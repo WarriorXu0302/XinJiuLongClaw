@@ -19,7 +19,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     await init_db()
     logger.info("Database tables initialized")
-    yield
+
+    # MCP bridge 的 StreamableHTTPSessionManager 必须在 app lifespan 内运行
+    from app.mcp.bridge import bridge_lifespan
+    async with bridge_lifespan():
+        logger.info("MCP bridge (streamable-http) ready at /mcp/stream")
+        yield
+
     logger.info("Shutting down...")
     await close_db()
     logger.info("Database connections closed")
@@ -103,9 +109,17 @@ def create_app() -> FastAPI:
     app.include_router(attendance.router, prefix="/api/attendance", tags=["Attendance"])
     app.include_router(performance.router, prefix="/api/performance", tags=["Performance"])
 
-    # MCP tools — AI Agent 工具集（JWT + 飞书双认证）
+    # MCP tools — AI Agent 工具集（JWT + 飞书双认证）REST 版本
     from app.mcp import mcp_router
     app.include_router(mcp_router, prefix="/mcp")
+
+    # MCP Streamable-HTTP 协议桥（给 Bisheng / Claude Code 等标准 MCP client 用）
+    from app.mcp.bridge import mcp_bridge_asgi
+    app.mount("/mcp/stream", mcp_bridge_asgi)
+
+    # 飞书 Agent 绑定 + token 签发（服务间密钥鉴权）
+    from app.feishu.routes import router as feishu_router
+    app.include_router(feishu_router, prefix="/api/feishu", tags=["Feishu"])
 
     return app
 

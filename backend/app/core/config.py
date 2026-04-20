@@ -67,6 +67,13 @@ class Settings(BaseSettings):
     # --- Feishu (Lark) ---
     FEISHU_APP_ID: str = ""
     FEISHU_APP_SECRET: str = ""
+    FEISHU_VERIFICATION_TOKEN: str = ""
+    FEISHU_ENCRYPT_KEY: str = ""
+
+    # --- Agent ingress ↔ ERP 服务间共享密钥 ---
+    # 飞书 Ingress 用这个 key 调 /api/feishu/exchange-token
+    FEISHU_AGENT_SERVICE_KEY: str = ""
+    FEISHU_AGENT_TOKEN_TTL_MIN: int = 15
 
     @property
     def database_url(self) -> str:

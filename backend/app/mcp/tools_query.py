@@ -5,10 +5,12 @@ from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.mcp.auth import require_mcp_employee, require_mcp_role
 from app.mcp.deps import get_mcp_db
 from app.models.order import Order, OrderItem
 from app.models.customer import Customer
@@ -26,16 +28,18 @@ router = APIRouter()
 # 1. 订单查询
 # ═══════════════════════════════════════════════════════════════════
 
+class QueryOrdersRequest(BaseModel):
+    brand_id: Optional[str] = None
+    status: Optional[str] = None
+    payment_status: Optional[str] = None
+    keyword: Optional[str] = None
+    limit: int = 20
+
 @router.post("/query-orders")
-async def query_orders(
-    brand_id: Optional[str] = None,
-    status: Optional[str] = None,
-    payment_status: Optional[str] = None,
-    keyword: Optional[str] = None,
-    limit: int = 20,
-    db: AsyncSession = Depends(get_mcp_db),
-):
+async def query_orders(body: QueryOrdersRequest, db: AsyncSession = Depends(get_mcp_db)):
     """查询订单列表。支持按品牌/状态/付款状态/关键字过滤。"""
+    require_mcp_employee(db.info.get("mcp_user", {}))
+    brand_id, status, payment_status, keyword, limit = body.brand_id, body.status, body.payment_status, body.keyword, body.limit
     stmt = select(Order).options(
         selectinload(Order.customer), selectinload(Order.salesman),
         selectinload(Order.items).selectinload(OrderItem.product),
@@ -61,9 +65,14 @@ async def query_orders(
     } for o in rows]
 
 
+class OrderDetailRequest(BaseModel):
+    order_no: str
+
 @router.post("/query-order-detail")
-async def query_order_detail(order_no: str, db: AsyncSession = Depends(get_mcp_db)):
+async def query_order_detail(body: OrderDetailRequest, db: AsyncSession = Depends(get_mcp_db)):
     """查询单个订单详情（含收款记录）。"""
+    require_mcp_employee(db.info.get("mcp_user", {}))
+    order_no = body.order_no
     o = (await db.execute(
         select(Order).where(Order.order_no == order_no)
         .options(selectinload(Order.customer), selectinload(Order.salesman),
@@ -87,12 +96,16 @@ async def query_order_detail(order_no: str, db: AsyncSession = Depends(get_mcp_d
 # 2. 客户查询
 # ═══════════════════════════════════════════════════════════════════
 
+class QueryCustomersRequest(BaseModel):
+    brand_id: Optional[str] = None
+    keyword: Optional[str] = None
+    limit: int = 20
+
 @router.post("/query-customers")
-async def query_customers(
-    brand_id: Optional[str] = None, keyword: Optional[str] = None, limit: int = 20,
-    db: AsyncSession = Depends(get_mcp_db),
-):
+async def query_customers(body: QueryCustomersRequest, db: AsyncSession = Depends(get_mcp_db)):
     """查询客户列表。"""
+    require_mcp_employee(db.info.get("mcp_user", {}))
+    brand_id, keyword, limit = body.brand_id, body.keyword, body.limit
     stmt = select(Customer)
     if keyword:
         kw = f"%{keyword}%"
@@ -106,12 +119,16 @@ async def query_customers(
 # 3. 库存查询
 # ═══════════════════════════════════════════════════════════════════
 
+class QueryInventoryRequest(BaseModel):
+    brand_id: Optional[str] = None
+    product_keyword: Optional[str] = None
+    low_stock_only: bool = False
+
 @router.post("/query-inventory")
-async def query_inventory(
-    brand_id: Optional[str] = None, product_keyword: Optional[str] = None, low_stock_only: bool = False,
-    db: AsyncSession = Depends(get_mcp_db),
-):
+async def query_inventory(body: QueryInventoryRequest, db: AsyncSession = Depends(get_mcp_db)):
     """查询库存。可只看低库存预警。"""
+    require_mcp_role(db.info.get("mcp_user", {}), "boss", "warehouse", "salesman", "sales_manager", "purchase", "finance")
+    brand_id, low_stock_only = body.brand_id, body.low_stock_only
     from app.models.product import Product, Warehouse
     stmt = select(Inventory).options(
         selectinload(Inventory.product), selectinload(Inventory.warehouse),
@@ -140,41 +157,33 @@ async def query_inventory(
 # 4. 利润台账
 # ═══════════════════════════════════════════════════════════════════
 
+class QueryProfitRequest(BaseModel):
+    brand_id: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+
 @router.post("/query-profit-summary")
-async def query_profit_summary(
-    brand_id: Optional[str] = None,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
-    db: AsyncSession = Depends(get_mcp_db),
-):
-    """查询利润台账汇总（11 个科目）。直接复用 dashboard 端点逻辑。"""
-    from app.api.routes.dashboard import profit_summary as _ps
+async def query_profit_summary(body: QueryProfitRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """查询利润台账汇总（11 个科目）。"""
     user = db.info.get("mcp_user", {})
-    class _FakeQuery:
-        pass
-    # 构造参数直接调内部函数
-    from fastapi import Query as _Q
-    # 简单 HTTP 转发
-    import httpx
-    # 不转发了，直接 import 内部的计算逻辑太深耦合。用查询参数拼接。
-    params = {}
-    if brand_id: params["brand_id"] = brand_id
-    if date_from: params["date_from"] = date_from
-    if date_to: params["date_to"] = date_to
-    # 直接内联计算——从 dashboard.py 里提取太复杂，用 API 自调用
-    return {"hint": "请直接调用 GET /api/dashboard/profit-summary 接口", "params": params}
+    require_mcp_role(user, "boss", "finance", "sales_manager")
+    from app.api.routes.dashboard import profit_summary as _fn
+    # 直接调内部函数（传 user + db + query 参数）
+    return await _fn(user=user, brand_id=body.brand_id, date_from=body.date_from, date_to=body.date_to, db=db)
 
 
 # ═══════════════════════════════════════════════════════════════════
 # 5. 账户余额
 # ═══════════════════════════════════════════════════════════════════
 
+class QueryAccountsRequest(BaseModel):
+    brand_id: Optional[str] = None
+
 @router.post("/query-account-balances")
-async def query_account_balances(
-    brand_id: Optional[str] = None,
-    db: AsyncSession = Depends(get_mcp_db),
-):
+async def query_account_balances(body: QueryAccountsRequest, db: AsyncSession = Depends(get_mcp_db)):
     """查询账户余额。按品牌分组。"""
+    require_mcp_role(db.info.get("mcp_user", {}), "boss", "finance")
+    brand_id = body.brand_id
     stmt = select(Account).where(Account.is_active == True)
     if brand_id:
         from sqlalchemy import or_
@@ -191,12 +200,15 @@ async def query_account_balances(
 # 6. 工资查询
 # ═══════════════════════════════════════════════════════════════════
 
+class QuerySalaryRequest(BaseModel):
+    period: Optional[str] = None
+    employee_name: Optional[str] = None
+
 @router.post("/query-salary-records")
-async def query_salary_records(
-    period: Optional[str] = None, employee_name: Optional[str] = None,
-    db: AsyncSession = Depends(get_mcp_db),
-):
+async def query_salary_records(body: QuerySalaryRequest, db: AsyncSession = Depends(get_mcp_db)):
     """查询工资单列表。"""
+    require_mcp_role(db.info.get("mcp_user", {}), "boss", "finance")
+    period, employee_name = body.period, body.employee_name
     from app.models.user import Employee
     stmt = select(SalaryRecord).options(selectinload(SalaryRecord.employee))
     if period:
@@ -216,13 +228,16 @@ async def query_salary_records(
 # 7. 销售目标
 # ═══════════════════════════════════════════════════════════════════
 
+class QueryTargetsRequest(BaseModel):
+    target_year: int = 2026
+    target_level: Optional[str] = None
+    brand_id: Optional[str] = None
+
 @router.post("/query-sales-targets")
-async def query_sales_targets(
-    target_year: int = 2026, target_level: Optional[str] = None,
-    brand_id: Optional[str] = None,
-    db: AsyncSession = Depends(get_mcp_db),
-):
+async def query_sales_targets(body: QueryTargetsRequest, db: AsyncSession = Depends(get_mcp_db)):
     """查询销售目标及完成率。"""
+    require_mcp_role(db.info.get("mcp_user", {}), "boss", "finance", "sales_manager", "salesman")
+    target_year, target_level, brand_id = body.target_year, body.target_level, body.brand_id
     stmt = select(SalesTarget).where(SalesTarget.target_year == target_year, SalesTarget.status == 'approved')
     if target_level:
         stmt = stmt.where(SalesTarget.target_level == target_level)
@@ -242,12 +257,16 @@ async def query_sales_targets(
 # 8. 稽查案件查询
 # ═══════════════════════════════════════════════════════════════════
 
+class QueryInspectionRequest(BaseModel):
+    brand_id: Optional[str] = None
+    status: Optional[str] = None
+    limit: int = 20
+
 @router.post("/query-inspection-cases")
-async def query_inspection_cases(
-    brand_id: Optional[str] = None, status: Optional[str] = None, limit: int = 20,
-    db: AsyncSession = Depends(get_mcp_db),
-):
+async def query_inspection_cases(body: QueryInspectionRequest, db: AsyncSession = Depends(get_mcp_db)):
     """查询稽查案件列表。"""
+    require_mcp_role(db.info.get("mcp_user", {}), "boss", "finance")
+    brand_id, status, limit = body.brand_id, body.status, body.limit
     stmt = select(InspectionCase)
     if brand_id:
         stmt = stmt.where(InspectionCase.brand_id == brand_id)
@@ -266,12 +285,16 @@ async def query_inspection_cases(
 # 9. 厂家补贴查询
 # ═══════════════════════════════════════════════════════════════════
 
+class QuerySubsidiesRequest(BaseModel):
+    brand_id: Optional[str] = None
+    period: Optional[str] = None
+    status: Optional[str] = None
+
 @router.post("/query-manufacturer-subsidies")
-async def query_manufacturer_subsidies(
-    brand_id: Optional[str] = None, period: Optional[str] = None, status: Optional[str] = None,
-    db: AsyncSession = Depends(get_mcp_db),
-):
+async def query_manufacturer_subsidies(body: QuerySubsidiesRequest, db: AsyncSession = Depends(get_mcp_db)):
     """查询厂家工资补贴应收。"""
+    require_mcp_role(db.info.get("mcp_user", {}), "boss", "finance")
+    brand_id, period, status = body.brand_id, body.period, body.status
     stmt = select(ManufacturerSalarySubsidy).options(
         selectinload(ManufacturerSalarySubsidy.employee),
         selectinload(ManufacturerSalarySubsidy.brand),
@@ -295,12 +318,14 @@ async def query_manufacturer_subsidies(
 # 10. 考勤汇总
 # ═══════════════════════════════════════════════════════════════════
 
+class QueryAttendanceRequest(BaseModel):
+    period: str = "2026-04"
+
 @router.post("/query-attendance-summary")
-async def query_attendance_summary(
-    period: str = "2026-04",
-    db: AsyncSession = Depends(get_mcp_db),
-):
+async def query_attendance_summary(body: QueryAttendanceRequest, db: AsyncSession = Depends(get_mcp_db)):
     """查询某月考勤汇总。"""
+    require_mcp_role(db.info.get("mcp_user", {}), "boss", "finance")
+    period = body.period
     from app.models.attendance import CheckinRecord, LeaveRequest
     from app.models.user import Employee
     from datetime import date, timedelta

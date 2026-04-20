@@ -16,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
+from app.mcp.auth import require_mcp_role
+from app.mcp.deps import get_mcp_db
 from app.models.base import (
     ClaimStatusEnum,
     ExecutionStatus,
@@ -64,13 +66,14 @@ class AllocationPreviewRequest(BaseModel):
 )
 async def allocate_settlement_to_claims(
     body: AllocationPreviewRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_mcp_db),
 ):
     """AI generates settlement-to-claims allocation suggestions.
 
     Returns a preview JSON array. Does NOT write to claim_settlement_links.
     Finance must confirm via /allocation-confirm to persist.
     """
+    require_mcp_role(db.info.get("mcp_user", {}), "boss", "finance")
     settlement_id = body.settlement_id
 
     # Load settlement
@@ -310,11 +313,12 @@ class BarcodeTracingResponse(BaseModel):
 )
 async def query_barcode_tracing(
     body: BarcodeTracingRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_mcp_db),
 ):
     """Trace a barcode through the full supply chain:
     barcode → batch → stock_flow → order → customer → salesman.
     """
+    require_mcp_role(db.info.get("mcp_user", {}), "boss", "warehouse", "salesman", "sales_manager", "finance")
     bc = (
         await db.execute(
             select(InventoryBarcode).where(InventoryBarcode.barcode == body.barcode)
@@ -379,11 +383,12 @@ class SubmitPolicyApprovalResponse(BaseModel):
 )
 async def submit_policy_approval(
     body: SubmitPolicyApprovalRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_mcp_db),
 ):
     """Submit a policy request for approval — moves status to pending_internal
     or pending_external depending on approval_target.
     """
+    require_mcp_role(db.info.get("mcp_user", {}), "boss", "finance", "sales_manager", "salesman")
     pr = await db.get(PolicyRequest, body.policy_request_id)
     if pr is None:
         raise HTTPException(404, "PolicyRequest not found")
@@ -454,11 +459,12 @@ class CreateUsageRecordResponse(BaseModel):
 )
 async def create_policy_usage_record(
     body: CreateUsageRecordRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_mcp_db),
 ):
     """Create a policy usage record manually — for non-shipment scenarios
     where consumption is recorded by hand (e.g., tasting events).
     """
+    require_mcp_role(db.info.get("mcp_user", {}), "boss", "finance", "salesman")
     pr = await db.get(PolicyRequest, body.policy_request_id)
     if pr is None:
         raise HTTPException(404, "PolicyRequest not found")
@@ -531,11 +537,12 @@ class PushManufacturerUpdateResponse(BaseModel):
 )
 async def push_manufacturer_update(
     body: PushManufacturerUpdateRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_mcp_db),
 ):
     """Record and push a manufacturer update notification.
     Creates a NotificationLog entry and returns structured card data.
     """
+    require_mcp_role(db.info.get("mcp_user", {}), "boss", "finance", "sales_manager")
     log = NotificationLog(
         id=str(uuid.uuid4()),
         channel=body.channel,
@@ -587,7 +594,7 @@ class CreateOrderFromTextResponse(BaseModel):
 )
 async def create_order_from_text(
     body: CreateOrderFromTextRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_mcp_db),
 ):
     """Parse natural language order text and create a structured order.
 
@@ -603,6 +610,16 @@ async def create_order_from_text(
 
     from app.models.product import Product
     from app.models.customer import Customer
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "salesman", "sales_manager")
+    # salesman 身份硬绑定
+    roles = user.get("roles") or []
+    if "admin" not in roles and "boss" not in roles and "sales_manager" not in roles:
+        emp_id = user.get("employee_id")
+        if not emp_id:
+            raise HTTPException(400, "当前用户未绑定员工档案")
+        body.salesman_id = emp_id
 
     lines = body.text.strip().split("\n")
     if not lines:

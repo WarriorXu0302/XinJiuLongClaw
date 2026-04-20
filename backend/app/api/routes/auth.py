@@ -45,6 +45,41 @@ class UserInfoResponse(BaseModel):
     brand_ids: list[str] = []
 
 
+async def build_jwt_payload(db: AsyncSession, user: User) -> dict:
+    """构造 JWT payload。login 和 /api/feishu/exchange-token 共用同一份逻辑。
+
+    Why：两处产出的 token 必须字段一致，否则 MCP RBAC / RLS 会因漏字段误判。
+    如新增字段，只改这里一处。
+    """
+    roles = [ur.role.code for ur in user.roles if ur.role]
+    is_admin = any(r in ('admin', 'boss') for r in roles)
+    # 跨品牌可见角色：财务/HR/管理员看所有品牌数据
+    see_all_brands = is_admin or any(r in ('finance', 'hr') for r in roles)
+
+    brand_ids: list[str] = []
+    if see_all_brands:
+        from app.models.product import Brand
+        all_bids = (await db.execute(select(Brand.id))).scalars().all()
+        brand_ids = list(all_bids)
+    elif user.employee_id:
+        ebs = (await db.execute(
+            select(EmployeeBrandPosition.brand_id)
+            .where(EmployeeBrandPosition.employee_id == user.employee_id)
+            .distinct()
+        )).scalars().all()
+        brand_ids = list(ebs)
+
+    return {
+        "sub": user.id,
+        "username": user.username,
+        "employee_id": user.employee_id,
+        "roles": roles,
+        "brand_ids": brand_ids,
+        "is_admin": is_admin,
+        "can_see_master": is_admin,
+    }
+
+
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db_anon)):
     user = (
@@ -66,36 +101,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db_anon)):
             detail="Account is disabled",
         )
 
-    # Collect role codes
-    roles = [ur.role.code for ur in user.roles if ur.role]
-    is_admin = any(r in ('admin', 'boss') for r in roles)
-    # 跨品牌可见角色：财务/HR/管理员看所有品牌数据
-    see_all_brands = is_admin or any(r in ('finance', 'hr') for r in roles)
-
-    # Collect brand IDs from EmployeeBrandPosition (权威数据源)
-    brand_ids: list[str] = []
-    if see_all_brands:
-        # 跨品牌可见：写入所有品牌 id，RLS 就放行
-        from app.models.product import Brand
-        all_bids = (await db.execute(select(Brand.id))).scalars().all()
-        brand_ids = list(all_bids)
-    elif user.employee_id:
-        ebs = (await db.execute(
-            select(EmployeeBrandPosition.brand_id)
-            .where(EmployeeBrandPosition.employee_id == user.employee_id)
-            .distinct()
-        )).scalars().all()
-        brand_ids = list(ebs)
-
-    token_data = {
-        "sub": user.id,
-        "username": user.username,
-        "employee_id": user.employee_id,
-        "roles": roles,
-        "brand_ids": brand_ids,
-        "is_admin": is_admin,
-        "can_see_master": is_admin,  # 财务/HR 看不到 master
-    }
+    token_data = await build_jwt_payload(db, user)
     return TokenResponse(
         access_token=create_access_token(token_data),
         refresh_token=create_refresh_token(token_data),

@@ -41,7 +41,7 @@ from app.models.finance import (
 )
 from app.models.tasting import TastingWineUsage
 from app.models.inspection import InspectionCase, MarketCleanupCase
-from app.models.external import ManufacturerExternalIdentity
+from app.models.external import FeishuBinding, ManufacturerExternalIdentity
 from app.models.audit_log import AuditLog
 from app.models.notification_log import NotificationLog
 from app.models.financing import FinancingOrder, FinancingRepayment
@@ -96,6 +96,7 @@ __all__ = [
     "MarketCleanupCase",
     # External
     "ManufacturerExternalIdentity",
+    "FeishuBinding",
     # Audit & Notification
     "AuditLog",
     "NotificationLog",

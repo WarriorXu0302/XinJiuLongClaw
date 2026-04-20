@@ -585,6 +585,8 @@ async def update_settlement(settlement_id: str, body: ManufacturerSettlementUpda
 @router.post("/manufacturer-settlements/{settlement_id}/allocation-preview")
 async def allocation_preview(settlement_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     from app.mcp.tools import AllocationPreviewRequest, allocate_settlement_to_claims
+    # 该 API 权威路径：HTTP 层已通过 CurrentUser 鉴权；内部调用 MCP 版本时需手动注入 mcp_user
+    db.info["mcp_user"] = user
     body = AllocationPreviewRequest(settlement_id=settlement_id)
     return await allocate_settlement_to_claims(body, db)
 

@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.mcp.auth import require_mcp_employee, require_mcp_role
 from app.mcp.deps import get_mcp_db
 from app.services.audit_service import log_audit
 
@@ -41,6 +42,14 @@ async def mcp_create_order(body: MCPCreateOrderRequest, db: AsyncSession = Depen
     from app.models.order import Order, OrderItem
 
     user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "salesman", "sales_manager")
+    # salesman 身份硬绑定：不信 body 传入的 salesman_id
+    roles = user.get("roles") or []
+    if "admin" not in roles and "boss" not in roles and "sales_manager" not in roles:
+        emp_id = user.get("employee_id")
+        if not emp_id:
+            raise HTTPException(400, "当前用户未绑定员工档案，无法建单")
+        body.salesman_id = emp_id
 
     tmpl = await db.get(PolicyTemplate, body.policy_template_id)
     if not tmpl or not tmpl.is_active:
@@ -110,6 +119,7 @@ async def mcp_register_payment(body: MCPUploadPaymentRequest, db: AsyncSession =
     from app.api.routes.accounts import record_fund_flow
 
     user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "finance", "salesman")
     order = (await db.execute(select(Order).where(Order.order_no == body.order_no))).scalar_one_or_none()
     if not order:
         raise HTTPException(404, f"订单 {body.order_no} 不存在")
@@ -172,6 +182,14 @@ async def mcp_create_customer(body: MCPCreateCustomerRequest, db: AsyncSession =
     """AI 创建客户并绑定品牌。"""
     from app.models.customer import Customer, CustomerBrandSalesman
     user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "salesman", "sales_manager")
+    # salesman 建客户：salesman_id 强制绑定本人
+    roles = user.get("roles") or []
+    if "admin" not in roles and "boss" not in roles and "sales_manager" not in roles:
+        emp_id = user.get("employee_id")
+        if not emp_id:
+            raise HTTPException(400, "当前用户未绑定员工档案")
+        body.salesman_id = emp_id
 
     obj = Customer(id=str(uuid.uuid4()), code=body.code, name=body.name,
                    contact_name=body.contact_name, contact_phone=body.contact_phone,
@@ -204,6 +222,15 @@ async def mcp_create_leave(body: MCPCreateLeaveRequest, db: AsyncSession = Depen
     from app.models.attendance import LeaveRequest
     from datetime import date
     user = db.info.get("mcp_user", {})
+    require_mcp_employee(user)
+    # employee_id 强制绑定当前用户，不信 body 传入（防替他人请假）
+    # 例外：admin/boss 可代提交
+    roles = user.get("roles") or []
+    if "admin" not in roles and "boss" not in roles:
+        emp_id = user.get("employee_id")
+        if not emp_id:
+            raise HTTPException(400, "当前用户未绑定员工档案")
+        body.employee_id = emp_id
     ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     obj = LeaveRequest(
         id=str(uuid.uuid4()), request_no=f"LV-{ts}-{uuid.uuid4().hex[:6]}",
@@ -227,22 +254,45 @@ class MCPGenerateSalaryRequest(BaseModel):
 
 @router.post("/generate-salary")
 async def mcp_generate_salary(body: MCPGenerateSalaryRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 一键生成本期工资单（调用后端 generate 逻辑）。需要 HR 权限。"""
-    from app.core.permissions import require_can_see_salary
+    """AI 一键生成本期工资单（直接调用后端生成逻辑）。"""
     user = db.info.get("mcp_user", {})
-    require_can_see_salary(user)
-    # 直接调用内部函数太耦合，返回提示让 Agent 走 API
-    return {"hint": f"请调用 POST /api/payroll/salary-records/generate，body: {{period: '{body.period}', overwrite: {body.overwrite}}}"}
+    require_mcp_role(user, "boss", "finance")
+    from app.api.routes.payroll import generate_salary_records, GenerateSalaryRequest
+    internal_body = GenerateSalaryRequest(period=body.period, overwrite=body.overwrite)
+    return await generate_salary_records(body=internal_body, user=user, db=db)
 
 
 # ═══════════════════════════════════════════════════════════════════
 # 16. 生成厂家补贴应收
 # ═══════════════════════════════════════════════════════════════════
 
+class MCPGenerateSubsidyRequest(BaseModel):
+    period: str
+
 @router.post("/generate-subsidy-expected")
-async def mcp_generate_subsidy(period: str, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 生成本月厂家补贴应收。"""
-    from app.core.permissions import require_can_see_salary
+async def mcp_generate_subsidy(body: MCPGenerateSubsidyRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 生成本月厂家补贴应收（直接执行）。"""
     user = db.info.get("mcp_user", {})
-    require_can_see_salary(user)
-    return {"hint": f"请调用 POST /api/payroll/manufacturer-subsidies/generate-expected，body: {{period: '{period}'}}"}
+    require_mcp_role(user, "boss", "finance")
+    from app.models.payroll import EmployeeBrandPosition, ManufacturerSalarySubsidy
+    ebps = (await db.execute(
+        select(EmployeeBrandPosition).where(EmployeeBrandPosition.manufacturer_subsidy > 0)
+    )).scalars().all()
+    created, skipped = 0, 0
+    for ebp in ebps:
+        existing = (await db.execute(
+            select(ManufacturerSalarySubsidy).where(
+                ManufacturerSalarySubsidy.employee_id == ebp.employee_id,
+                ManufacturerSalarySubsidy.brand_id == ebp.brand_id,
+                ManufacturerSalarySubsidy.period == body.period,
+            )
+        )).scalar_one_or_none()
+        if existing:
+            skipped += 1; continue
+        db.add(ManufacturerSalarySubsidy(
+            id=str(uuid.uuid4()), employee_id=ebp.employee_id, brand_id=ebp.brand_id,
+            period=body.period, subsidy_amount=ebp.manufacturer_subsidy, status='pending',
+        ))
+        created += 1
+    await db.flush()
+    return {"created": created, "skipped": skipped, "period": body.period}

@@ -59,6 +59,31 @@ async def get_mcp_user(
     raise HTTPException(status.HTTP_401_UNAUTHORIZED, "需要 JWT Bearer Token 或 X-External-Open-Id")
 
 
+def require_mcp_employee(user: dict[str, Any]) -> None:
+    """仅要求调用方是 ERP 内部员工（任何角色）。拦截飞书外部身份。"""
+    if user.get("_auth_type") == "feishu":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "外部身份无权调用此工具")
+
+
+def require_mcp_role(user: dict[str, Any], *allowed: str) -> None:
+    """MCP 工具角色白名单。
+
+    - admin 默认通过。
+    - 飞书外部身份（_auth_type=feishu）走独立路径，此函数直接拒绝：
+      飞书身份只能调 external-approve-and-fill-scheme，不在本白名单体系。
+    - 其他：roles 与 allowed 需有交集。
+    """
+    require_mcp_employee(user)
+    roles = user.get("roles") or []
+    if "admin" in roles:
+        return
+    if not any(r in roles for r in allowed):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            f"需要角色之一: {', '.join(allowed)}",
+        )
+
+
 async def resolve_feishu_brand_scope(
     user: dict[str, Any], db: AsyncSession,
 ) -> dict[str, Any]:

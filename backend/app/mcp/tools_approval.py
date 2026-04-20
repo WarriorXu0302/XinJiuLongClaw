@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.permissions import require_role
+from app.mcp.auth import require_mcp_role
 from app.mcp.deps import get_mcp_db
 from app.services.audit_service import log_audit
 
@@ -19,17 +19,20 @@ router = APIRouter()
 # 17. 确认收款
 # ═══════════════════════════════════════════════════════════════════
 
+class ConfirmPaymentRequest(BaseModel):
+    order_no: str
+
 @router.post("/confirm-order-payment")
-async def mcp_confirm_order_payment(order_no: str, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 确认订单收款（delivered + fully_paid → completed）。仅 boss/admin。"""
+async def mcp_confirm_order_payment(body: ConfirmPaymentRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 确认订单收款（delivered + fully_paid → completed）。admin/boss/finance。"""
     from app.models.order import Order
     from app.models.base import OrderStatus
     user = db.info.get("mcp_user", {})
-    require_role(user, 'boss')
+    require_mcp_role(user, 'boss', 'finance')
 
-    order = (await db.execute(select(Order).where(Order.order_no == order_no))).scalar_one_or_none()
+    order = (await db.execute(select(Order).where(Order.order_no == body.order_no))).scalar_one_or_none()
     if not order:
-        raise HTTPException(404, f"订单 {order_no} 不存在")
+        raise HTTPException(404, f"订单 {body.order_no} 不存在")
     if order.status != OrderStatus.DELIVERED:
         raise HTTPException(400, f"订单状态为 {order.status}，需要 delivered")
     if order.payment_status != 'fully_paid':
@@ -55,10 +58,10 @@ class MCPApproveLeaveRequest(BaseModel):
 
 @router.post("/approve-leave")
 async def mcp_approve_leave(body: MCPApproveLeaveRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 审批请假。仅 boss/hr。"""
+    """AI 审批请假。admin/boss/finance。"""
     from app.models.attendance import LeaveRequest
     user = db.info.get("mcp_user", {})
-    require_role(user, 'boss', 'hr')
+    require_mcp_role(user, 'boss', 'finance')
 
     req = (await db.execute(select(LeaveRequest).where(LeaveRequest.request_no == body.request_no))).scalar_one_or_none()
     if not req:
@@ -84,11 +87,11 @@ class MCPApproveSalaryRequest(BaseModel):
 
 @router.post("/approve-salary")
 async def mcp_approve_salary(body: MCPApproveSalaryRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 审批工资。仅 boss/admin。"""
+    """AI 审批工资。admin/boss/finance。"""
     from app.models.payroll import SalaryRecord
     from datetime import datetime, timezone
     user = db.info.get("mcp_user", {})
-    require_role(user, 'boss')
+    require_mcp_role(user, 'boss', 'finance')
 
     rec = await db.get(SalaryRecord, body.salary_record_id)
     if not rec:
@@ -122,11 +125,11 @@ class MCPApproveTargetRequest(BaseModel):
 
 @router.post("/approve-sales-target")
 async def mcp_approve_target(body: MCPApproveTargetRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 审批销售目标。仅 boss/admin。"""
+    """AI 审批销售目标。admin/boss/sales_manager。"""
     from app.models.sales_target import SalesTarget
     from datetime import datetime, timezone
     user = db.info.get("mcp_user", {})
-    require_role(user, 'boss')
+    require_mcp_role(user, 'boss', 'sales_manager')
 
     t = await db.get(SalesTarget, body.target_id)
     if not t:
@@ -150,9 +153,13 @@ async def mcp_approve_target(body: MCPApproveTargetRequest, db: AsyncSession = D
 # 21. 审批资金调拨
 # ═══════════════════════════════════════════════════════════════════
 
+class ApproveTransferRequest(BaseModel):
+    transfer_id: str
+
 @router.post("/approve-fund-transfer")
-async def mcp_approve_transfer(transfer_id: str, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 批准资金调拨。仅 boss/admin。"""
+async def mcp_approve_transfer(body: ApproveTransferRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 批准资金调拨（直接执行）。admin/boss/finance。"""
     user = db.info.get("mcp_user", {})
-    require_role(user, 'boss')
-    return {"hint": f"请调用 POST /api/accounts/transfers/{transfer_id}/approve"}
+    require_mcp_role(user, 'boss', 'finance')
+    from app.api.routes.accounts import approve_fund_transfer
+    return await approve_fund_transfer(transfer_id=body.transfer_id, user=user, db=db)

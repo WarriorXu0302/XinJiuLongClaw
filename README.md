@@ -7,6 +7,7 @@
 | 指标 | 数量 |
 |---|---|
 | API 端点 | 267 |
+| MCP 工具 | 28（查询 10 + 操作 6 + 审批 5 + 飞书 7） |
 | 数据库表 | 61 |
 | 前端页面 | 60 |
 | 用户角色 | 9 |
@@ -58,6 +59,24 @@
 - **JWT**：access + refresh token，载荷含 roles / brand_ids / is_admin / can_see_master
 - **应用层**：require_role / can_see_salary / can_see_master 等 helpers
 - **前端**：菜单按角色过滤 + AuthGuard 路由守卫
+
+## MCP — AI Agent 工具集
+
+28 个工具让 AI Agent 像人一样操作 ERP，支持双认证：
+
+| 调用方 | 认证 | 安全 |
+|---|---|---|
+| Claude Code / 外部 Agent | JWT Bearer Token | PostgreSQL RLS 行级安全 |
+| 飞书 AI 网关 | X-External-Open-Id | brand_scope 品牌过滤 |
+
+| 类别 | 数量 | 示例 |
+|---|---|---|
+| 查询 | 10 | 订单/客户/库存/利润/账户/工资/目标/稽查/补贴/考勤 |
+| 操作 | 6 | 建单/收款/建客户/请假/生成工资/生成补贴 |
+| 审批 | 5 | 确认收款/审批请假/工资/目标/调拨 |
+| 飞书 | 7 | 对账分配/厂家审批/条码追溯/自然语言建单 |
+
+详见 [MCP 工具文档](docs/MCP工具文档.md)。
 
 ## 本地开发
 
@@ -161,6 +180,7 @@ frontend/src/
 - [系统架构书](docs/系统架构书.md) — 业务模块、资金流、权限体系、审批中心、薪资、利润台账
 - [数据库文档](docs/数据库文档.md) — 61 张表字段说明、RLS 策略、索引
 - [开发文档](docs/开发文档.md) — API 端点清单、开发规范、新功能开发流程
+- [MCP 工具文档](docs/MCP工具文档.md) — 28 个 AI Agent 工具、双认证、调用示例
 
 ## 授权
 

@@ -257,7 +257,7 @@ function PolicyRequestList() {
       <Table<PolicyRequest>
         columns={columns} dataSource={approvedRequests} rowKey="id" loading={isLoading}
         size="middle" scroll={{ x: 700 }}
-        expandable={{ expandedRowRender, rowExpandable: r => (r.request_items?.length ?? 0) > 0 }}
+        expandable={{ expandedRowRender, rowExpandable: r => (r.request_items?.length ?? 0) > 0, expandIcon: () => null, expandRowByClick: true }}
         pagination={{ pageSize: 20 }}
       />
 

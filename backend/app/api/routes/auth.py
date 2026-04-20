@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.database import get_db
+from app.core.database import get_db, get_db_anon
 from app.core.security import (
     CurrentUser,
     create_access_token,
@@ -16,7 +16,8 @@ from app.core.security import (
     get_password_hash,
     verify_password,
 )
-from app.models.user import Role, User, UserRole, EmployeeBrand
+from app.models.user import Role, User, UserRole
+from app.models.payroll import EmployeeBrandPosition
 
 router = APIRouter()
 
@@ -45,7 +46,7 @@ class UserInfoResponse(BaseModel):
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(body: LoginRequest, db: AsyncSession = Depends(get_db_anon)):
     user = (
         await db.execute(
             select(User)
@@ -67,12 +68,22 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
 
     # Collect role codes
     roles = [ur.role.code for ur in user.roles if ur.role]
+    is_admin = any(r in ('admin', 'boss') for r in roles)
+    # 跨品牌可见角色：财务/HR/管理员看所有品牌数据
+    see_all_brands = is_admin or any(r in ('finance', 'hr') for r in roles)
 
-    # Collect brand IDs (admin/boss see all → empty list means "all")
+    # Collect brand IDs from EmployeeBrandPosition (权威数据源)
     brand_ids: list[str] = []
-    if user.employee_id and not any(r in ('admin', 'boss') for r in roles):
+    if see_all_brands:
+        # 跨品牌可见：写入所有品牌 id，RLS 就放行
+        from app.models.product import Brand
+        all_bids = (await db.execute(select(Brand.id))).scalars().all()
+        brand_ids = list(all_bids)
+    elif user.employee_id:
         ebs = (await db.execute(
-            select(EmployeeBrand.brand_id).where(EmployeeBrand.employee_id == user.employee_id)
+            select(EmployeeBrandPosition.brand_id)
+            .where(EmployeeBrandPosition.employee_id == user.employee_id)
+            .distinct()
         )).scalars().all()
         brand_ids = list(ebs)
 
@@ -82,6 +93,8 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
         "employee_id": user.employee_id,
         "roles": roles,
         "brand_ids": brand_ids,
+        "is_admin": is_admin,
+        "can_see_master": is_admin,  # 财务/HR 看不到 master
     }
     return TokenResponse(
         access_token=create_access_token(token_data),
@@ -102,6 +115,9 @@ async def refresh_token(body: RefreshRequest):
         "username": payload.get("username"),
         "employee_id": payload.get("employee_id"),
         "roles": payload.get("roles", []),
+        "brand_ids": payload.get("brand_ids", []),
+        "is_admin": payload.get("is_admin", False),
+        "can_see_master": payload.get("can_see_master", False),
     }
     return TokenResponse(
         access_token=create_access_token(token_data),

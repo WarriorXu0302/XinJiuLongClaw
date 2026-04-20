@@ -134,7 +134,7 @@ function ReceiptList() {
     { title: '客户', dataIndex: 'customer_id', width: 120, render: (_, record) => record.customer?.name ?? '-' },
     { title: '订单', dataIndex: 'order_id', width: 140, render: (_, record) => record.order?.order_no ?? '-' },
     { title: '账户', dataIndex: 'account_id', width: 120, render: (_, record) => record.account?.name ?? '-' },
-    { title: '金额', dataIndex: 'amount', width: 100, align: 'right', render: (v: number) => `¥${Number(v).toFixed(2)}` },
+    { title: '金额', dataIndex: 'amount', width: 100, align: 'right', render: (v: number) => `¥${Number(v).toLocaleString()}` },
     { title: '支付方式', dataIndex: 'payment_method', width: 100 },
     { title: '收款日期', dataIndex: 'receipt_date', width: 120 },
     { title: '创建时间', dataIndex: 'created_at', width: 170, render: (v: string) => v?.replace('T', ' ').slice(0, 19) },

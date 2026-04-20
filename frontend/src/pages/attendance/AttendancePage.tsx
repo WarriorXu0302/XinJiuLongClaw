@@ -372,12 +372,7 @@ function LeavePanel() {
         : v === 'rejected' ? <Tag color="red">已驳回</Tag> : <Tag color="orange">待审批</Tag> },
     { title: '操作', key: 'op', width: 120,
       render: (_, r) => r.status === 'pending' ? (
-        <Space size="small">
-          <a style={{ color: '#52c41a' }} onClick={() => approveMut.mutate({ id: r.id, approved: true })}>批准</a>
-          <a style={{ color: '#ff4d4f' }} onClick={() => Modal.confirm({
-            title: '驳回原因?', onOk: () => approveMut.mutate({ id: r.id, approved: false, reason: '不同意' }),
-          })}>驳回</a>
-        </Space>
+        <Tag color="orange">审批中心处理</Tag>
       ) : null },
   ];
 

@@ -67,6 +67,8 @@ class Receipt(Base):
     )
     receipt_date: Mapped[date] = mapped_column(Date, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 凭证来源：customer（客户付款）/ employee_advance（业务员垫付补款）/ company_advance（公司内部转账）
+    source_type: Mapped[str] = mapped_column(String(20), default="customer")
     created_at: Mapped[datetime] = mapped_column(server_default="now()")
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))
 
@@ -310,6 +312,9 @@ class FinancePaymentRequest(Base):
     approved_by: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("employees.id"), nullable=True
     )
+    # 支付凭证（银行回单 / 转账截图）+ 签收照（收款人签字 / 现金签收）
+    payment_voucher_urls: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    signed_photo_urls: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     paid_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default="now()")
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))

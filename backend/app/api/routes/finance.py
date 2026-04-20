@@ -83,6 +83,7 @@ async def create_receipt(body: ReceiptCreate, user: CurrentUser, db: AsyncSessio
         db, account_id=master_cash.id, flow_type='credit', amount=obj.amount,
         balance_after=master_cash.balance, related_type='receipt', related_id=obj.id,
         notes=f"收款 {obj.receipt_no}", created_by=user.get('employee_id'),
+        brand_id=obj.brand_id,
     )
 
     if obj.order_id:
@@ -95,11 +96,9 @@ async def create_receipt(body: ReceiptCreate, user: CurrentUser, db: AsyncSessio
                 )
             ).scalar_one()
             prev_status = order.payment_status
-            # 结算模式决定"全额回款"基准：company_pay 按客户到手价，其他按指导价
-            target_amount = (
-                order.deal_amount if order.settlement_mode == 'company_pay' and order.deal_amount
-                else order.total_amount
-            )
+            # 全额回款基准 = 订单应收（customer_paid_amount）
+            # customer_pay/employee_pay: 26,550；company_pay: 19,500
+            target_amount = order.customer_paid_amount or order.total_amount
             if Decimal(str(total_received)) >= target_amount:
                 order.payment_status = PaymentStatus.FULLY_PAID
             elif total_received > 0:
@@ -136,11 +135,9 @@ async def create_receipt(body: ReceiptCreate, user: CurrentUser, db: AsyncSessio
                         if scheme:
                             rate = Decimal(str(scheme.commission_rate))
                     if rate and rate > 0:
-                        # 提成基数：company_pay 按客户到手价（公司实收），其他按指导价
-                        comm_base = (
-                            order.deal_amount if order.settlement_mode == 'company_pay' and order.deal_amount
-                            else order.total_amount
-                        )
+                        # 提成基数 = 订单应收（公司实际拿到的钱）
+                        # customer_pay/employee_pay → 26,550；company_pay → 19,500
+                        comm_base = order.customer_paid_amount or order.total_amount
                         comm_amount = (Decimal(str(comm_base)) * rate).quantize(Decimal("0.01"))
                         db.add(Commission(
                             id=str(uuid.uuid4()),
@@ -151,6 +148,7 @@ async def create_receipt(body: ReceiptCreate, user: CurrentUser, db: AsyncSessio
                             status='pending',
                             notes=f"订单{order.order_no} 基数¥{comm_base} × {rate*100}%（{order.settlement_mode}）",
                         ))
+                        await db.flush()
 
                 # 刷新本月 KPI（kpi_revenue + kpi_customers）
                 try:
@@ -764,8 +762,19 @@ async def update_payment_request(request_id: str, body: PaymentRequestUpdate, us
     return obj
 
 
+class ConfirmPaymentBody(BaseModel):
+    payment_account_id: str | None = None  # 覆盖时必须是 project cash
+    payment_voucher_urls: list[str] = []
+    signed_photo_urls: list[str] = []
+
+
 @router.post("/payment-requests/{request_id}/confirm-payment", response_model=PaymentRequestResponse)
-async def confirm_payment(request_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+async def confirm_payment(
+    request_id: str,
+    body: ConfirmPaymentBody,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
     obj = await db.get(FinancePaymentRequest, request_id)
     if obj is None:
         raise HTTPException(404, "PaymentRequest not found")
@@ -774,15 +783,53 @@ async def confirm_payment(request_id: str, user: CurrentUser, db: AsyncSession =
     if obj.status == PaymentRequestStatus.CANCELLED:
         raise HTTPException(400, "PaymentRequest is cancelled")
 
-    if obj.payable_account_id:
-        account = await db.get(Account, obj.payable_account_id)
-        if account and account.balance < obj.amount:
-            raise HTTPException(400, f"付款账户余额不足：{account.name} 余额 ¥{account.balance}，需付 ¥{obj.amount}")
-        if account:
-            account.balance -= obj.amount
+    # 凭证：转款凭证和签收照至少一种（通常都要，但允许二选一）
+    if not body.payment_voucher_urls and not body.signed_photo_urls:
+        raise HTTPException(400, "请至少上传转款凭证或签收照片")
 
+    # 付款账户强制为品牌现金账户（F 类专款专用于订货）
+    account_id = body.payment_account_id or obj.payable_account_id
+    if not account_id:
+        raise HTTPException(400, "请指定付款账户（品牌现金账户）")
+    account = await db.get(Account, account_id)
+    if not account:
+        raise HTTPException(400, "付款账户不存在")
+    if account.account_type != 'cash' or account.level != 'project':
+        raise HTTPException(400, "兑付付款必须从品牌现金账户扣款（非 F 类/非总账）")
+    if account.balance < obj.amount:
+        raise HTTPException(400, f"账户余额不足：{account.name} 余额 ¥{account.balance}，需付 ¥{obj.amount}")
+
+    # 扣账户 + 流水
+    account.balance -= obj.amount
+    from app.api.routes.accounts import record_fund_flow
+    await record_fund_flow(
+        db, account_id=account.id, flow_type='debit', amount=obj.amount,
+        balance_after=account.balance, related_type='advance_refund', related_id=obj.id,
+        notes=f"垫付返还 {obj.request_no}", created_by=user.get('employee_id'),
+    )
+
+    obj.payable_account_id = account.id
+    obj.payment_voucher_urls = body.payment_voucher_urls or None
+    obj.signed_photo_urls = body.signed_photo_urls or None
     obj.status = PaymentRequestStatus.PAID
     obj.paid_at = datetime.now(timezone.utc)
+
+    # 通知被返还的业务员/客户
+    from app.services.notification_service import notify
+    from app.models.user import User as _U
+    payee_emp_id = obj.payee_employee_id
+    if payee_emp_id:
+        u = (await db.execute(
+            select(_U).where(_U.employee_id == payee_emp_id, _U.is_active == True)
+        )).scalar_one_or_none()
+        if u:
+            await notify(
+                db, recipient_id=u.id,
+                title=f"垫付返还 {obj.request_no} 已付款",
+                content=f"金额 ¥{obj.amount}，请在「我的」查看凭证。",
+                entity_type="FinancePaymentRequest", entity_id=obj.id,
+            )
+
     await db.flush()
     await log_audit(db, action="confirm_payment", entity_type="FinancePaymentRequest", entity_id=obj.id, user=user)
     return obj

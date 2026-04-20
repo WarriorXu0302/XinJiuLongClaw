@@ -508,9 +508,9 @@ async def list_salary(
     status: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    from app.core.permissions import is_privileged
-    # 非特权用户只看自己的工资单
-    if not is_privileged(user) and user.get("employee_id"):
+    from app.core.permissions import can_see_salary
+    # 非 HR 类角色只能看自己的工资单
+    if not can_see_salary(user) and user.get("employee_id"):
         employee_id = user.get("employee_id")
     stmt = select(SalaryRecord)
     if period:
@@ -530,6 +530,8 @@ async def list_salary(
 
 @router.post("/salary-records", response_model=SalaryRecordResponse, status_code=201)
 async def create_salary(body: SalaryRecordCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    from app.core.permissions import require_can_see_salary
+    require_can_see_salary(user)
     # 幂等
     existing = (await db.execute(
         select(SalaryRecord).where(
@@ -555,6 +557,8 @@ async def create_salary(body: SalaryRecordCreate, user: CurrentUser, db: AsyncSe
 
 @router.put("/salary-records/{rec_id}", response_model=SalaryRecordResponse)
 async def update_salary(rec_id: str, body: SalaryRecordUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    from app.core.permissions import require_can_see_salary
+    require_can_see_salary(user)
     obj = await db.get(SalaryRecord, rec_id)
     if not obj:
         raise HTTPException(404, "工资单不存在")
@@ -839,6 +843,8 @@ class GenerateExpectedRequest(BaseModel):
 @router.post("/manufacturer-subsidies/generate-expected")
 async def generate_expected_subsidies(body: GenerateExpectedRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     """月初按员工×品牌应得补贴挂账 pending 记录（幂等：已存在则跳过）"""
+    from app.core.permissions import require_can_see_salary
+    require_can_see_salary(user)
     ebps = (await db.execute(
         select(EmployeeBrandPosition).where(EmployeeBrandPosition.manufacturer_subsidy > 0)
     )).scalars().all()
@@ -999,9 +1005,8 @@ async def _get_fully_paid_orders_for_employee(
     stmt = (
         select(
             Order.id,
-            Order.settlement_mode,
+            Order.customer_paid_amount,
             Order.total_amount,
-            Order.deal_amount,
             func.max(Receipt.receipt_date).label("last_receipt_date"),
         )
         .select_from(Order)
@@ -1026,10 +1031,9 @@ async def _get_fully_paid_orders_for_employee(
     )).scalars().all()
     already_set = set(already)
 
+    # 提成基数 = 订单应收（customer_paid_amount；公司让利模式下公司实收）
     def _base(r) -> Decimal:
-        if r.settlement_mode == 'company_pay' and r.deal_amount:
-            return Decimal(str(r.deal_amount))
-        return Decimal(str(r.total_amount or 0))
+        return Decimal(str(r.customer_paid_amount or r.total_amount or 0))
 
     return [(r.id, _base(r)) for r in qualified if r.id not in already_set]
 
@@ -1072,6 +1076,8 @@ async def generate_salary_records(
       - 厂家补贴: 从 EmployeeBrandPosition.manufacturer_subsidy 累加
       - 底薪 / 社保: 从 Employee 表取
     """
+    from app.core.permissions import require_can_see_salary
+    require_can_see_salary(user)
     # 解析截止日期
     if body.pay_cutoff_date:
         cutoff = datetime.strptime(body.pay_cutoff_date, "%Y-%m-%d")
@@ -1547,12 +1553,12 @@ async def batch_confirm_salary(
 @router.get("/salary-records/{rec_id}/detail")
 async def salary_detail(rec_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     """工资明细详情页：订单提成明细 / 管理提成 / 考核项 / 厂家补贴 / 扣款 / 达标奖金"""
-    from app.core.permissions import is_privileged
+    from app.core.permissions import can_see_salary
     rec = await db.get(SalaryRecord, rec_id)
     if not rec:
         raise HTTPException(404, "工资单不存在")
-    # 权限：非特权必须是本人
-    if not is_privileged(user) and user.get("employee_id") != rec.employee_id:
+    # 权限：HR 类全开；其他只能看本人工资
+    if not can_see_salary(user) and user.get("employee_id") != rec.employee_id:
         raise HTTPException(403, "无权查看他人工资")
 
     # 订单明细

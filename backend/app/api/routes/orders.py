@@ -152,19 +152,19 @@ async def create_order(body: OrderCreate, user: CurrentUser, db: AsyncSession = 
     order.policy_value = tmpl.total_policy_value
     order.policy_surplus = (tmpl.total_policy_value or Decimal("0")) - order.policy_gap
 
-    # 结算模式：决定客户实付 vs 应收挂账
-    # customer_pay   客户按指导价全额付 → 业务员自己挣政策差（公司收 total，提成按 total）
-    # employee_pay   业务员垫付差额  → 客户付 deal_amount，公司仍应收 total（提成按 total）
-    # company_pay    公司垫付差额    → 客户付 deal_amount，公司应收 deal_amount（提成按 deal）
+    # 结算模式：统一 customer_paid_amount 语义 = "公司对该订单期望收到的钱"
+    # customer_pay   客户按指导价全额付 → 公司应收 total（26,550）
+    # employee_pay   业务员垫差额 → 公司应收 total（客户 19,500 + 业务员 7,050 两笔凭证凑齐）
+    # company_pay    公司垫差额 → 公司应收 deal_amount（19,500，公司不向自己要钱）
     if body.settlement_mode == "customer_pay":
         order.customer_paid_amount = total
         order.policy_receivable = Decimal("0")
     elif body.settlement_mode == "employee_pay":
-        order.customer_paid_amount = order.deal_amount
+        order.customer_paid_amount = total  # 公司按指导价应收；业务员要补足政策差
         order.policy_receivable = order.policy_gap  # 等厂家兑付后返业务员
     elif body.settlement_mode == "company_pay":
-        order.customer_paid_amount = order.deal_amount
-        order.policy_receivable = order.policy_gap  # 等厂家兑付后留公司
+        order.customer_paid_amount = order.deal_amount  # 公司让利，只收客户那部分
+        order.policy_receivable = order.policy_gap  # 等厂家兑付后留公司 F 类
     else:
         raise HTTPException(400, "settlement_mode 必须为 customer_pay/employee_pay/company_pay")
 
@@ -528,6 +528,9 @@ class DeliveryUploadBody(BaseModel):
 
 class PaymentVoucherBody(BaseModel):
     voucher_urls: list[str]
+    amount: Decimal  # 本次登记金额（必填）
+    source_type: str | None = "customer"  # customer / employee_advance（业务员垫付补款）
+    payment_method: str | None = None
 
 
 @router.post("/{order_id}/upload-delivery", response_model=OrderResponse)
@@ -563,22 +566,79 @@ async def upload_delivery(
 async def upload_payment_voucher(
     order_id: str, body: PaymentVoucherBody, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
-    """Upload payment receipt images (does not change status)."""
+    """Upload payment voucher + register a Receipt (累加式；自动更新 payment_status)。"""
+    from app.models.finance import Receipt
+    from app.models.base import OrderPaymentMethod, PaymentStatus
+    from app.api.routes.accounts import record_fund_flow
+    from app.models.product import Account
+
     order = await db.get(Order, order_id)
     if order is None:
         raise HTTPException(404, "Order not found")
     if order.status != OrderStatus.DELIVERED:
         raise HTTPException(400, f"订单状态为 '{order.status}'，只有已送达的订单才能上传收款凭证")
+    if body.amount <= 0:
+        raise HTTPException(400, "金额必须大于 0")
 
-    order.payment_voucher_urls = body.voucher_urls
-    await db.flush()
-    await log_audit(db, action="upload_payment_voucher", entity_type="Order", entity_id=order.id, user=user)
-    await notify_roles(
-        db, role_codes=["admin", "boss", "finance"],
-        title=f"收到收款凭证: {order.order_no}",
-        content=f"订单 {order.order_no} 已上传收款凭证，请确认收款",
-        entity_type="Order", entity_id=order.id,
+    # 凭证累加（历史 + 新增）
+    existing_urls = order.payment_voucher_urls or []
+    order.payment_voucher_urls = existing_urls + body.voucher_urls
+
+    # 建 Receipt —— 自动进 master 现金池（收款统一入口）
+    master_cash = (await db.execute(
+        select(Account).where(Account.level == 'master', Account.account_type == 'cash')
+    )).scalar_one_or_none()
+    if not master_cash:
+        raise HTTPException(400, "未配置公司总资金池（master 现金账户），请先到账户管理创建")
+
+    now_str = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    receipt = Receipt(
+        id=str(uuid.uuid4()),
+        receipt_no=f"RC-{now_str}-{uuid.uuid4().hex[:6]}",
+        customer_id=order.customer_id,
+        order_id=order.id,
+        brand_id=order.brand_id,
+        account_id=master_cash.id,
+        amount=body.amount,
+        payment_method=body.payment_method or OrderPaymentMethod.BANK,
+        receipt_date=datetime.now(timezone.utc).date(),
+        source_type=body.source_type or "customer",
+        notes=f"订单 {order.order_no} 收款（{body.source_type or 'customer'}）",
     )
+    db.add(receipt)
+    master_cash.balance += body.amount
+    await record_fund_flow(
+        db, account_id=master_cash.id, flow_type='credit', amount=body.amount,
+        balance_after=master_cash.balance, related_type='receipt', related_id=receipt.id,
+        notes=f"订单收款 {order.order_no}", created_by=user.get('employee_id'),
+        brand_id=order.brand_id,
+    )
+    # 先 flush 让新 Receipt 落库，下面的 SUM 才能查到
+    await db.flush()
+
+    # 更新 payment_status
+    total_received = (await db.execute(
+        select(func.coalesce(func.sum(Receipt.amount), 0)).where(Receipt.order_id == order.id)
+    )).scalar_one()
+    target_amount = order.customer_paid_amount or order.total_amount
+    prev_status = order.payment_status
+    if Decimal(str(total_received)) >= target_amount:
+        order.payment_status = PaymentStatus.FULLY_PAID
+    elif total_received > 0:
+        order.payment_status = PaymentStatus.PARTIALLY_PAID
+
+    await db.flush()
+    await log_audit(db, action="upload_payment_voucher", entity_type="Order", entity_id=order.id,
+                    changes={"amount": float(body.amount), "source_type": body.source_type}, user=user)
+
+    # 只在全款跃升时才通知财务；部分付款不打扰
+    if prev_status != PaymentStatus.FULLY_PAID and order.payment_status == PaymentStatus.FULLY_PAID:
+        await notify_roles(
+            db, role_codes=["admin", "boss", "finance"],
+            title=f"订单已全款：{order.order_no}",
+            content=f"订单 {order.order_no} 已收齐 ¥{target_amount}，请在审批中心确认收款。",
+            entity_type="Order", entity_id=order.id,
+        )
     return order
 
 

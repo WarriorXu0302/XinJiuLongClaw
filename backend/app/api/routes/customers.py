@@ -19,9 +19,41 @@ router = APIRouter()
 
 @router.post("", response_model=CustomerResponse, status_code=201)
 async def create_customer(body: CustomerCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
-    obj = Customer(id=str(uuid.uuid4()), **body.model_dump())
+    data = body.model_dump()
+    brand_id = data.pop("brand_id", None)
+
+    roles = user.get("roles", [])
+    is_salesman = "salesman" in roles and not any(r in roles for r in ("admin", "boss", "finance", "hr", "sales_manager"))
+
+    # 业务员建客户：必须绑品牌，且业务员自动 = 本人
+    if is_salesman:
+        user_brand_ids = user.get("brand_ids") or []
+        # salesman 只绑了一个品牌时自动用它；传了 brand_id 的校验必须在范围内
+        if not brand_id:
+            if len(user_brand_ids) == 1:
+                brand_id = user_brand_ids[0]
+            else:
+                raise HTTPException(400, "请指定归属品牌")
+        elif brand_id not in user_brand_ids:
+            raise HTTPException(403, "无权归属到该品牌")
+        # salesman 建的客户自动把业务员设为自己
+        if not data.get("salesman_id"):
+            data["salesman_id"] = user.get("employee_id")
+
+    obj = Customer(id=str(uuid.uuid4()), **data)
     db.add(obj)
     await db.flush()
+
+    # 建品牌-业务员绑定
+    if brand_id and data.get("salesman_id"):
+        db.add(CustomerBrandSalesman(
+            id=str(uuid.uuid4()),
+            customer_id=obj.id,
+            brand_id=brand_id,
+            salesman_id=data["salesman_id"],
+        ))
+        await db.flush()
+
     return obj
 
 
@@ -41,12 +73,6 @@ async def list_customers(
     stmt = select(Customer)
     if customer_type:
         stmt = stmt.where(Customer.customer_type == customer_type)
-    if brand_id:
-        stmt = stmt.join(CustomerBrandSalesman, Customer.id == CustomerBrandSalesman.customer_id).where(CustomerBrandSalesman.brand_id == brand_id)
-    if salesman_id:
-        stmt = stmt.join(
-            CustomerBrandSalesman, CustomerBrandSalesman.customer_id == Customer.id,
-        ).where(CustomerBrandSalesman.salesman_id == salesman_id)
     if status:
         stmt = stmt.where(Customer.status == status)
     if settlement_mode:
@@ -59,14 +85,21 @@ async def list_customers(
             | (Customer.contact_phone.ilike(kw))
         )
 
-    # 业务员数据隔离：只看自己关联的客户
+    # customer_brand_salesman 过滤（只 JOIN 一次，同时收 brand_id / salesman_id / 业务员自身隔离）
     roles = user.get("roles", [])
-    if not any(r in roles for r in ("admin", "boss", "finance", "hr", "sales_manager")):
-        if "salesman" in roles and user.get("employee_id"):
-            # JOIN customer_brand_salesman 过滤
-            stmt = stmt.join(
-                CustomerBrandSalesman, CustomerBrandSalesman.customer_id == Customer.id,
-            ).where(CustomerBrandSalesman.salesman_id == user["employee_id"])
+    force_own = (
+        "salesman" in roles
+        and not any(r in roles for r in ("admin", "boss", "finance", "hr", "sales_manager"))
+        and user.get("employee_id")
+    )
+    if brand_id or salesman_id or force_own:
+        stmt = stmt.join(CustomerBrandSalesman, CustomerBrandSalesman.customer_id == Customer.id)
+        if brand_id:
+            stmt = stmt.where(CustomerBrandSalesman.brand_id == brand_id)
+        if salesman_id:
+            stmt = stmt.where(CustomerBrandSalesman.salesman_id == salesman_id)
+        if force_own:
+            stmt = stmt.where(CustomerBrandSalesman.salesman_id == user["employee_id"])
 
     stmt = stmt.order_by(Customer.created_at.desc()).offset(skip).limit(limit)
     rows = (await db.execute(stmt)).scalars().all()

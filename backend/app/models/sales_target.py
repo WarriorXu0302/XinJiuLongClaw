@@ -46,6 +46,16 @@ class SalesTarget(Base):
     bonus_at_120: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))  # 完成 120% 奖
     bonus_metric: Mapped[str] = mapped_column(String(20), default="receipt")  # receipt / sales 用哪个指标判达标
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # 审批流：boss 建目标直接 approved；sales_manager 给下属业务员下目标走 pending_approval
+    # status: approved / pending_approval / rejected
+    status: Mapped[str] = mapped_column(String(20), default="approved", index=True)
+    submitted_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    submitted_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    approved_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    reject_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(server_default="now()")
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         onupdate=lambda: datetime.now(__import__("datetime").timezone.utc)

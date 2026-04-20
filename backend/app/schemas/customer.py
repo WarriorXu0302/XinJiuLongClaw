@@ -23,7 +23,8 @@ class CustomerBase(BaseModel):
 
 
 class CustomerCreate(CustomerBase):
-    pass
+    # 归属品牌（salesman 建客户时必填；boss/admin 建时可选，稍后在品牌绑定页设）
+    brand_id: Optional[str] = None
 
 
 class CustomerUpdate(BaseModel):

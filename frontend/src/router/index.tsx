@@ -99,7 +99,7 @@ const routes: RouteObject[] = [
       // 财务
       { path: 'finance/profit-ledger', element: <ProfitLedger /> },
       { path: 'finance/payment-progress', element: <PaymentProgress /> },
-      { path: 'finance/accounts', element: <AccountOverview /> },
+      { path: 'finance/accounts', element: <AuthGuard requiredRoles={['admin', 'boss', 'finance']}><AccountOverview /></AuthGuard> },
       { path: 'finance/cash-flow', element: <CashFlowManage /> },
       { path: 'finance/expenses', element: <ExpenseList /> },
       { path: 'finance/aging', element: <ReceivableAging /> },
@@ -127,18 +127,18 @@ const routes: RouteObject[] = [
       { path: 'hr/employees', element: <EmployeeList /> },
       { path: 'hr/kpis', element: <KPIList /> },
       { path: 'hr/commissions', element: <CommissionList /> },
-      { path: 'hr/salary-schemes', element: <SalarySchemeList /> },
-      { path: 'hr/salaries', element: <SalaryRecordList /> },
+      { path: 'hr/salary-schemes', element: <AuthGuard requiredRoles={['admin', 'boss', 'hr']}><SalarySchemeList /></AuthGuard> },
+      { path: 'hr/salaries', element: <AuthGuard requiredRoles={['admin', 'boss', 'hr']}><SalaryRecordList /></AuthGuard> },
       { path: 'hr/salaries/:id', element: <SalaryDetail /> },
-      { path: 'hr/manufacturer-subsidies', element: <ManufacturerSubsidyList /> },
-      { path: 'sales/targets', element: <SalesTargetManage /> },
+      { path: 'hr/manufacturer-subsidies', element: <AuthGuard requiredRoles={['admin', 'boss', 'hr']}><ManufacturerSubsidyList /></AuthGuard> },
+      { path: 'sales/targets', element: <AuthGuard requiredRoles={['admin', 'boss', 'sales_manager']}><SalesTargetManage /></AuthGuard> },
       { path: 'attendance', element: <AttendancePage /> },
       { path: 'attendance/map', element: <AttendanceMap /> },
       { path: 'hr/performance', element: <PerformanceDashboard /> },
       { path: 'me', element: <MyDashboard /> },
 
       // 审计
-      { path: 'audit-logs', element: <AuditLogList /> },
+      { path: 'audit-logs', element: <AuthGuard requiredRoles={['admin']}><AuditLogList /></AuthGuard> },
     ],
   },
 ];

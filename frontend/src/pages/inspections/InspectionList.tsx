@@ -72,6 +72,13 @@ function InspectionList() {
     queryFn: () => api.get('/inventory/warehouses', { params }).then(r => r.data),
     enabled: !!brandId,
   });
+
+  // 拉当前品牌的政策模板（取 customer_unit_price 用于盈亏计算）
+  const { data: policyTemplates = [] } = useQuery<any[]>({
+    queryKey: ['policy-templates-brand', brandId],
+    queryFn: () => api.get('/policy-templates/templates', { params: { brand_id: brandId, is_active: true } }).then(r => r.data),
+    enabled: !!brandId,
+  });
   const mainWh = warehouses.find((w: any) => w.warehouse_type === 'main');
   const backupWh = warehouses.find((w: any) => w.warehouse_type === 'backup');
 
@@ -98,7 +105,9 @@ function InspectionList() {
   const bottleCount = watchUnit === '箱' ? watchQty * bpc : watchQty;
   // 从商品拿价格（如果有）
   const salePrice = selectedProduct?.sale_price ?? 885;
-  const dealPrice = 650; // 到手价，TODO: 后续从政策模板或订单拿
+  // 到手价：从当前品牌的政策模板读 customer_unit_price（取第一个匹配的模板）
+  const brandTemplate = policyTemplates.find((t: any) => t.customer_unit_price > 0);
+  const dealPrice = brandTemplate?.customer_unit_price ?? salePrice;
 
   const calcProfitLoss = () => {
     switch (watchType) {
@@ -119,9 +128,9 @@ function InspectionList() {
       return (await api.post('/inspection-cases', {
         ...values, brand_id: brandId,
         original_sale_price: salePrice,
+        deal_unit_price: dealPrice,
         profit_loss: calcProfitLoss(),
         no_rebate: values.case_type === 'outflow_nonmalicious',
-        // A3 被转码金额 = 售价/瓶 × 瓶数
         transfer_amount: values.case_type === 'outflow_transfer' ? salePrice * bottles : 0,
       })).data;
     },
@@ -324,12 +333,12 @@ function InspectionList() {
 
               {needsPay && (
                 <div style={{ marginBottom: 12 }}>
-                  <Text strong>💰 {t === 'outflow_transfer' ? `罚款 ¥${execRecord.penalty_amount}` : `付款 ¥${(execRecord.purchase_price * qty).toLocaleString()} (${execRecord.purchase_price}/瓶×${qty})`} → 从总资金池扣款</Text>
+                  <Text strong>💰 {t === 'outflow_transfer' ? `罚款 ¥${execRecord.penalty_amount}` : `付款 ¥${(execRecord.purchase_price * qty).toLocaleString()} (${execRecord.purchase_price}/瓶×${qty})`} → 从品牌现金账户扣款</Text>
                 </div>
               )}
               {needsReceive && (
                 <div style={{ marginBottom: 12 }}>
-                  <Text strong style={{ color: '#52c41a' }}>💰 收款 ¥{(execRecord.resell_price * qty).toLocaleString()} → 总资金池入账</Text>
+                  <Text strong style={{ color: '#52c41a' }}>💰 收款 ¥{(execRecord.resell_price * qty).toLocaleString()} → 品牌现金账户入账</Text>
                 </div>
               )}
               {needsInbound && (

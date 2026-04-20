@@ -124,26 +124,6 @@ class UserRole(Base):
     role: Mapped["Role"] = relationship("Role", back_populates="users")
 
 
-class EmployeeBrand(Base):
-    """Many-to-many: employee manages multiple brands."""
-
-    __tablename__ = "employee_brands"
-    __table_args__ = (
-        UniqueConstraint("employee_id", "brand_id", name="uq_employee_brand"),
-    )
-
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
-    employee_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("employees.id", ondelete="CASCADE"), nullable=False
-    )
-    brand_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("brands.id", ondelete="CASCADE"), nullable=False
-    )
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
-
-
 class Employee(Base):
     """Employee record."""
 

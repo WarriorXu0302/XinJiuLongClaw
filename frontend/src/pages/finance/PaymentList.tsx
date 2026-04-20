@@ -118,7 +118,7 @@ function PaymentList() {
   const columns: ColumnsType<PaymentItem> = [
     { title: '付款编号', dataIndex: 'payment_no', width: 180 },
     { title: '收款方', dataIndex: 'payee', width: 140 },
-    { title: '金额', dataIndex: 'amount', width: 100, align: 'right', render: (v: number) => `¥${Number(v).toFixed(2)}` },
+    { title: '金额', dataIndex: 'amount', width: 100, align: 'right', render: (v: number) => `¥${Number(v).toLocaleString()}` },
     { title: '类型', dataIndex: 'payment_type', width: 80 },
     { title: '支付方式', dataIndex: 'payment_method', width: 100 },
     { title: '付款日期', dataIndex: 'payment_date', width: 120 },
@@ -170,7 +170,7 @@ function PaymentList() {
               showSearch
               placeholder="请选择账户"
               optionFilterProp="label"
-              options={accounts.map(a => ({ value: a.id, label: `${a.name}（¥${Number(a.balance).toFixed(0)}）` }))}
+              options={accounts.map(a => ({ value: a.id, label: `${a.name}（¥${Number(a.balance).toLocaleString()}）` }))}
               allowClear
             />
           </Form.Item>

@@ -10,7 +10,7 @@ from alembic import context
 # Import all models to ensure they are registered with Base.metadata
 from app.models import Base
 from app.models import (
-    User, Role, UserRole, Department, Employee,
+    User, Role, UserRole, Employee,
     Customer, Receivable,
     Brand, Product, Warehouse, Account, Supplier,
     Order, OrderItem,

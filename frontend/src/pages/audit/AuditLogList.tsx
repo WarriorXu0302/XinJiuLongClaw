@@ -25,7 +25,8 @@ interface AuditLog {
 const ACTION_LABEL: Record<string, string> = {
   create_order: '创建订单', approve_policy: '政策审批', ship_order: '订单发货',
   confirm_delivery: '确认送达', upload_delivery: '上传送达凭证', confirm_payment: '确认收款',
-  resubmit_order: '重新提交订单', confirm_external_policy: '厂家政策确认',
+  upload_payment_voucher: '上传收款凭证', resubmit_order: '重新提交订单',
+  confirm_external_policy: '厂家政策确认', submit_policy: '提交政策审批',
   create_receipt: '客户收款', create_payment: '对外付款',
   create_purchase_order: '创建采购单', approve_purchase_order: '审批采购',
   cancel_purchase_order: '撤销采购', receive_purchase_order: '采购收货',
@@ -34,6 +35,12 @@ const ACTION_LABEL: Record<string, string> = {
   create_tasting_wine_usage: '品鉴酒使用', direct_inbound: '直接入库', direct_outbound: '直接出库',
   fulfill_materials: '物料出库', recover_to_stock: '稽查入备用库',
   approve_claim: '审批结算申报', confirm_allocation: '确认分账',
+  upsert_sales_target: '设定销售目标', approve_sales_target: '批准销售目标', reject_sales_target: '驳回销售目标',
+  upsert_salary_scheme: '更新薪酬方案', submit_salary: '提交工资审批', approve_salary: '批准工资', reject_salary: '驳回工资',
+  pay_salary: '发放工资', batch_pay_salary: '批量发放工资', generate_expected_subsidies: '生成补贴应收',
+  confirm_subsidy_arrival: '确认补贴到账', reimburse_manufacturer_subsidy: '厂家补贴报账',
+  confirm_payment_request: '确认垫付返还', approve_transfer: '批准资金调拨', reject_transfer: '驳回调拨',
+  approve_expense: '批准报销', reject_expense: '驳回报销', pay_expense: '报销付款',
 };
 
 // 动作分类颜色
@@ -54,6 +61,23 @@ const ENTITY_LABEL: Record<string, string> = {
   StockFlow: '库存流水', Account: '账户', ExpenseClaim: '结算申报',
   MarketCleanupCase: '市场清理', TastingWineUsage: '品鉴酒使用',
   PolicyTemplate: '政策模板', Supplier: '供应商',
+  SalaryRecord: '工资单', ManufacturerSalarySubsidy: '厂家工资补贴',
+  BrandSalaryScheme: '薪酬方案', SalesTarget: '销售目标',
+  FinancePaymentRequest: '垫付返还', FundFlow: '资金流水',
+  Customer: '客户', Product: '商品', Brand: '品牌',
+  Employee: '员工', Commission: '提成', AssessmentItem: '考核项',
+};
+
+// 变更详情字段翻译
+const CHANGE_KEY_LABEL: Record<string, string> = {
+  amount: '金额', source_type: '来源', employee: '员工', period: '周期',
+  status: '状态', count: '数量', total: '合计', name: '名称',
+  commission: '提成', manager_share: '管理提成', subsidy: '补贴',
+  total_pay: '应发', order_count: '订单数', brand_id: '品牌',
+  created: '创建数', reason: '原因', approved: '已批准',
+};
+const SOURCE_TYPE_LABEL: Record<string, string> = {
+  customer: '客户付款', employee_advance: '业务员垫付', company_advance: '公司内部',
 };
 
 function AuditLogList() {
@@ -86,11 +110,17 @@ function AuditLogList() {
 
   const renderChanges = (v: Record<string, unknown> | null | undefined) => {
     if (!v || Object.keys(v).length === 0) return <Text type="secondary">-</Text>;
+    const formatVal = (key: string, val: unknown): string => {
+      if (key === 'source_type' && typeof val === 'string') return SOURCE_TYPE_LABEL[val] ?? val;
+      if (typeof val === 'number') return `¥${val.toLocaleString()}`;
+      if (typeof val === 'object') return JSON.stringify(val);
+      return String(val);
+    };
     const entries = Object.entries(v).slice(0, 5);
-    const short = entries.map(([k, val]) => `${k}=${typeof val === 'object' ? JSON.stringify(val) : val}`).join(', ');
+    const short = entries.map(([k, val]) => `${CHANGE_KEY_LABEL[k] ?? k}：${formatVal(k, val)}`).join('，');
     return (
-      <Tooltip title={<pre style={{ margin: 0, fontSize: 11 }}>{JSON.stringify(v, null, 2)}</pre>}>
-        <span style={{ fontSize: 12 }}>{short.slice(0, 80)}{short.length > 80 ? '…' : ''}</span>
+      <Tooltip title={<div style={{ fontSize: 11 }}>{Object.entries(v).map(([k, val]) => <div key={k}>{CHANGE_KEY_LABEL[k] ?? k}：{formatVal(k, val)}</div>)}</div>}>
+        <span style={{ fontSize: 12 }}>{short.slice(0, 100)}{short.length > 100 ? '…' : ''}</span>
       </Tooltip>
     );
   };

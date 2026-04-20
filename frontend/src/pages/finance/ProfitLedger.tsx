@@ -166,11 +166,13 @@ function ProfitLedger() {
       </Row>
 
       {/* 全部明细表（可展开查看详情） */}
-      <Card title="全部明细（点击展开查看详情）" size="small" style={{ marginTop: 16 }}>
+      <Card title="全部明细（点击行查看详情）" size="small" style={{ marginTop: 16 }}>
         <Table columns={columns} dataSource={items.filter(i => i.amount !== 0)} rowKey="category" size="small" pagination={false} loading={isLoading}
           expandable={{
             expandedRowRender: (record) => <DetailExpand category={record.category} brandId={brandId} dateFrom={dateFrom} dateTo={dateTo} />,
             rowExpandable: (r) => !['rebate', 'share_diff'].includes(r.category),
+            expandIcon: () => null,
+            expandRowByClick: true,
           }}
           summary={() => (
             <Table.Summary.Row style={{ background: net >= 0 ? '#f6ffed' : '#fff1f0' }}>

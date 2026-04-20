@@ -259,6 +259,7 @@ class UserRoleCode(str, enum.Enum):
     BOSS = "boss"
     FINANCE = "finance"
     SALESMAN = "salesman"
+    SALES_MANAGER = "sales_manager"
     WAREHOUSE = "warehouse"
     HR = "hr"
     PURCHASE = "purchase"

@@ -19,7 +19,14 @@ interface StockFlowItem {
 const columns: ColumnsType<StockFlowItem> = [
   { title: '流水号', dataIndex: 'flow_no', width: 180 },
   { title: '批次号', dataIndex: 'batch_no', width: 140 },
-  { title: '类型', dataIndex: 'flow_type', width: 80, render: (t: string) => <Tag color={t === 'in' ? 'green' : t === 'out' ? 'red' : 'blue'}>{t}</Tag> },
+  { title: '类型', dataIndex: 'flow_type', width: 80, render: (t: string) => {
+    const map: Record<string, { color: string; text: string }> = {
+      inbound: { color: 'green', text: '入库' }, outbound: { color: 'red', text: '出库' },
+      in: { color: 'green', text: '入库' }, out: { color: 'red', text: '出库' },
+    };
+    const m = map[t] ?? { color: 'blue', text: t };
+    return <Tag color={m.color}>{m.text}</Tag>;
+  }},
   { title: '数量', dataIndex: 'quantity', width: 80, align: 'right' },
   { title: '成本单价', dataIndex: 'cost_price', width: 100, align: 'right', render: (v: number | null) => v != null ? `¥${Number(v).toFixed(2)}` : '-' },
   { title: '时间', dataIndex: 'created_at', width: 170, render: (v: string) => v?.replace('T', ' ').slice(0, 19) },

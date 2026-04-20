@@ -61,11 +61,12 @@ async def employee_monthly(
             for ebp in ebps
         ]
 
-        # 销售目标（员工级）- 取本月目标
+        # 销售目标（员工级）- 取本月目标，仅看已审批通过的
         target_stmt = select(SalesTarget).where(
             SalesTarget.target_level == 'employee',
             SalesTarget.employee_id == emp.id,
             SalesTarget.target_year == y,
+            SalesTarget.status == 'approved',
         )
         targets = (await db.execute(target_stmt)).scalars().all()
         month_target = next((t for t in targets if t.target_month == m), None)
@@ -265,6 +266,7 @@ async def my_dashboard(
             SalesTarget.employee_id == emp_id,
             SalesTarget.target_year == y,
             SalesTarget.target_month.is_(None),
+            SalesTarget.status == 'approved',
         )
     )).scalars().all()
     data["year_targets"] = [
@@ -320,6 +322,7 @@ async def init_assessment_items(
                 SalesTarget.employee_id == eid,
                 SalesTarget.target_year == y,
                 SalesTarget.target_month == m,
+                SalesTarget.status == 'approved',
             )
         )).scalar_one()
         revenue_target = Decimal(str(t_sum))
@@ -466,6 +469,7 @@ async def employee_trend(
                 SalesTarget.employee_id == eid,
                 SalesTarget.target_year == y,
                 SalesTarget.target_month == m,
+                SalesTarget.status == 'approved',
             )
         )).scalar_one_or_none()
 

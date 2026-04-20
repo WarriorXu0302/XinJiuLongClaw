@@ -37,14 +37,17 @@ def _gen_no(prefix: str) -> str:
 
 
 def _compute_profit_loss(case: InspectionCase, bottles: int) -> Decimal:
-    """根据 case_type 计算盈亏（瓶数基准）。统一正=盈利、负=亏损。
-    A1 恶意: -(原售价-回收价)*瓶数 - 罚款  （厂家成交价 ≈ 原售价的简化：因 A1 本应零损失，这里用"市场回流损失 = 厂家已付厂出-回收"近似，实际未知用 0）
-    A2 非恶意: +(原售价-回收价)*瓶数 - 罚款（回收后以售价入主仓，差价是盈利）
-    A3 被转码: -罚款 （转码金额走的回款账户，非盈亏）
-    B1 回售:   +(回售价-买入价)*瓶数 + 奖励 （清理市场反向加价）
-    B2 转码入库: +(原售价-买入价)*瓶数 + 奖励
+    """根据 case_type 计算预估盈亏（瓶数基准）。正=盈利、负=亏损。
+    A1 恶意外流: -(回收价 - 到手价) × 瓶数 - 罚款
+       含义：我们卖给客户的到手价 650，被窜货后花 800 回收，每瓶多花 150
+    A2 非恶意: +(指导价 - 回收价) × 瓶数 - 罚款
+       含义：回收后以指导价入主仓，差价是盈利
+    A3 被转码: -罚款
+    B1 回售: +(回售价 - 买入价) × 瓶数 + 奖励
+    B2 转码入库: +(指导价 - 买入价) × 瓶数 + 奖励
     """
-    sale_price = case.original_sale_price or Decimal("0")
+    sale_price = case.original_sale_price or Decimal("0")  # 指导价
+    deal_price = case.deal_unit_price if case.deal_unit_price and case.deal_unit_price > 0 else sale_price  # 到手价
     purchase_price = case.purchase_price or Decimal("0")
     resell_price = case.resell_price or Decimal("0")
     penalty = case.penalty_amount or Decimal("0")
@@ -52,8 +55,7 @@ def _compute_profit_loss(case: InspectionCase, bottles: int) -> Decimal:
     b = Decimal(bottles)
     t = case.case_type
     if t == 'outflow_malicious':
-        # A1 简化模型：(回收价 - 原售价) * 瓶数 - 罚款，通常为负（亏损）
-        return (purchase_price - sale_price) * b - penalty
+        return -(purchase_price - deal_price) * b - penalty
     if t == 'outflow_nonmalicious':
         return (sale_price - purchase_price) * b - penalty
     if t == 'outflow_transfer':
@@ -218,11 +220,16 @@ async def execute_inspection_case(
     if needs_scan and not (body.barcode or (body.barcodes and len(body.barcodes) > 0)):
         raise HTTPException(400, "该案件类型必须扫码")
 
-    master_acc = (await db.execute(
-        select(Account).where(Account.level == 'master')
+    # 稽查付款/收款走品牌现金账户（不走总资金池）
+    brand_cash_acc = (await db.execute(
+        select(Account).where(
+            Account.brand_id == case.brand_id,
+            Account.account_type == 'cash',
+            Account.level == 'project',
+        )
     )).scalar_one_or_none()
-    if not master_acc:
-        raise HTTPException(400, "未找到总资金池账户")
+    if not brand_cash_acc:
+        raise HTTPException(400, "该品牌未配置现金账户，无法执行稽查扣款")
 
     main_wh = (await db.execute(
         select(Warehouse).where(Warehouse.brand_id == case.brand_id, Warehouse.warehouse_type == 'main', Warehouse.is_active == True)
@@ -234,32 +241,44 @@ async def execute_inspection_case(
     now = datetime.now(timezone.utc)
     batch_no = f"IC-{case.case_no}"
 
+    # 预算总支出，校验余额
+    total_debit = Decimal("0")
+    if case.case_type in ('outflow_malicious', 'outflow_nonmalicious'):
+        total_debit += case.purchase_price * bottles
+    if case.case_type in ('outflow_malicious', 'outflow_nonmalicious', 'outflow_transfer'):
+        total_debit += case.penalty_amount or Decimal("0")
+    if case.case_type == 'inflow_transfer':
+        total_debit += case.purchase_price * bottles
+    if total_debit > 0 and brand_cash_acc.balance < total_debit:
+        raise HTTPException(400,
+            f"品牌现金账户余额不足：{brand_cash_acc.balance} < 需付 ¥{total_debit}。请先从总资金池调拨到品牌现金账户。")
+
     # 1. 付款/收款
     if case.case_type == 'outflow_malicious' or case.case_type == 'outflow_nonmalicious':
         pay_amt = case.purchase_price * bottles
         if pay_amt > 0:
-            master_acc.balance -= pay_amt
-            await record_fund_flow(db, account_id=master_acc.id, flow_type='debit', amount=pay_amt,
-                balance_after=master_acc.balance, related_type='inspection_payment', related_id=case.id,
+            brand_cash_acc.balance -= pay_amt
+            await record_fund_flow(db, account_id=brand_cash_acc.id, flow_type='debit', amount=pay_amt,
+                balance_after=brand_cash_acc.balance, related_type='inspection_payment', related_id=case.id,
                 notes=f"稽查回收付款 {case.case_no} ({bottles}瓶)")
     if case.case_type in ('outflow_malicious', 'outflow_nonmalicious', 'outflow_transfer') and case.penalty_amount > 0:
-        master_acc.balance -= case.penalty_amount
-        await record_fund_flow(db, account_id=master_acc.id, flow_type='debit', amount=case.penalty_amount,
-            balance_after=master_acc.balance, related_type='inspection_penalty', related_id=case.id,
+        brand_cash_acc.balance -= case.penalty_amount
+        await record_fund_flow(db, account_id=brand_cash_acc.id, flow_type='debit', amount=case.penalty_amount,
+            balance_after=brand_cash_acc.balance, related_type='inspection_penalty', related_id=case.id,
             notes=f"稽查罚款 {case.case_no}")
     if case.case_type == 'inflow_transfer':
         pay_amt = case.purchase_price * bottles
         if pay_amt > 0:
-            master_acc.balance -= pay_amt
-            await record_fund_flow(db, account_id=master_acc.id, flow_type='debit', amount=pay_amt,
-                balance_after=master_acc.balance, related_type='inspection_payment', related_id=case.id,
+            brand_cash_acc.balance -= pay_amt
+            await record_fund_flow(db, account_id=brand_cash_acc.id, flow_type='debit', amount=pay_amt,
+                balance_after=brand_cash_acc.balance, related_type='inspection_payment', related_id=case.id,
                 notes=f"转码入库付款 {case.case_no} ({bottles}瓶)")
     if case.case_type == 'inflow_resell':
         income = case.resell_price * bottles
         if income > 0:
-            master_acc.balance += income
-            await record_fund_flow(db, account_id=master_acc.id, flow_type='credit', amount=income,
-                balance_after=master_acc.balance, related_type='inspection_income', related_id=case.id,
+            brand_cash_acc.balance += income
+            await record_fund_flow(db, account_id=brand_cash_acc.id, flow_type='credit', amount=income,
+                balance_after=brand_cash_acc.balance, related_type='inspection_income', related_id=case.id,
                 notes=f"清理回售收款 {case.case_no} ({bottles}瓶)")
 
     # 2. 入库/出库
@@ -341,8 +360,9 @@ async def execute_inspection_case(
         )
         db.add(flow)
 
-    # 3. 更新状态
-    case.status = 'processing'
+    # 3. 更新状态 + 记录执行时间（利润台账按此时间过滤）
+    case.status = 'executed'
+    case.closed_at = now
     if body.voucher_urls:
         case.voucher_urls = body.voucher_urls
 

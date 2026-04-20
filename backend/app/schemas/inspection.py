@@ -41,6 +41,7 @@ class InspectionCaseBase(BaseModel):
     transfer_amount: Decimal = Decimal("0.00")
     rebate_loss: Decimal = Decimal("0.00")
     reward_amount: Decimal = Decimal("0.00")
+    deal_unit_price: Decimal = Decimal("0.00")
     profit_loss: Decimal = Decimal("0.00")
     counterparty: Optional[str] = None
     no_rebate: bool = False

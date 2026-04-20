@@ -217,9 +217,11 @@ async def profit_summary(
     policy_profit = float((await db.execute(policy_profit_q)).scalar_one())
     items.append(ProfitItem(category='policy_profit', label='政策兑付盈利', amount=policy_profit, direction='income'))
 
-    # --- 3. 稽查清理盈利 ---
+    # --- 3. 稽查清理盈利（只算已执行的案件，按执行时间过滤）---
     insp_profit_q = select(func.coalesce(func.sum(InspectionCase.profit_loss), 0)).where(
-        InspectionCase.profit_loss > 0, InspectionCase.created_at.between(d_from, d_to)
+        InspectionCase.profit_loss > 0,
+        InspectionCase.status.in_(('executed', 'closed')),
+        InspectionCase.closed_at.between(d_from, d_to),
     )
     if brand_id:
         insp_profit_q = insp_profit_q.where(InspectionCase.brand_id == brand_id)
@@ -260,9 +262,11 @@ async def profit_summary(
     policy_loss = float((await db.execute(policy_loss_q)).scalar_one())
     items.append(ProfitItem(category='policy_loss', label='政策兑付亏损', amount=policy_loss, direction='expense'))
 
-    # --- 8. 稽查外流亏损 ---
+    # --- 8. 稽查外流亏损（只算已执行的案件，按执行时间过滤）---
     insp_loss_q = select(func.coalesce(func.sum(func.abs(InspectionCase.profit_loss)), 0)).where(
-        InspectionCase.profit_loss < 0, InspectionCase.created_at.between(d_from, d_to)
+        InspectionCase.profit_loss < 0,
+        InspectionCase.status.in_(('executed', 'closed')),
+        InspectionCase.closed_at.between(d_from, d_to),
     )
     if brand_id:
         insp_loss_q = insp_loss_q.where(InspectionCase.brand_id == brand_id)

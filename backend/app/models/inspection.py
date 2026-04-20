@@ -109,6 +109,7 @@ class InspectionCase(Base):
     transfer_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"))
     rebate_loss: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"))
     reward_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"))
+    deal_unit_price: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"))
     profit_loss: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0.00"))
     counterparty: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     no_rebate: Mapped[bool] = mapped_column(Boolean, default=False)

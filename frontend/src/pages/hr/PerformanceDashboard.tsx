@@ -256,7 +256,7 @@ function PerformanceDashboard() {
       <Table<Row>
         columns={columns} dataSource={data} rowKey="employee_id"
         loading={isLoading} pagination={{ pageSize: 20 }}
-        expandable={{ expandedRowRender }}
+        expandable={{ expandedRowRender, expandIcon: () => null, expandRowByClick: true }}
         size="small" scroll={{ x: 1500 }}
       />
     </>

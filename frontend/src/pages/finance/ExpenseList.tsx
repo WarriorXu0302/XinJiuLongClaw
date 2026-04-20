@@ -153,7 +153,7 @@ function ExpenseList() {
   const columns: ColumnsType<ExpenseItem> = [
     { title: '报销编号', dataIndex: 'expense_no', width: 140 },
     { title: '说明', dataIndex: 'description', width: 180, ellipsis: true },
-    { title: '金额', dataIndex: 'amount', width: 90, align: 'right', render: (v: number) => `¥${Number(v).toFixed(0)}` },
+    { title: '金额', dataIndex: 'amount', width: 90, align: 'right', render: (v: number) => `¥${Number(v).toLocaleString()}` },
     { title: '申请人', key: 'applicant', width: 80, render: (_, r) => r.applicant?.name ?? '-' },
     { title: '凭证', key: 'voucher', width: 50, render: (_, r: any) => r.voucher_urls?.length ? `${r.voucher_urls.length}张` : '-' },
     { title: '状态', dataIndex: 'status', width: 80, render: (s: string) => { const m = STATUS_MAP[s]; return m ? <Tag color={m.color}>{m.label}</Tag> : <Tag>{s}</Tag>; } },

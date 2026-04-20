@@ -13,7 +13,8 @@ from decimal import Decimal
 
 from app.core.database import get_db
 from app.core.security import CurrentUser
-from app.models.user import Commission, Employee, EmployeeBrand, KPI
+from app.models.user import Commission, Employee, KPI
+from app.models.payroll import EmployeeBrandPosition
 
 router = APIRouter()
 
@@ -92,7 +93,7 @@ async def list_employees(
 ):
     stmt = select(Employee)
     if brand_id:
-        stmt = stmt.join(EmployeeBrand, Employee.id == EmployeeBrand.employee_id).where(EmployeeBrand.brand_id == brand_id)
+        stmt = stmt.join(EmployeeBrandPosition, Employee.id == EmployeeBrandPosition.employee_id).where(EmployeeBrandPosition.brand_id == brand_id)
     if status:
         stmt = stmt.where(Employee.status == status)
     stmt = stmt.order_by(Employee.employee_no).offset(skip).limit(limit)
@@ -351,41 +352,5 @@ async def settle_commission(commission_id: str, user: CurrentUser, db: AsyncSess
     return obj
 
 
-# ═══════════════════════════════════════════════════════════════════
-# Employee Brand Binding
-# ═══════════════════════════════════════════════════════════════════
-
-
-@router.get("/employees/{emp_id}/brands")
-async def get_employee_brands(emp_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
-    rows = (await db.execute(
-        select(EmployeeBrand).where(EmployeeBrand.employee_id == emp_id)
-    )).scalars().all()
-    return [{"id": r.id, "brand_id": r.brand_id} for r in rows]
-
-
-class BindBrandBody(BaseModel):
-    brand_id: str
-
-
-@router.post("/employees/{emp_id}/brands", status_code=201)
-async def bind_employee_brand(emp_id: str, body: BindBrandBody, user: CurrentUser, db: AsyncSession = Depends(get_db)):
-    existing = (await db.execute(
-        select(EmployeeBrand).where(EmployeeBrand.employee_id == emp_id, EmployeeBrand.brand_id == body.brand_id)
-    )).scalar_one_or_none()
-    if existing:
-        raise HTTPException(400, "该员工已绑定此品牌")
-    obj = EmployeeBrand(id=str(uuid.uuid4()), employee_id=emp_id, brand_id=body.brand_id)
-    db.add(obj)
-    await db.flush()
-    return {"id": obj.id, "employee_id": emp_id, "brand_id": body.brand_id}
-
-
-@router.delete("/employees/{emp_id}/brands/{brand_id}", status_code=204)
-async def unbind_employee_brand(emp_id: str, brand_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
-    obj = (await db.execute(
-        select(EmployeeBrand).where(EmployeeBrand.employee_id == emp_id, EmployeeBrand.brand_id == brand_id)
-    )).scalar_one_or_none()
-    if obj:
-        await db.delete(obj)
-        await db.flush()
+# 员工品牌绑定已迁移到 payroll.py 的 /employees/{emp_id}/brand-positions 接口
+# 使用 EmployeeBrandPosition（含岗位+提成率+补贴），旧 EmployeeBrand 表已废弃

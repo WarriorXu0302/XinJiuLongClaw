@@ -110,7 +110,9 @@ function CustomerList() {
 
   const createMutation = useMutation({
     mutationFn: async (values: Record<string, unknown>) => {
-      const { data } = await api.post('/customers', values);
+      // 建客户时把当前选中品牌一并传给后端，后端自动建 CustomerBrandSalesman 关联
+      const payload = { ...values, brand_id: values.brand_id ?? brandId ?? null };
+      const { data } = await api.post('/customers', payload);
       return data;
     },
     onSuccess: () => {
@@ -162,7 +164,7 @@ function CustomerList() {
 
   const orderColumns: ColumnsType<OrderItem> = [
     { title: '订单号', dataIndex: 'order_no', width: 180 },
-    { title: '金额', dataIndex: 'total_amount', width: 100, align: 'right', render: (v: string) => `¥${Number(v).toFixed(2)}` },
+    { title: '金额', dataIndex: 'total_amount', width: 100, align: 'right', render: (v: string) => `¥${Number(v).toLocaleString()}` },
     { title: '状态', dataIndex: 'status', width: 120, render: (v: string) => <Tag>{v}</Tag> },
     { title: '付款', dataIndex: 'payment_status', width: 100, render: (v: string) => <Tag color={v === 'fully_paid' ? 'green' : 'orange'}>{v}</Tag> },
     { title: '时间', dataIndex: 'created_at', width: 160, render: (v: string) => new Date(v).toLocaleString('zh-CN') },
@@ -259,6 +261,22 @@ function CustomerList() {
           <Form.Item name="customer_type" label="客户类型" rules={[{ required: true }]}>
             <Select options={[{ value: 'channel', label: '渠道客户' }, { value: 'group_purchase', label: '团购客户' }]} />
           </Form.Item>
+          {!editingRecord && (
+            <Form.Item
+              name="brand_id"
+              label="归属品牌"
+              rules={[{ required: true, message: '请选择归属品牌' }]}
+              tooltip="客户要挂到某个品牌下；业务员只能归属自己的品牌"
+              initialValue={brandId ?? undefined}
+            >
+              <Select
+                showSearch
+                placeholder="选择品牌"
+                optionFilterProp="label"
+                options={brands.map(b => ({ value: b.id, label: b.name }))}
+              />
+            </Form.Item>
+          )}
           <Form.Item name="salesman_id" label="绑定业务员">
             <Select
               showSearch

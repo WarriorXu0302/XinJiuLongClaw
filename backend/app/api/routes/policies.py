@@ -39,6 +39,81 @@ from app.services.audit_service import log_audit
 router = APIRouter()
 
 
+async def _trigger_advance_refund_if_fulfilled(db: AsyncSession, ri) -> None:
+    """PolicyRequestItem 进入 fulfilled → 若 advance_payer 是员工/客户，自动生成 pending
+    FinancePaymentRequest（垫付返还申请）。等老板在审批中心确认付款。
+    金额 = settled_amount（到账+实物的实际结算值）。幂等：已有同 source 的请求不重建。
+    """
+    from app.models.finance import FinancePaymentRequest
+    from app.models.base import PayeeType, PaymentRequestStatus
+    from app.services.notification_service import notify_roles
+
+    if ri.fulfill_status != "fulfilled":
+        return
+    if not ri.advance_payer_type or ri.advance_payer_type == "company":
+        return  # 公司垫付不需要返还
+    amount = Decimal(str(ri.settled_amount or 0))
+    if amount <= 0:
+        # settled_amount 未计算时兜底用 standard_total - actual_cost
+        amount = Decimal(str(ri.standard_total or 0)) - Decimal(str(ri.actual_cost or 0))
+    if amount <= 0:
+        return
+
+    # 幂等
+    existing = (await db.execute(
+        select(FinancePaymentRequest).where(
+            FinancePaymentRequest.source_usage_record_id == None,
+            FinancePaymentRequest.payee_type == ri.advance_payer_type,
+            FinancePaymentRequest.payee_employee_id == (ri.advance_payer_id if ri.advance_payer_type == "employee" else None),
+            FinancePaymentRequest.payee_customer_id == (ri.advance_payer_id if ri.advance_payer_type == "customer" else None),
+            FinancePaymentRequest.amount == amount,
+            FinancePaymentRequest.status != PaymentRequestStatus.CANCELLED,
+        )
+    )).scalar_one_or_none()
+    if existing:
+        return
+
+    pr = await db.get(PolicyRequest, ri.policy_request_id)
+    brand_id = pr.brand_id if pr else None
+
+    # 默认付款账户 = 该品牌现金账户
+    default_account_id = None
+    if brand_id:
+        from app.models.product import Account as _Acct
+        acct = (await db.execute(
+            select(_Acct).where(
+                _Acct.brand_id == brand_id,
+                _Acct.account_type == "cash",
+                _Acct.level == "project",
+            )
+        )).scalar_one_or_none()
+        if acct:
+            default_account_id = acct.id
+
+    now = datetime.now(timezone.utc)
+    req = FinancePaymentRequest(
+        id=str(uuid.uuid4()),
+        request_no=f"AR-{now.strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6]}",
+        brand_id=brand_id,
+        payee_type=ri.advance_payer_type,
+        payee_employee_id=ri.advance_payer_id if ri.advance_payer_type == "employee" else None,
+        payee_customer_id=ri.advance_payer_id if ri.advance_payer_type == "customer" else None,
+        amount=amount,
+        status=PaymentRequestStatus.PENDING,
+        payable_account_type="cash",
+        payable_account_id=default_account_id,
+    )
+    db.add(req)
+    await db.flush()
+
+    await notify_roles(
+        db, role_codes=["boss", "admin", "finance"],
+        title=f"政策垫付已到账，{ri.advance_payer_type} 待返还 ¥{amount}",
+        content=f"政策项 {ri.name}（方案 {ri.scheme_no or '-'}）已 fulfilled，请审批付款给垫付人。",
+        entity_type="FinancePaymentRequest", entity_id=req.id,
+    )
+
+
 def _generate_claim_no() -> str:
     ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     short = uuid.uuid4().hex[:6]
@@ -373,6 +448,12 @@ async def fulfill_materials(
         raise HTTPException(400, f"政策申请状态为 '{pr.status}'，只有已审批的才能兑付物料")
     if not pr.brand_id:
         raise HTTPException(400, "政策申请没有关联品牌")
+    # 订单必须已确认收款（status=completed）才能启动政策兑付
+    if pr.order_id:
+        from app.models.order import Order as _Ord
+        linked_order = await db.get(_Ord, pr.order_id)
+        if linked_order and linked_order.status != "completed":
+            raise HTTPException(400, f"关联订单 {linked_order.order_no} 状态为 '{linked_order.status}'，需先由财务在审批中心确认收款后才能发起政策兑付")
 
     wh_result = await db.execute(
         select(Warehouse)
@@ -461,6 +542,7 @@ async def fulfill_materials(
                 if ri.fulfilled_qty >= ri.quantity:
                     ri.fulfill_status = "fulfilled"
                     ri.fulfilled_at = now
+                    await _trigger_advance_refund_if_fulfilled(db, ri)
                 else:
                     ri.fulfill_status = "applied"
 
@@ -484,6 +566,12 @@ async def update_fulfill_item_status(
     pr = await db.get(PolicyRequest, request_id)
     if pr is None:
         raise HTTPException(404, "政策申请不存在")
+    # 订单必须已确认收款（status=completed）才能启动政策兑付
+    if pr.order_id:
+        from app.models.order import Order as _Ord
+        linked_order = await db.get(_Ord, pr.order_id)
+        if linked_order and linked_order.status != "completed":
+            raise HTTPException(400, f"关联订单 {linked_order.order_no} 状态为 '{linked_order.status}'，需先确认收款后才能发起政策兑付")
 
     ri = await db.get(PolicyRequestItem, body.request_item_id)
     if ri is None or ri.policy_request_id != request_id:
@@ -508,6 +596,7 @@ async def update_fulfill_item_status(
     elif body.fulfill_status == "fulfilled":
         ri.fulfill_status = "fulfilled"
         ri.fulfilled_at = now
+        await _trigger_advance_refund_if_fulfilled(db, ri)
     else:
         ri.fulfill_status = body.fulfill_status
 

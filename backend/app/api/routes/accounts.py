@@ -116,11 +116,16 @@ class FundTransferRecord(BaseModel):
 # In-memory model for transfer requests (simple approach using fund_flows table)
 # We use FundFlow with flow_type='transfer_pending' as the approval record
 
+from app.core.permissions import can_operate_fund_transfer, require_role
+
+
 @router.post("/accounts/transfer")
 async def submit_fund_transfer(
     body: FundTransferRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
     """Submit a transfer request for approval. Does NOT move money yet."""
+    if not can_operate_fund_transfer(user):
+        raise HTTPException(403, "仅管理员/老板/财务可发起资金调拨")
     if body.amount <= 0:
         raise HTTPException(400, "调拨金额必须大于0")
 
@@ -136,6 +141,8 @@ async def submit_fund_transfer(
         raise HTTPException(400, "只能拨款到品牌项目账户")
     if to_acc.account_type == 'f_class':
         raise HTTPException(400, "F类账户只接收厂家政策打款，不能接受调拨")
+    if to_acc.account_type == 'payment_to_mfr':
+        raise HTTPException(400, "回款账户是统计用虚账户，不能接受调拨")
 
     amount = Decimal(str(body.amount))
     if from_acc.balance < amount:
@@ -189,6 +196,7 @@ async def approve_fund_transfer(
     transfer_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
     """Approve a pending transfer → actually move the money."""
+    require_role(user, 'boss')  # 仅 admin/boss 可批准资金调拨
     ff = await db.get(FundFlow, transfer_id)
     if ff is None:
         raise HTTPException(404, "拨款申请不存在")

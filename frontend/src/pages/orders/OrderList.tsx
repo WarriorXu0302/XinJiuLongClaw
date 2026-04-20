@@ -7,7 +7,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import api from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';
-import { useAuthStore } from '../../stores/authStore';
 
 interface Order {
   id: string;
@@ -17,6 +16,7 @@ interface Order {
   total_amount: number;
   status: string;
   payment_status: string;
+  payment_voucher_urls?: string[];
   created_at: string;
   customer?: { id: string; name: string };
   salesman?: { id: string; name: string };
@@ -47,8 +47,6 @@ const STATUS_COLOR: Record<string, string> = {
 function OrderList() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const roles = useAuthStore((s) => s.roles) ?? [];
-  const canConfirmPayment = roles.some(r => ['admin', 'boss', 'finance'].includes(r));
   const { brandId, params } = useBrandFilter();
   const [form] = Form.useForm<OrderCreateForm>();
   const [modalOpen, setModalOpen] = useState(false);
@@ -349,14 +347,22 @@ function OrderList() {
             {s === 'shipped' && (
               <a style={{ color: '#52c41a' }} onClick={() => navigate(`/orders/${record.id}/delivery`)}>上传送货照片</a>
             )}
-            {s === 'delivered' && (
-              <>
-                <a onClick={() => navigate(`/orders/${record.id}/payment`)}>上传收款凭证</a>
-                {canConfirmPayment && (
-                  <a style={{ color: '#52c41a', fontWeight: 600 }} onClick={() => actionMutation.mutate({ id: record.id, action: 'confirm-payment' })}>确认收款</a>
-                )}
-              </>
-            )}
+            {s === 'delivered' && (() => {
+              const hasVoucher = (record.payment_voucher_urls?.length ?? 0) > 0;
+              const fullyPaid = record.payment_status === 'fully_paid';
+              if (fullyPaid && hasVoucher) {
+                return <Tag color="blue">已全款，待财务确认</Tag>;
+              }
+              if (hasVoucher) {
+                return (
+                  <Space size="small">
+                    <Tag color="gold">已传凭证，待补款</Tag>
+                    <a onClick={() => navigate(`/orders/${record.id}/payment`)}>继续补传</a>
+                  </Space>
+                );
+              }
+              return <a onClick={() => navigate(`/orders/${record.id}/payment`)}>上传收款凭证</a>;
+            })()}
             {s === 'policy_rejected' && (
               <a style={{ color: '#fa8c16' }} onClick={() => actionMutation.mutate({ id: record.id, action: 'resubmit' })}>重新提交</a>
             )}
@@ -608,9 +614,17 @@ function OrderList() {
                     </div>
                   ) : p.benefit_rules && (
                     <div style={{ marginTop: 8, color: '#666', fontSize: 13 }}>
-                      {Object.entries(p.benefit_rules).map(([k, v]) => (
-                        <Tag key={k} style={{ marginBottom: 4 }}>{k}: {typeof v === 'object' ? JSON.stringify(v) : String(v)}</Tag>
-                      ))}
+                      {Object.entries(p.benefit_rules as Record<string, unknown>).map(([k, v]) => {
+                        const label: Record<string, string> = {
+                          品鉴酒: '品鉴酒', 陈列费: '陈列费', 品鉴会: '品鉴会',
+                          旅游: '旅游', 返利: '返利', 其他: '其他',
+                        };
+                        const display = typeof v === 'number' ? `¥${v.toLocaleString()}`
+                          : typeof v === 'string' ? v
+                          : Array.isArray(v) ? v.join('、')
+                          : '-';
+                        return <Tag key={k} style={{ marginBottom: 4 }}>{label[k] ?? k}：{display}</Tag>;
+                      })}
                     </div>
                   )}
                 </Card>

@@ -4,6 +4,7 @@ import { AimOutlined, PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import api from '../../api/client';
+import { useIsAdmin, useHasRole } from '../../stores/authStore';
 
 const { Title, Text } = Typography;
 
@@ -18,12 +19,24 @@ interface Target {
   employee_name?: string;
   receipt_target: number;
   sales_target: number;
+  bonus_at_100?: number;
+  bonus_at_120?: number;
+  bonus_metric?: string;
   actual_sales: number;
   actual_receipt: number;
   sales_completion: number;
   receipt_completion: number;
+  status?: string;
+  reject_reason?: string;
+  submitted_at?: string;
   notes?: string;
 }
+
+const STATUS_TAG: Record<string, { color: string; text: string }> = {
+  approved: { color: 'green', text: '已生效' },
+  pending_approval: { color: 'gold', text: '待审批' },
+  rejected: { color: 'red', text: '已驳回' },
+};
 
 interface Brand { id: string; name: string }
 interface Employee { id: string; name: string }
@@ -32,9 +45,13 @@ const ym = () => new Date().getFullYear();
 
 function SalesTargetManage() {
   const qc = useQueryClient();
+  const isAdmin = useIsAdmin();
+  const isManager = useHasRole('sales_manager');
+  const canSetCompanyBrand = isAdmin;
+
   const [year, setYear] = useState(ym());
   const [month, setMonth] = useState<number | undefined>();
-  const [level, setLevel] = useState<string>('company');
+  const [level, setLevel] = useState<string>(isAdmin ? 'company' : 'employee');
   const [form] = Form.useForm();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Target | null>(null);
@@ -141,13 +158,23 @@ function SalesTargetManage() {
         return <Progress percent={pct} size="small"
           status={pct >= 100 ? 'success' : pct >= 80 ? 'normal' : pct >= 50 ? 'active' : 'exception'} />;
       }},
-    { title: '操作', key: 'op', width: 100,
+    { title: '状态', dataIndex: 'status', width: 100,
+      render: (v: string, r: Target) => {
+        const tag = STATUS_TAG[v || 'approved'];
+        const label = <Tag color={tag.color}>{tag.text}</Tag>;
+        if (v === 'rejected' && r.reject_reason) {
+          return <span title={r.reject_reason}>{label}<Text type="secondary" style={{ fontSize: 11, marginLeft: 4 }}>原因 …</Text></span>;
+        }
+        return label;
+      } },
+    { title: '操作', key: 'op', width: 120,
       render: (_, r) => (
         <Space size="small">
-          <a onClick={() => openEdit(r)}>编辑</a>
-          <a style={{ color: '#ff4d4f' }} onClick={() => Modal.confirm({
-            title: '删除该目标?', onOk: () => delMut.mutate(r.id),
-          })}>删除</a>
+          {(isAdmin || (r.status !== 'approved' && isManager)) && <a onClick={() => openEdit(r)}>编辑</a>}
+          {(isAdmin || (r.status !== 'approved' && isManager)) &&
+            <a style={{ color: '#ff4d4f' }} onClick={() => Modal.confirm({
+              title: '删除该目标?', onOk: () => delMut.mutate(r.id),
+            })}>删除</a>}
         </Space>
       ) },
   ];
@@ -179,8 +206,10 @@ function SalesTargetManage() {
       </Row>
 
       <Tabs activeKey={level} onChange={setLevel} items={[
-        { key: 'company', label: '公司整体' },
-        { key: 'brand', label: '品牌目标' },
+        ...(canSetCompanyBrand ? [
+          { key: 'company', label: '公司整体' },
+          { key: 'brand', label: '品牌目标' },
+        ] : []),
         { key: 'employee', label: '员工目标' },
       ]} />
 
@@ -190,13 +219,20 @@ function SalesTargetManage() {
       <Modal title={editing ? '编辑目标' : '设置目标'} open={open}
         onOk={submit} onCancel={() => { setOpen(false); setEditing(null); form.resetFields(); }}
         confirmLoading={saveMut.isPending} destroyOnHidden width={520}>
+        {isManager && !isAdmin && (
+          <div style={{ padding: 8, background: '#fffbe6', borderRadius: 4, marginBottom: 12, fontSize: 12 }}>
+            <Text type="warning">业务经理给业务员下的目标需要老板审批后才生效</Text>
+          </div>
+        )}
         <Form form={form} layout="vertical">
           <Row gutter={12}>
             <Col span={8}>
               <Form.Item name="target_level" label="层级" rules={[{ required: true }]}>
-                <Select disabled={!!editing} options={[
+                <Select disabled={!!editing || !canSetCompanyBrand} options={canSetCompanyBrand ? [
                   { value: 'company', label: '公司' },
                   { value: 'brand', label: '品牌' },
+                  { value: 'employee', label: '员工' },
+                ] : [
                   { value: 'employee', label: '员工' },
                 ]} />
               </Form.Item>

@@ -20,6 +20,18 @@ const ROLE_LABELS: Record<string, string> = {
   warehouse: '仓库', hr: '人事', purchase: '采购', manufacturer_staff: '厂家',
 };
 
+const ROLE_DESCRIPTIONS: Record<string, string> = {
+  admin: '超级管理员，全系统可见 + 可操作',
+  boss: '老板，全系统可见，资金调拨批准',
+  finance: '财务，全品牌账/订单/审批；看不到总资金池和工资明细',
+  hr: '人事，员工/工资/补贴/考勤/绩效',
+  salesman: '业务员，只看自己订单/回款/客户/政策申请',
+  sales_manager: '业务经理，看所属品牌全部业务数据',
+  warehouse: '库管，授权仓库的出入库/采购收货',
+  purchase: '采购，采购单/供应商/商品',
+  manufacturer_staff: '厂家对接人，受限视图',
+};
+
 function UserList() {
   const queryClient = useQueryClient();
   const [form] = Form.useForm();
@@ -143,9 +155,30 @@ function UserList() {
             <Select allowClear showSearch optionFilterProp="label" placeholder="选择员工（可不关联）"
               options={employees.map((e: any) => ({ value: e.id, label: e.name }))} />
           </Form.Item>
-          <Form.Item name="role_codes" label="角色">
-            <Select mode="multiple" placeholder="选择角色"
-              options={roles.map(r => ({ value: r.code, label: ROLE_LABELS[r.code] || r.name }))} />
+          <Form.Item
+            name="role_codes"
+            label="角色（权限）"
+            rules={[{ required: true, message: '至少选择一个角色，否则该账号无权访问任何功能' }]}
+            tooltip="同一账号可指定多个角色，权限并集。admin 拥有一切权限。"
+          >
+            <Select
+              mode="multiple"
+              placeholder="为该账号分配角色"
+              optionLabelProp="label"
+              options={roles.map(r => ({
+                value: r.code,
+                label: ROLE_LABELS[r.code] || r.name,
+                optionLabel: (
+                  <div>
+                    <Tag color={ROLE_COLORS[r.code] || 'default'}>{ROLE_LABELS[r.code] || r.name}</Tag>
+                    <span style={{ fontSize: 12, color: '#666', marginLeft: 8 }}>
+                      {ROLE_DESCRIPTIONS[r.code] || ''}
+                    </span>
+                  </div>
+                ),
+              }))}
+              optionRender={(opt) => (opt.data as any).optionLabel}
+            />
           </Form.Item>
           {editingUser && (
             <Form.Item name="is_active" label="启用" valuePropName="checked">

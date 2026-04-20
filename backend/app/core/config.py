@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     DB_NAME: str = "newerp"
     DATABASE_URL: str = ""
 
+    # App-level DB role (NOBYPASSRLS) — used by FastAPI request handlers
+    # Migrations/seed/startup 继续用 DB_USER（superuser）以绕过 RLS
+    APP_DB_USER: str = "erp_app"
+    APP_DB_PASSWORD: str = "erp_app_pw"
+
     # --- Redis ---
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
@@ -65,10 +70,19 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
+        """Admin/superuser URL — 给 Alembic / seed / 启动钩子用，绕过 RLS。"""
         if self.DATABASE_URL:
             return self.DATABASE_URL
         return (
             f"postgresql+asyncpg://{self.DB_USER}:{self.DB_PASSWORD}"
+            f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+        )
+
+    @property
+    def app_database_url(self) -> str:
+        """应用请求用的 URL，走非特权 erp_app 角色，受 RLS 约束。"""
+        return (
+            f"postgresql+asyncpg://{self.APP_DB_USER}:{self.APP_DB_PASSWORD}"
             f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
         )
 

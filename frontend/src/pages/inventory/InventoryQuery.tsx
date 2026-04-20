@@ -220,7 +220,10 @@ function InventoryQuery() {
               columns={[
                 { title: '时间', dataIndex: 'created_at', width: 155, render: (v: string) => new Date(v).toLocaleString('zh-CN') },
                 { title: '仓库', key: 'wh', width: 150, render: (_, r) => r.warehouse ? <>{r.warehouse.name} <Tag color={whTypeColor[r.warehouse.warehouse_type || ''] ?? 'default'}>{whTypeLabel[r.warehouse.warehouse_type || ''] ?? r.warehouse.warehouse_type}</Tag></> : '-' },
-                { title: '类型', dataIndex: 'flow_type', width: 75, render: (v: string) => v === 'inbound' ? <Tag color="green">入库</Tag> : v === 'outbound' ? <Tag color="red">出库</Tag> : <Tag>{v}</Tag> },
+                { title: '类型', dataIndex: 'flow_type', width: 75, render: (v: string) => {
+                  const m: Record<string, {c: string; t: string}> = { inbound: {c:'green',t:'入库'}, outbound: {c:'red',t:'出库'}, in: {c:'green',t:'入库'}, out: {c:'red',t:'出库'} };
+                  const r = m[v] ?? {c:'blue',t:v}; return <Tag color={r.c}>{r.t}</Tag>;
+                }},
                 { title: '商品', key: 'p', width: 160, render: (_, r) => r.product?.name ?? '-' },
                 { title: '数量', key: 'qty', width: 120, align: 'right', render: (_, r) => fmtQty(r.quantity, r.product?.bottles_per_case ?? 1) },
                 { title: '单价', dataIndex: 'cost_price', width: 100, align: 'right', render: (v: number) => v ? `¥${Number(v).toFixed(2)}/瓶` : '-' },

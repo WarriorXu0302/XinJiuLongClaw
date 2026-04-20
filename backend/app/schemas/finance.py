@@ -29,6 +29,7 @@ class ReceiptBase(BaseModel):
     payment_method: str = OrderPaymentMethod.BANK
     receipt_date: Optional[date] = None
     notes: Optional[str] = None
+    source_type: str = "customer"  # customer / employee_advance / company_advance
 
 
 class ReceiptCreate(ReceiptBase):
@@ -224,6 +225,8 @@ class PaymentRequestResponse(PaymentRequestBase):
     request_no: str
     status: str
     approved_by: Optional[str] = None
+    payment_voucher_urls: Optional[list[str]] = None
+    signed_photo_urls: Optional[list[str]] = None
     paid_at: Optional[datetime] = None
     created_at: datetime
     updated_at: Optional[datetime] = None

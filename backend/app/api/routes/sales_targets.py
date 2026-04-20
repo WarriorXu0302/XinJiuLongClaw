@@ -63,10 +63,17 @@ class TargetResponse(BaseModel):
     bonus_at_120: float = 0.0
     bonus_metric: str = "receipt"
     notes: Optional[str] = None
+    # 审批
+    status: str = "approved"
+    submitted_by: Optional[str] = None
+    submitted_at: Optional[datetime] = None
+    approved_by: Optional[str] = None
+    approved_at: Optional[datetime] = None
+    reject_reason: Optional[str] = None
     # 实际完成数据
     actual_receipt: float = 0.0
     actual_sales: float = 0.0
-    receipt_completion: float = 0.0  # 回款完成率
+    receipt_completion: float = 0.0
     sales_completion: float = 0.0
 
 
@@ -128,11 +135,69 @@ def _to_response(t: SalesTarget, actual_sales: Decimal, actual_receipt: Decimal)
         "bonus_at_120": float(t.bonus_at_120 or 0),
         "bonus_metric": t.bonus_metric or "receipt",
         "notes": t.notes,
+        "status": t.status or "approved",
+        "submitted_by": t.submitted_by,
+        "submitted_at": t.submitted_at,
+        "approved_by": t.approved_by,
+        "approved_at": t.approved_at,
+        "reject_reason": t.reject_reason,
         "actual_sales": float(actual_sales),
         "actual_receipt": float(actual_receipt),
         "sales_completion": round(sales_comp, 4),
         "receipt_completion": round(recv_comp, 4),
     }
+
+
+def _roles(user) -> list[str]:
+    return user.get("roles", []) or []
+
+
+def _is_admin(user) -> bool:
+    r = _roles(user)
+    return "admin" in r or "boss" in r
+
+
+def _is_sales_manager(user) -> bool:
+    return "sales_manager" in _roles(user)
+
+
+def _is_pure_salesman(user) -> bool:
+    r = _roles(user)
+    return "salesman" in r and not _is_admin(user) and not _is_sales_manager(user)
+
+
+async def _assert_sub_in_brand(
+    db: AsyncSession, manager_emp_id: str, subordinate_emp_id: str, brand_id: Optional[str],
+) -> str:
+    """确认 subordinate 在指定品牌（或经理自己某个品牌）下是 salesman；返回 brand_id。"""
+    from app.models.payroll import EmployeeBrandPosition
+    # 经理的品牌集合
+    mgr_brands = set((await db.execute(
+        select(EmployeeBrandPosition.brand_id).where(
+            EmployeeBrandPosition.employee_id == manager_emp_id,
+            EmployeeBrandPosition.position_code == 'sales_manager',
+        )
+    )).scalars().all())
+    if not mgr_brands:
+        raise HTTPException(403, "您不是任何品牌的业务经理")
+    # 下属
+    sub_ebps = (await db.execute(
+        select(EmployeeBrandPosition).where(
+            EmployeeBrandPosition.employee_id == subordinate_emp_id,
+            EmployeeBrandPosition.position_code == 'salesman',
+        )
+    )).scalars().all()
+    sub_brand_ids = {e.brand_id for e in sub_ebps}
+    common = mgr_brands & sub_brand_ids
+    if not common:
+        raise HTTPException(403, "该员工不是您品牌下的业务员")
+    if brand_id:
+        if brand_id not in common:
+            raise HTTPException(403, "该品牌不在您管辖范围")
+        return brand_id
+    if len(common) > 1:
+        raise HTTPException(400, "请指定 brand_id（共同品牌多个）")
+    return next(iter(common))
 
 
 @router.get("", response_model=list[TargetResponse])
@@ -143,6 +208,7 @@ async def list_targets(
     target_level: Optional[str] = Query(None),
     brand_id: Optional[str] = Query(None),
     employee_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(SalesTarget)
@@ -156,6 +222,38 @@ async def list_targets(
         stmt = stmt.where(SalesTarget.brand_id == brand_id)
     if employee_id:
         stmt = stmt.where(SalesTarget.employee_id == employee_id)
+    if status:
+        stmt = stmt.where(SalesTarget.status == status)
+
+    # 角色数据范围：
+    # - admin/boss/finance: 全看
+    # - sales_manager: 自己品牌下全部（公司层看不到）
+    # - 纯 salesman: 只看自己的 employee 级 approved 目标
+    # - 其他: 只看 approved company+brand
+    if _is_pure_salesman(user):
+        emp_id = user.get("employee_id")
+        stmt = stmt.where(
+            SalesTarget.target_level == 'employee',
+            SalesTarget.employee_id == emp_id,
+            SalesTarget.status == 'approved',
+        )
+    elif _is_sales_manager(user) and not _is_admin(user):
+        from app.models.payroll import EmployeeBrandPosition
+        mgr_brands = list((await db.execute(
+            select(EmployeeBrandPosition.brand_id).where(
+                EmployeeBrandPosition.employee_id == user.get("employee_id"),
+                EmployeeBrandPosition.position_code == 'sales_manager',
+            )
+        )).scalars().all())
+        # 自己品牌的所有目标（brand/employee 层）
+        if mgr_brands:
+            stmt = stmt.where(SalesTarget.brand_id.in_(mgr_brands))
+        else:
+            stmt = stmt.where(SalesTarget.id == None)  # 不是任何品牌经理 → 空
+    elif not _is_admin(user) and 'finance' not in _roles(user) and 'hr' not in _roles(user):
+        # 其他角色默认只看已批准目标
+        stmt = stmt.where(SalesTarget.status == 'approved')
+
     stmt = stmt.order_by(SalesTarget.target_year.desc(), SalesTarget.target_month.asc().nulls_first())
     rows = (await db.execute(stmt)).scalars().all()
     result = []
@@ -167,7 +265,27 @@ async def list_targets(
 
 @router.post("", response_model=TargetResponse, status_code=201)
 async def create_target(body: TargetCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
-    # 幂等：同一 key 已存在则更新
+    # 权限门禁
+    if _is_pure_salesman(user):
+        raise HTTPException(403, "业务员无权设定目标")
+
+    is_admin = _is_admin(user)
+    is_mgr = _is_sales_manager(user) and not is_admin
+
+    # 仅老板/管理员可下 company / brand 目标
+    if body.target_level in ('company', 'brand') and not is_admin:
+        raise HTTPException(403, "仅老板/管理员可下达公司或品牌目标")
+
+    # sales_manager 只能下 employee 级目标给自己品牌下的业务员
+    if body.target_level == 'employee' and is_mgr:
+        if not body.employee_id:
+            raise HTTPException(400, "需指定 employee_id")
+        mgr_emp_id = user.get("employee_id")
+        if not mgr_emp_id:
+            raise HTTPException(403, "当前账号未关联员工")
+        body.brand_id = await _assert_sub_in_brand(db, mgr_emp_id, body.employee_id, body.brand_id)
+
+    # 幂等
     existing = (await db.execute(
         select(SalesTarget).where(
             SalesTarget.target_level == body.target_level,
@@ -177,13 +295,35 @@ async def create_target(body: TargetCreate, user: CurrentUser, db: AsyncSession 
             SalesTarget.employee_id.is_(body.employee_id) if body.employee_id is None else SalesTarget.employee_id == body.employee_id,
         )
     )).scalar_one_or_none()
+
+    now = datetime.now(timezone.utc)
+    # 状态决策：老板下的一律 approved；业务经理下 employee 目标 → pending_approval
+    if is_admin:
+        new_status = "approved"
+        approval_fields = {"approved_by": user.get("employee_id"), "approved_at": now}
+    else:
+        new_status = "pending_approval"
+        approval_fields = {
+            "submitted_by": user.get("employee_id"),
+            "submitted_at": now,
+            "approved_by": None,
+            "approved_at": None,
+            "reject_reason": None,
+        }
+
     if existing:
+        # 已生效的目标不允许被经理覆盖；只允许自己重新提交被驳回的
+        if existing.status == 'approved' and not is_admin:
+            raise HTTPException(400, "该目标已生效，如需调整请联系老板")
         existing.receipt_target = Decimal(str(body.receipt_target))
         existing.sales_target = Decimal(str(body.sales_target))
         existing.bonus_at_100 = Decimal(str(body.bonus_at_100))
         existing.bonus_at_120 = Decimal(str(body.bonus_at_120))
         existing.bonus_metric = body.bonus_metric
         existing.notes = body.notes
+        existing.status = new_status
+        for k, v in approval_fields.items():
+            setattr(existing, k, v)
         obj = existing
     else:
         obj = SalesTarget(
@@ -200,12 +340,28 @@ async def create_target(body: TargetCreate, user: CurrentUser, db: AsyncSession 
             bonus_at_120=Decimal(str(body.bonus_at_120)),
             bonus_metric=body.bonus_metric,
             notes=body.notes,
+            status=new_status,
+            **approval_fields,
         )
         db.add(obj)
     await db.flush()
     await db.refresh(obj, ["brand", "employee"])
     await log_audit(db, action="upsert_sales_target", entity_type="SalesTarget",
                     entity_id=obj.id, user=user)
+
+    # pending 的目标推审批通知给老板，不通知员工
+    if obj.status == 'pending_approval':
+        from app.services.notification_service import notify_roles
+        period_label2 = f"{obj.target_year}-{str(obj.target_month).zfill(2)}" if obj.target_month else f"{obj.target_year}年度"
+        emp_name = obj.employee.name if obj.employee else obj.employee_id[:8] if obj.employee_id else '-'
+        await notify_roles(
+            db, role_codes=['boss', 'admin'],
+            title=f"销售目标审批：{emp_name} {period_label2}",
+            content=f"销售 ¥{float(obj.sales_target):,.0f} / 回款 ¥{float(obj.receipt_target):,.0f}，请审批。",
+            entity_type="SalesTarget", entity_id=obj.id,
+        )
+        s, rc = await _calc_actual(db, obj.target_level, obj.target_year, obj.target_month, obj.brand_id, obj.employee_id)
+        return _to_response(obj, s, rc)
 
     # 推送通知
     period_label = f"{obj.target_year}-{str(obj.target_month).zfill(2)}" if obj.target_month else f"{obj.target_year}年度"
@@ -263,6 +419,13 @@ async def update_target(target_id: str, body: TargetUpdate, user: CurrentUser, d
     obj = await db.get(SalesTarget, target_id)
     if not obj:
         raise HTTPException(404, "目标不存在")
+    # 纯业务员禁止改；sales_manager 只能改自己提交的 pending/rejected 记录
+    if _is_pure_salesman(user):
+        raise HTTPException(403, "业务员无权修改目标")
+    is_admin = _is_admin(user)
+    if not is_admin:
+        if obj.submitted_by != user.get("employee_id") or obj.status not in ('pending_approval', 'rejected'):
+            raise HTTPException(403, "已生效目标仅老板可改")
     for k, v in body.model_dump(exclude_unset=True).items():
         if v is not None and k in ("receipt_target", "sales_target"):
             setattr(obj, k, Decimal(str(v)))
@@ -279,8 +442,72 @@ async def delete_target(target_id: str, user: CurrentUser, db: AsyncSession = De
     obj = await db.get(SalesTarget, target_id)
     if not obj:
         raise HTTPException(404, "目标不存在")
+    if not _is_admin(user):
+        # 经理只能删自己提交的 pending/rejected 记录
+        if obj.submitted_by != user.get("employee_id") or obj.status not in ('pending_approval', 'rejected'):
+            raise HTTPException(403, "仅老板可删除已生效目标")
     await db.delete(obj)
     await db.flush()
+
+
+class TargetApproveRequest(BaseModel):
+    approved: bool = True
+    reject_reason: Optional[str] = None
+
+
+@router.post("/{target_id}/approve", response_model=TargetResponse)
+async def approve_target(target_id: str, body: TargetApproveRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    """老板审批业务经理提交的员工目标。"""
+    if not _is_admin(user):
+        raise HTTPException(403, "仅老板/管理员可审批目标")
+    obj = await db.get(SalesTarget, target_id)
+    if not obj:
+        raise HTTPException(404, "目标不存在")
+    if obj.status != 'pending_approval':
+        raise HTTPException(400, f"状态 {obj.status} 不能审批")
+    now = datetime.now(timezone.utc)
+    if body.approved:
+        obj.status = 'approved'
+        obj.approved_by = user.get("employee_id")
+        obj.approved_at = now
+        obj.reject_reason = None
+    else:
+        obj.status = 'rejected'
+        obj.reject_reason = body.reject_reason or '已驳回'
+    await db.flush()
+    await db.refresh(obj, ["brand", "employee"])
+    await log_audit(db, action=f"{'approve' if body.approved else 'reject'}_sales_target",
+                    entity_type="SalesTarget", entity_id=obj.id, user=user)
+
+    # 通知提交人 + 员工本人
+    from app.models.user import User
+    period_label = f"{obj.target_year}-{str(obj.target_month).zfill(2)}" if obj.target_month else f"{obj.target_year}年度"
+    emp_name = obj.employee.name if obj.employee else '-'
+    if obj.submitted_by:
+        u_mgr = (await db.execute(
+            select(User).where(User.employee_id == obj.submitted_by, User.is_active == True)
+        )).scalar_one_or_none()
+        if u_mgr:
+            await notify(
+                db, recipient_id=u_mgr.id,
+                title=f"目标{'已批准' if body.approved else '已驳回'}：{emp_name} {period_label}",
+                content=body.reject_reason if not body.approved else f"销售 ¥{float(obj.sales_target):,.0f}",
+                entity_type="SalesTarget", entity_id=obj.id,
+            )
+    if body.approved and obj.employee_id:
+        u_emp = (await db.execute(
+            select(User).where(User.employee_id == obj.employee_id, User.is_active == True)
+        )).scalar_one_or_none()
+        if u_emp:
+            await notify(
+                db, recipient_id=u_emp.id,
+                title=f"您有新的{period_label}销售目标",
+                content=f"销售 ¥{float(obj.sales_target):,.0f} / 回款 ¥{float(obj.receipt_target):,.0f}",
+                entity_type="SalesTarget", entity_id=obj.id,
+            )
+
+    s, rc = await _calc_actual(db, obj.target_level, obj.target_year, obj.target_month, obj.brand_id, obj.employee_id)
+    return _to_response(obj, s, rc)
 
 
 @router.get("/my-dashboard")
@@ -298,6 +525,7 @@ async def my_target_dashboard(
         SalesTarget.target_level == 'employee',
         SalesTarget.employee_id == emp_id,
         SalesTarget.target_year == target_year,
+        SalesTarget.status == 'approved',
     )
     if target_month is not None:
         stmt = stmt.where(SalesTarget.target_month == target_month)

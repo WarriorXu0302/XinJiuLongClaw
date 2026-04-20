@@ -35,122 +35,122 @@ import api from '../api/client';
 
 const { Header, Sider, Content } = Layout;
 
-type MenuItem = Required<MenuProps>['items'][number];
+// 扩展 MenuItem: 加 roles 字段用于权限过滤（空/undefined 视为所有角色可见）
+type MenuItem = Required<MenuProps>['items'][number] & { roles?: string[]; children?: MenuItem[] };
 
 const menuItems: MenuItem[] = [
+  { key: '/dashboard', icon: <DashboardOutlined />, label: '仪表盘' },
+  { key: '/me', icon: <SolutionOutlined />, label: '我的' },
   {
-    key: '/dashboard',
-    icon: <DashboardOutlined />,
-    label: '仪表盘',
-  },
-  {
-    key: '/me',
-    icon: <SolutionOutlined />,
-    label: '我的',
-  },
-  // ───────────────── 日常操作 ─────────────────
-  {
-    type: 'group',
-    label: '日常操作',
+    key: 'approval', icon: <CheckCircleOutlined />, label: '审批中心',
+    roles: ['admin', 'boss', 'finance', 'hr'],
     children: [
+      { key: '/approval/policy', icon: <AuditOutlined />, label: '政策审批', roles: ['admin', 'boss'] },
+      { key: '/approval/finance', icon: <DollarOutlined />, label: '综合审批' },
+    ],
+  },
+  // ─── 业务 ───
+  {
+    type: 'group', label: '业务',
+    children: [
+      { key: '/orders', icon: <ShoppingCartOutlined />, label: '订单' },
+      { key: '/customers', icon: <TeamOutlined />, label: '客户' },
+      { key: '/sales/targets', icon: <DashboardOutlined />, label: '销售目标', roles: ['admin', 'boss', 'sales_manager'] },
       {
-        key: 'approval',
-        icon: <CheckCircleOutlined />,
-        label: '审批中心',
+        key: 'policies', icon: <AuditOutlined />, label: '政策',
         children: [
-          { key: '/approval/policy', icon: <AuditOutlined />, label: '政策审批' },
-          { key: '/approval/finance', icon: <DollarOutlined />, label: '财务审批' },
-        ],
-      },
-      { key: '/orders', icon: <ShoppingCartOutlined />, label: '订单管理' },
-      { key: '/sales/targets', icon: <DashboardOutlined />, label: '销售目标' },
-      { key: '/attendance', icon: <CheckCircleOutlined />, label: '考勤打卡' },
-      { key: '/attendance/map', icon: <EnvironmentOutlined />, label: '考勤地图' },
-      {
-        key: 'policies',
-        icon: <AuditOutlined />,
-        label: '政策管理',
-        children: [
-          { key: '/policies/requests', icon: <FileTextOutlined />, label: '政策申请' },
-          { key: '/policies/fulfill', icon: <CheckCircleOutlined />, label: '兑付管理' },
-          { key: '/policies/reconcile', icon: <ReconciliationOutlined />, label: '到账对账' },
-          { key: '/policies/tasting-mgmt', icon: <SafetyOutlined />, label: '销瓶对账' },
-        ],
-      },
-      {
-        key: 'inventory',
-        icon: <DatabaseOutlined />,
-        label: '库存管理',
-        children: [
-          { key: '/inventory/query', icon: <DatabaseOutlined />, label: '库存查询' },
-          { key: '/inventory/stock-flow', icon: <SwapOutlined />, label: '出入库流水' },
-          { key: '/inventory/low-stock', icon: <BellOutlined />, label: '低库存预警' },
+          { key: '/policies/requests', icon: <FileTextOutlined />, label: '申请' },
+          { key: '/policies/fulfill', icon: <CheckCircleOutlined />, label: '兑付' },
+          { key: '/policies/reconcile', icon: <ReconciliationOutlined />, label: '到账对账', roles: ['admin', 'boss', 'finance'] },
+          { key: '/policies/tasting-mgmt', icon: <SafetyOutlined />, label: '销瓶对账', roles: ['admin', 'boss', 'finance'] },
+          { key: '/policies/dashboard', icon: <BankOutlined />, label: '政策应收', roles: ['admin', 'boss', 'finance'] },
+          { key: '/policies/templates', icon: <FileTextOutlined />, label: '模板', roles: ['admin', 'boss'] },
         ],
       },
       {
-        key: 'purchase',
-        icon: <ShopOutlined />,
-        label: '采购管理',
+        key: 'inspections', icon: <SafetyOutlined />, label: '稽查',
+        roles: ['admin', 'boss', 'finance'],
         children: [
-          { key: '/purchase/orders', icon: <ShoppingCartOutlined />, label: '采购订单' },
-          { key: '/purchase/receive', icon: <BarcodeOutlined />, label: '收货扫码' },
-        ],
-      },
-      {
-        key: 'inspections',
-        icon: <SafetyOutlined />,
-        label: '稽查管理',
-        children: [
-          { key: '/inspections/cases', icon: <SearchOutlined />, label: '稽查案件' },
+          { key: '/inspections/cases', icon: <SearchOutlined />, label: '案件' },
           { key: '/inspections/trace', icon: <BarcodeOutlined />, label: '扫码追溯' },
         ],
       },
     ],
   },
-  // ───────────────── 财务 ─────────────────
+  // ─── 仓储采购 ───
   {
-    type: 'group',
-    label: '财务',
+    type: 'group', label: '仓储采购',
+    roles: ['admin', 'boss', 'warehouse', 'purchase'],
+    children: [
+      { key: '/inventory/query', icon: <DatabaseOutlined />, label: '库存' },
+      { key: '/inventory/stock-flow', icon: <SwapOutlined />, label: '出入库流水' },
+      { key: '/inventory/low-stock', icon: <BellOutlined />, label: '低库存预警' },
+      { key: '/purchase/orders', icon: <ShoppingCartOutlined />, label: '采购订单', roles: ['admin', 'boss', 'purchase', 'finance'] },
+      { key: '/purchase/receive', icon: <BarcodeOutlined />, label: '收货扫码', roles: ['admin', 'boss', 'purchase', 'warehouse'] },
+    ],
+  },
+  // ─── 财务 ───
+  {
+    type: 'group', label: '财务',
+    roles: ['admin', 'boss', 'finance'],
     children: [
       { key: '/finance/accounts', icon: <BankOutlined />, label: '账户总览' },
       { key: '/finance/profit-ledger', icon: <AccountBookOutlined />, label: '利润台账' },
       { key: '/finance/payment-progress', icon: <DashboardOutlined />, label: '回款进度' },
       { key: '/finance/cash-flow', icon: <ReconciliationOutlined />, label: '资金往来' },
       { key: '/finance/aging', icon: <WarningOutlined />, label: '应收账龄' },
-      { key: '/finance/expenses', icon: <PayCircleOutlined />, label: '报销管理' },
-      { key: '/policies/dashboard', icon: <BankOutlined />, label: '政策应收' },
-      { key: '/finance/financing', icon: <BankOutlined />, label: '融资管理' },
+      { key: '/finance/expenses', icon: <PayCircleOutlined />, label: '报销' },
+      { key: '/finance/financing', icon: <BankOutlined />, label: '融资' },
     ],
   },
-  // ───────────────── 基础设置 ─────────────────
+  // ─── 人事 ───
   {
-    type: 'group',
-    label: '基础设置',
+    type: 'group', label: '人事',
+    roles: ['admin', 'boss', 'hr'],
     children: [
-      { key: '/customers', icon: <TeamOutlined />, label: '客户' },
+      { key: '/hr/employees', icon: <TeamOutlined />, label: '员工' },
+      { key: '/hr/salaries', icon: <AccountBookOutlined />, label: '工资', roles: ['admin', 'boss', 'hr'] },
+      { key: '/hr/salary-schemes', icon: <DollarOutlined />, label: '薪酬方案', roles: ['admin', 'boss', 'hr'] },
+      { key: '/hr/manufacturer-subsidies', icon: <BankOutlined />, label: '厂家补贴', roles: ['admin', 'boss', 'hr'] },
+      { key: '/hr/performance', icon: <DashboardOutlined />, label: '绩效', roles: ['admin', 'boss', 'hr'] },
+      { key: '/hr/kpis', icon: <DashboardOutlined />, label: 'KPI', roles: ['admin', 'boss', 'hr'] },
+      { key: '/hr/commissions', icon: <DollarOutlined />, label: '佣金', roles: ['admin', 'boss', 'hr', 'finance'] },
+      { key: '/attendance', icon: <CheckCircleOutlined />, label: '考勤' },
+      { key: '/attendance/map', icon: <EnvironmentOutlined />, label: '考勤地图', roles: ['admin', 'boss', 'hr'] },
+    ],
+  },
+  // ─── 设置 ───
+  {
+    type: 'group', label: '设置',
+    roles: ['admin', 'boss'],
+    children: [
       { key: '/products', icon: <AppstoreOutlined />, label: '商品' },
       { key: '/brands', icon: <TagsOutlined />, label: '品牌' },
       { key: '/suppliers', icon: <ShopOutlined />, label: '供应商' },
-      { key: '/policies/templates', icon: <FileTextOutlined />, label: '政策模板' },
-      {
-        key: 'hr',
-        icon: <SolutionOutlined />,
-        label: '人事',
-        children: [
-          { key: '/hr/employees', icon: <TeamOutlined />, label: '员工' },
-          { key: '/hr/users', icon: <SafetyOutlined />, label: '用户账号' },
-          { key: '/hr/performance', icon: <DashboardOutlined />, label: '绩效档案' },
-          { key: '/hr/salary-schemes', icon: <DollarOutlined />, label: '薪酬方案' },
-          { key: '/hr/salaries', icon: <AccountBookOutlined />, label: '月度工资' },
-          { key: '/hr/manufacturer-subsidies', icon: <BankOutlined />, label: '厂家工资报账' },
-          { key: '/hr/kpis', icon: <DashboardOutlined />, label: 'KPI 考核' },
-          { key: '/hr/commissions', icon: <DollarOutlined />, label: '佣金' },
-        ],
-      },
-      { key: '/audit-logs', icon: <FileSearchOutlined />, label: '审计日志' },
+      { key: '/hr/users', icon: <SafetyOutlined />, label: '用户账号' },
+      { key: '/audit-logs', icon: <FileSearchOutlined />, label: '审计日志', roles: ['admin'] },
     ],
   },
 ];
+
+function hasAccess(item: MenuItem, userRoles: string[]): boolean {
+  if (userRoles.includes('admin')) return true;
+  if (!item.roles?.length) return true;
+  return item.roles.some(r => userRoles.includes(r));
+}
+
+function filterMenu(items: MenuItem[], userRoles: string[]): MenuItem[] {
+  return items
+    .filter(it => hasAccess(it, userRoles))
+    .map(it => {
+      if (!it.children?.length) return it;
+      const kids = filterMenu(it.children, userRoles);
+      // 如果所有子菜单都被过滤掉，隐藏父节点（group 除外）
+      if (!kids.length && (it as any).type !== 'group') return null as any;
+      return { ...it, children: kids };
+    })
+    .filter(Boolean) as MenuItem[];
+}
 
 function MainLayout() {
   const [collapsed, setCollapsed] = useState(false);
@@ -182,13 +182,14 @@ function MainLayout() {
   };
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
+    <Layout style={{ height: '100vh' }}>
       <Sider
         collapsible
         collapsed={collapsed}
         onCollapse={setCollapsed}
         theme="dark"
         width={220}
+        style={{ overflow: 'auto', height: '100vh', position: 'fixed', left: 0, top: 0, bottom: 0, zIndex: 10 }}
       >
         <div style={{
           height: 48,
@@ -209,11 +210,11 @@ function MainLayout() {
           mode="inline"
           selectedKeys={[location.pathname]}
           defaultOpenKeys={defaultOpenKeys}
-          items={menuItems}
+          items={filterMenu(menuItems, roles ?? [])}
           onClick={onClick}
         />
       </Sider>
-      <Layout>
+      <Layout style={{ marginLeft: collapsed ? 80 : 220, transition: 'margin-left 0.2s' }}>
         <Header style={{
           padding: '0 24px',
           background: colorBgContainer,
@@ -240,7 +241,7 @@ function MainLayout() {
           padding: 24,
           background: colorBgContainer,
           borderRadius: borderRadiusLG,
-          minHeight: 280,
+          overflow: 'auto',
         }}>
           <Outlet />
         </Content>

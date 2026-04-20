@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import api from '../../api/client';
 import { useBrandStore } from '../../stores/brandStore';
+import { useCanSeeMasterAccount } from '../../stores/authStore';
 
 const { Title, Text } = Typography;
 
@@ -15,12 +16,13 @@ interface Summary { master_balance: number; project_total: number; grand_total: 
 interface FundFlowItem { id: string; flow_no: string; account_id: string; flow_type: string; amount: number; balance_after: number; related_type?: string; notes?: string; created_at: string; }
 interface FinancingOrder { id: string; order_no: string; brand_id: string; amount: number; interest_rate?: number; outstanding_balance: number; start_date: string; status: string; }
 
-const typeLabel: Record<string, string> = { cash: '现金', f_class: 'F类', financing: '融资' };
-const typeColor: Record<string, string> = { cash: '#52c41a', f_class: '#1890ff', financing: '#722ed1' };
+const typeLabel: Record<string, string> = { cash: '现金', f_class: 'F类', financing: '融资', payment_to_mfr: '回款账户' };
+const typeColor: Record<string, string> = { cash: '#52c41a', f_class: '#1890ff', financing: '#722ed1', payment_to_mfr: '#fa8c16' };
 const flowLabel: Record<string, string> = { credit: '收入', debit: '支出', transfer_in: '拨入', transfer_out: '拨出', financing_drawdown: '融资放款', financing_repayment: '融资还本' };
 const flowColor: Record<string, string> = { credit: 'green', debit: 'red', transfer_in: 'blue', transfer_out: 'orange', financing_drawdown: 'purple', financing_repayment: 'cyan' };
 
 function AccountOverview() {
+  const canSeeMaster = useCanSeeMasterAccount();
   const queryClient = useQueryClient();
   const [transferOpen, setTransferOpen] = useState(false);
   const [form] = Form.useForm();
@@ -166,7 +168,16 @@ function AccountOverview() {
     { title: '类型', dataIndex: 'flow_type', width: 80, render: (v: string) => <Tag color={flowColor[v] ?? 'default'}>{flowLabel[v] ?? v}</Tag> },
     { title: '金额', dataIndex: 'amount', width: 120, align: 'right' as const, render: (v: number, r) => <span style={{ color: r.flow_type === 'credit' || r.flow_type === 'transfer_in' ? '#52c41a' : '#ff4d4f', fontWeight: 600 }}>{r.flow_type === 'credit' || r.flow_type === 'transfer_in' ? '+' : '-'}¥{Number(v).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</span> },
     { title: '余额', dataIndex: 'balance_after', width: 130, align: 'right' as const, render: (v: number) => `¥${Number(v).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}` },
-    { title: '关联', dataIndex: 'related_type', width: 110 },
+    { title: '关联', dataIndex: 'related_type', width: 110, render: (v?: string) => {
+      const map: Record<string, string> = {
+        receipt: '客户收款', salary_payment: '工资发放', inspection_payment: '稽查回收',
+        inspection_penalty: '稽查罚款', inspection_income: '稽查回售', advance_refund: '垫付返还',
+        f_class_arrival: 'F类到账', manufacturer_salary_arrival: '工资补贴到账',
+        manufacturer_salary_reimburse: '补贴报账', transfer_in: '调拨入', transfer_out: '调拨出',
+        transfer_pending: '待审拨款', expense_payment: '报销付款', purchase_payment: '采购付款',
+      };
+      return map[v ?? ''] ?? v ?? '-';
+    }},
     { title: '备注', dataIndex: 'notes', ellipsis: true },
     { title: '流水号', dataIndex: 'flow_no', width: 170 },
   ];
@@ -178,19 +189,23 @@ function AccountOverview() {
         <Button type="primary" icon={<SwapOutlined />} onClick={() => setTransferOpen(true)}>申请拨款</Button>
       </Space>
 
-      {/* 总资金池 */}
+      {/* 总资金池（仅 admin/boss 可见） */}
       <Card style={{ marginBottom: 16, background: '#f0f5ff', borderColor: '#adc6ff' }}>
         <Row gutter={16} align="middle">
-          <Col span={6}>
-            <Statistic title="公司总资金池" value={summary?.master_balance ?? 0} precision={2} prefix="¥" styles={{ content: { color: '#1890ff', fontSize: 28 } }} />
-          </Col>
-          <Col span={6}>
+          {canSeeMaster && (
+            <Col span={6}>
+              <Statistic title="公司总资金池" value={summary?.master_balance ?? 0} precision={2} prefix="¥" styles={{ content: { color: '#1890ff', fontSize: 28 } }} />
+            </Col>
+          )}
+          <Col span={canSeeMaster ? 6 : 8}>
             <Statistic title="品牌资产合计" value={summary?.project_total ?? 0} precision={2} prefix="¥" styles={{ content: { fontSize: 20 } }} />
           </Col>
-          <Col span={6}>
-            <Statistic title="系统总资产" value={summary?.grand_total ?? 0} precision={2} prefix="¥" styles={{ content: { color: '#52c41a', fontSize: 20 } }} />
-          </Col>
-          <Col span={6}>
+          {canSeeMaster && (
+            <Col span={6}>
+              <Statistic title="系统总资产" value={summary?.grand_total ?? 0} precision={2} prefix="¥" styles={{ content: { color: '#52c41a', fontSize: 20 } }} />
+            </Col>
+          )}
+          <Col span={canSeeMaster ? 6 : 8}>
             <Statistic title="融资负债合计" value={brandGroups.reduce((s, g) => s + g.financing_balance, 0)} precision={2} prefix="¥" styles={{ content: { color: '#ff4d4f', fontSize: 20 } }} />
           </Col>
         </Row>
@@ -255,7 +270,7 @@ function AccountOverview() {
           )}
           <Form.Item name="to_account_id" label="目标账户" rules={[{ required: true }]}>
             <Select showSearch optionFilterProp="label"
-              options={projectAccounts.filter(a => a.account_type !== 'f_class').map(a => ({
+              options={projectAccounts.filter(a => a.account_type === 'cash' || a.account_type === 'financing').map(a => ({
                 value: a.id,
                 label: `${a.brand_name ?? ''} ${a.name}（${typeLabel[a.account_type]}${a.account_type === 'financing' ? ' - 还款' : ''}）`,
               }))} />

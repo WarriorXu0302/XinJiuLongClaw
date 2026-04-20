@@ -103,10 +103,9 @@ def create_app() -> FastAPI:
     app.include_router(attendance.router, prefix="/api/attendance", tags=["Attendance"])
     app.include_router(performance.router, prefix="/api/performance", tags=["Performance"])
 
-    # MCP tools for openclaw
-    from app.mcp.tools import router as mcp_router
-
-    app.include_router(mcp_router, prefix="/mcp", tags=["MCP Tools"])
+    # MCP tools — AI Agent 工具集（JWT + 飞书双认证）
+    from app.mcp import mcp_router
+    app.include_router(mcp_router, prefix="/mcp")
 
     return app
 

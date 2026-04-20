@@ -2,16 +2,27 @@
 
 面向多品牌白酒经销业务的企业管理系统。一个公司下多个品牌事业部（青花郎 / 五粮液 / 汾酒 / 珍十五 …）独立核算，统一管理。
 
+## 系统规模
+
+| 指标 | 数量 |
+|---|---|
+| API 端点 | 267 |
+| 数据库表 | 61 |
+| 前端页面 | 60 |
+| 用户角色 | 9 |
+| RLS 保护表 | 14 |
+| 利润台账科目 | 11 |
+
 ## 功能模块
 
-- **销售订单** — 下单、政策匹配、出库、回款、利润计算
-- **政策管理** — 政策模板、客户申请、厂家审批、到账对账、理赔结算
-- **库存管理** — 主仓/备用仓/门店仓、条码追溯、FIFO 成本分配
-- **财务** — 多账户体系（总资金池 / 品牌现金 / F类 / 融资）、资金调拨、报销、利润台账
-- **采购** — 采购单、审批、到货扫码
-- **人事 / 薪资** — 员工、品牌岗位、薪酬方案、月度工资、考勤、KPI、厂家工资补贴
-- **稽查** — 窜货案件、市场清理、盈亏核算
-- **权限** — JWT + RBAC + 品牌数据范围隔离
+- **销售** — 订单（指导价强制从政策模板取）、客户、销售目标（三级：公司/品牌/员工，含审批流）
+- **政策** — 政策模板、申请、兑付、到账对账（Excel 两轮匹配）、政策应收
+- **仓储** — 库存双轨制（数量账 + 条码追溯）、出入库流水、低库存预警、采购订单、收货扫码
+- **稽查** — 五种案件类型（A1-A3 外流 / B1-B2 流入）、盈亏自动核算、品牌现金账户扣款
+- **财务** — 账户总览、利润台账（11 科目按品牌独立核算）、回款进度、资金往来、报销、融资
+- **人事** — 员工、薪酬方案（品牌×岗位底薪模板）、月度工资（自动计算+审批流）、厂家补贴、KPI、佣金、考勤打卡
+- **审批中心** — 政策审批、确认收款、请假审批、销售目标审批、工资审批、垫付返还、采购审批、拨款审批、融资还款、稽查案件
+- **权限** — PostgreSQL RLS 行级安全（14 张表）+ JWT RBAC + 菜单角色过滤
 
 ## 资金流规则
 
@@ -19,67 +30,98 @@
 客户回款           → master 现金（公司总资金池）
 政策 / F类到账     → 品牌 F类账户
 工资补贴到账       → 品牌现金账户
-付款 / 工资发放    → 品牌现金账户（余额不足走资金调拨）
+付款 / 工资 / 稽查  → 品牌现金账户（余额不足提示调拨）
+资金调拨           → master → 品牌现金/融资（需老板审批）
 ```
+
+### 三种结算模式
+
+| 模式 | 公司应收 | 提成基数 | 全款触发 |
+|---|---|---|---|
+| customer_pay（客户按指导价付） | 指导价全额 | 指导价全额 | 客户付齐 |
+| employee_pay（业务员垫差价） | 指导价全额 | 指导价全额 | 客户 + 业务员凑齐 |
+| company_pay（公司垫差价） | 客户到手价 | 客户到手价 | 客户付到手价即可 |
 
 ## 技术栈
 
-- **后端**：FastAPI · SQLAlchemy 2.0 async · Pydantic v2 · Alembic
-- **前端**：React 19 · TypeScript · Vite · Ant Design v6 · TanStack React Query · Zustand
-- **基建**：PostgreSQL 16 · Redis 7 · Docker
+| 层 | 技术 |
+|---|---|
+| 后端 | FastAPI · SQLAlchemy 2.0 async · Pydantic v2 · Alembic |
+| 前端 | React 19 · TypeScript 6 · Vite 8 · Ant Design v6 · React Query · Zustand |
+| 数据库 | PostgreSQL 16（RLS 行级安全）· Redis 7 |
+| 部署 | Docker Compose |
+
+## 安全设计
+
+- **数据库层**：PostgreSQL RLS 14 张表强制品牌隔离，防 Agent/prompt 注入绕过
+- **双引擎连接**：`erp_app`（受限，业务请求用）+ `erpuser`（管理员，迁移/seed 用）
+- **JWT**：access + refresh token，载荷含 roles / brand_ids / is_admin / can_see_master
+- **应用层**：require_role / can_see_salary / can_see_master 等 helpers
+- **前端**：菜单按角色过滤 + AuthGuard 路由守卫
 
 ## 本地开发
 
-### 准备基础设施
+### 基础设施
 
 ```bash
 docker-compose up -d          # PostgreSQL(5433) + Redis(6379)
 ```
 
-### 后端（`backend/`）
+### 后端
 
 ```bash
+cd backend
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-alembic upgrade head                   # 应用数据库迁移
-python -m app.scripts.seed             # 初始化角色/员工/品牌/商品/客户
+cp .env.example .env
+alembic upgrade head
+python -m app.scripts.seed
 uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
 API 文档：http://localhost:8001/docs
 
-### 前端（`frontend/`）
+### 前端
 
 ```bash
+cd frontend
 npm install
-npm run dev                            # http://localhost:5173
+npm run dev    # http://localhost:5173（代理 /api → localhost:8001）
 ```
-
-> 前端 Vite 代理 `/api` 和 `/mcp` 指向 `localhost:8001`。
 
 ### 默认账号
 
-| 用户名 | 密码 | 角色 |
-|---|---|---|
-| admin | admin123 | 超级管理员 |
-| boss | boss123 | 老板 |
-| finance | finance123 | 财务 |
-| salesman | sales123 | 业务员 |
-| warehouse | wh123 | 库管 |
+| 用户名 | 密码 | 角色 | 可见范围 |
+|---|---|---|---|
+| admin | admin123 | 超级管理员 | 全系统 |
+| boss | boss123 | 老板 | 全系统 + 审批 |
+| finance | finance123 | 财务 | 全品牌，看不到总资金池和工资 |
+| salesman | salesman123 | 业务员 | 只看自己 |
+| warehouse | wh123 | 库管 | 授权仓库 |
 
 ## 核心实体关系
 
 ```
-Brand ── BrandSalaryScheme ── EmployeeBrandPosition ── Employee
-         (品牌×岗位底薪模板)    (员工兼职多品牌)
+Brand（品牌/事业部）
+  ├── Account（现金 / F类 / 融资 / 回款）
+  ├── BrandSalaryScheme（底薪模板 × 岗位）
+  ├── Warehouse（主仓 / 备用 / 品鉴 / 零售 / 批发）
+  └── Product（SKU）
 
-Order ── OrderItem ── StockOutAllocation ── InventoryBarcode
-  │
-  ├── PolicyTemplate（指导价 + 客户到手价）
-  ├── PolicyRequest ── PolicyRequestItem ── PolicyClaim
-  └── Receipt ── Account(master cash)
+Employee ── EmployeeBrandPosition（多品牌兼职，主属品牌决定底薪）
 
-SalaryRecord ── SalaryOrderLink
-           └── ManufacturerSalarySubsidy
+Order（单价=政策模板指导价）
+  ├── OrderItem
+  ├── PolicyRequest → PolicyRequestItem → PolicyClaim
+  ├── Receipt（凭证+金额，进 master）
+  └── StockOutAllocation（FIFO 成本溯源）
+
+SalaryRecord（draft→pending_approval→approved→paid）
+  ├── SalaryOrderLink（提成订单明细）
+  └── ManufacturerSalarySubsidy（pending→advanced→reimbursed）
+
+SalesTarget（approved/pending_approval/rejected）
+  └── 三级：company → brand → employee
 ```
 
 ## 项目结构
@@ -87,36 +129,38 @@ SalaryRecord ── SalaryOrderLink
 ```
 backend/
 ├── app/
-│   ├── api/routes/       # FastAPI 路由 (~22 个业务模块)
-│   ├── models/           # SQLAlchemy 模型
-│   ├── schemas/          # Pydantic 请求/响应
-│   ├── services/         # 业务服务（审计、通知、政策结算）
-│   ├── core/             # 配置、数据库、安全、权限
-│   └── scripts/          # 种子数据、运维脚本
-├── migrations/           # Alembic 迁移
-└── uploads/              # 文件上传目录（.gitignore）
+│   ├── main.py               # FastAPI 入口 + 路由注册
+│   ├── api/routes/            # 24 个路由模块（267 端点）
+│   ├── models/                # 61 张表 SQLAlchemy 模型
+│   ├── schemas/               # Pydantic 请求/响应
+│   ├── services/              # 审计、通知、政策结算
+│   ├── core/
+│   │   ├── database.py        # 双引擎 + RLS 上下文注入
+│   │   ├── security.py        # JWT + CurrentUser
+│   │   └── permissions.py     # 角色判断 + 数据范围
+│   └── scripts/seed.py        # 种子数据
+├── migrations/                # Alembic（含 RLS policy 迁移）
+└── uploads/                   # 文件上传（.gitignore）
 
-frontend/
-└── src/
-    ├── pages/            # 业务页面（orders/policies/finance/hr/…）
-    ├── layouts/          # 布局与路由守卫
-    ├── router/           # 路由注册
-    ├── stores/           # Zustand 状态（auth、brandFilter）
-    ├── api/client.ts     # Axios 实例（自动注入 JWT）
-    └── utils/            # 工具函数
+frontend/src/
+├── api/client.ts              # Axios（JWT 自动注入 + 401 跳转）
+├── stores/                    # authStore（权限 hooks）/ brandStore
+├── layouts/                   # MainLayout（固定侧栏+角色菜单）/ AuthGuard
+├── router/index.tsx           # 60 个路由
+└── pages/                     # 15 个业务目录
+    ├── orders/    (4)     ├── finance/     (11)
+    ├── hr/        (9)     ├── policies/    (8)
+    ├── inventory/ (7)     ├── approval/    (2)
+    ├── attendance/(2)     ├── customers/   (2)
+    ├── inspections/(2)    ├── purchase/    (2)
+    └── ...
 ```
 
-## 业务约定
+## 文档
 
-- **订单单价**：按政策模板 `required_unit_price`（指导价），不允许业务员手工填写
-- **客户到手价**：按政策模板 `customer_unit_price`，可在订单上微调
-- **结算模式**：
-  - `customer_pay` — 客户按指导价结账（业务员赚政策差）
-  - `employee_pay` — 业务员垫付差额（政策到账后返还给业务员）
-  - `company_pay` — 公司垫付差额（政策到账留公司毛利）
-- **提成基数**：
-  - `customer_pay` / `employee_pay` → 按指导价
-  - `company_pay` → 按客户到手价
+- [系统架构书](docs/系统架构书.md) — 业务模块、资金流、权限体系、审批中心、薪资、利润台账
+- [数据库文档](docs/数据库文档.md) — 61 张表字段说明、RLS 策略、索引
+- [开发文档](docs/开发文档.md) — API 端点清单、开发规范、新功能开发流程
 
 ## 授权
 

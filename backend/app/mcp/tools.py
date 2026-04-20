@@ -630,45 +630,52 @@ async def create_order_from_text(
     customer_name: str | None = None
     total = Decimal("0.00")
 
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        # Try pattern: name product qty price
-        parts = re.split(r"\s+", line)
-        if len(parts) >= 4:
-            if customer_name is None:
-                customer_name = parts[0]
-            product_name = parts[1]
-            qty_str = re.sub(r"[箱瓶件]", "", parts[2])
-            try:
-                qty = int(qty_str)
-            except ValueError:
-                qty = 1
-            try:
-                price = float(parts[3])
-            except ValueError:
-                price = 0.0
-            parsed_items.append(
-                ParsedOrderItem(product_name=product_name, quantity=qty, unit_price=price)
-            )
-            total += Decimal(str(price)) * qty
-        elif len(parts) >= 3:
-            # product qty price (no customer name)
-            product_name = parts[0]
-            qty_str = re.sub(r"[箱瓶件]", "", parts[1])
-            try:
-                qty = int(qty_str)
-            except ValueError:
-                qty = 1
-            try:
-                price = float(parts[2])
-            except ValueError:
-                price = 0.0
-            parsed_items.append(
-                ParsedOrderItem(product_name=product_name, quantity=qty, unit_price=price)
-            )
-            total += Decimal(str(price)) * qty
+    # 先尝试从文本中提取客户名、商品、数量
+    # 支持多种自然语言格式：
+    #   "张三 青花郎 10箱 885"（严格格式）
+    #   "王永 买 5箱 青花郎"
+    #   "青花郎 5箱"
+    #   "给张三下单 青花郎53度500ml 10箱"
+    full_text = " ".join(lines)
+
+    # 提取数量（数字+箱/瓶/件）
+    qty_match = re.search(r"(\d+)\s*[箱瓶件]", full_text)
+    qty = int(qty_match.group(1)) if qty_match else 1
+
+    # 提取商品名（匹配数据库中的产品）
+    all_products = (await db.execute(select(Product))).scalars().all()
+    matched_product = None
+    for p in all_products:
+        if p.name and p.name in full_text:
+            matched_product = p
+            break
+        if p.code and p.code in full_text:
+            matched_product = p
+            break
+    # 模糊匹配：品牌名
+    if not matched_product:
+        for p in all_products:
+            brand_keywords = ['青花郎', '五粮液', '汾酒', '珍十五']
+            for kw in brand_keywords:
+                if kw in full_text and p.name and kw in p.name:
+                    matched_product = p
+                    break
+            if matched_product:
+                break
+
+    if matched_product:
+        price = float(matched_product.sale_price or 0)
+        parsed_items.append(
+            ParsedOrderItem(product_name=matched_product.name, quantity=qty, unit_price=price)
+        )
+        total += Decimal(str(price)) * qty
+
+    # 提取客户名（排除商品名和数量后的中文词）
+    all_customers = (await db.execute(select(Customer).limit(100))).scalars().all()
+    for c in all_customers:
+        if c.name and c.name in full_text:
+            customer_name = c.name
+            break
 
     if not parsed_items:
         return CreateOrderFromTextResponse(

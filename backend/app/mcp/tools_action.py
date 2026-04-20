@@ -231,16 +231,27 @@ async def mcp_create_leave(body: MCPCreateLeaveRequest, db: AsyncSession = Depen
         if not emp_id:
             raise HTTPException(400, "当前用户未绑定员工档案")
         body.employee_id = emp_id
+    # 校验员工存在
+    from app.models.user import Employee
+    emp = await db.get(Employee, body.employee_id)
+    if not emp:
+        raise HTTPException(400, f"员工 {body.employee_id} 不存在")
+    # 日期解析
+    try:
+        start = date.fromisoformat(body.start_date)
+        end = date.fromisoformat(body.end_date)
+    except ValueError:
+        raise HTTPException(400, f"日期格式错误，需要 YYYY-MM-DD，收到 {body.start_date} / {body.end_date}")
     ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     obj = LeaveRequest(
         id=str(uuid.uuid4()), request_no=f"LV-{ts}-{uuid.uuid4().hex[:6]}",
         employee_id=body.employee_id, leave_type=body.leave_type,
-        start_date=date.fromisoformat(body.start_date), end_date=date.fromisoformat(body.end_date),
+        start_date=start, end_date=end,
         total_days=Decimal(str(body.total_days)), reason=body.reason, status="pending",
     )
     db.add(obj)
     await db.flush()
-    return {"request_no": obj.request_no, "status": "pending"}
+    return {"request_no": obj.request_no, "employee": emp.name, "status": "pending"}
 
 
 # ═══════════════════════════════════════════════════════════════════

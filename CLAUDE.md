@@ -4,7 +4,34 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-NewERP System (新鑫久隆 ERP) — a full-stack ERP application for managing orders, inventory, policies (rebates/claims), finance, HR, purchasing, and inspections. FastAPI backend + React/TypeScript frontend.
+NewERP System (新鑫久隆 ERP) — 多品牌白酒经销 ERP。一个公司下多个品牌事业部（青花郎/五粮液/汾酒/珍十五）独立核算。FastAPI + React/TypeScript。
+
+### 新 Agent 上手必读
+
+**先读这 4 份文档再动手写代码：**
+- `docs/系统架构书.md` — 全系统业务模块 + 资金流 + 权限 + 审批 + 薪资 + 利润台账
+- `docs/数据库文档.md` — 61 张表字段说明 + RLS 策略
+- `docs/开发文档.md` — 267 个 API 端点 + 开发规范 + 新功能开发流程
+- `docs/MCP工具文档.md` — 28 个 AI Agent 工具 + 双认证
+
+### 核心业务规则（速查）
+
+**资金流**：客户回款 → master 现金池；政策/F类到账 → 品牌 F 类账户；工资补贴到账 → 品牌现金；所有付款 → 品牌现金（不够走调拨）。
+
+**三种结算模式**：
+- `customer_pay`：客户按指导价全额付 → 公司应收 = 指导价 → 提成按指导价
+- `employee_pay`：客户付到手价 + 业务员补差额 → 公司应收 = 指导价 → 提成按指导价
+- `company_pay`：客户只付到手价 → 公司应收 = 到手价 → 提成按到手价
+
+**订单闭环**：建单 → 政策审批 → 出库 → 送达 → 上传凭证（每笔建 Receipt + 进 master + 更新 payment_status）→ 全款锁定 → 审批中心确认收款 → completed → 解锁政策兑付
+
+**权限**：PostgreSQL RLS 14 张表强制品牌隔离。双引擎：erp_app（受限）/ erpuser（管理员）。每次 API 请求 SET LOCAL 注入 brand_ids/is_admin 到 PG session。
+
+**薪资**：底薪从 BrandSalaryScheme（品牌×岗位）取。厂家补贴不进工资条（独立走政策应收）。工资审批流：draft → pending_approval → approved → paid。
+
+**稽查**：A1 亏损 = -(回收价 - 到手价) × 瓶数。扣款从品牌现金账户。只有已执行案件才进利润台账。
+
+**利润台账**：11 个科目覆盖销售利润 / 政策盈亏 / 稽查盈亏 / 报销 / 融资利息 / 人力成本。按品牌独立核算。
 
 ## Development Commands
 

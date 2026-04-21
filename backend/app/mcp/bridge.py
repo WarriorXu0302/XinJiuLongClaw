@@ -125,13 +125,26 @@ async def _list_tools() -> list[types.Tool]:
         },
     ))
 
-    # ERP 业务工具
+    # ERP 业务工具——从 FastAPI openapi schema 动态提取参数定义
+    openapi_schemas = _get_tool_schemas()
+
     for t in visible:
+        props: dict[str, Any] = {"_open_id": open_id_prop}
+        required = ["_open_id"]
+
+        # 合并 FastAPI 端点的 body schema
+        tool_schema = openapi_schemas.get(t["name"])
+        if tool_schema and "properties" in tool_schema:
+            for k, v in tool_schema["properties"].items():
+                props[k] = v
+            for r in tool_schema.get("required", []):
+                if r not in required:
+                    required.append(r)
+
         schema: dict[str, Any] = {
             "type": "object",
-            "properties": {"_open_id": open_id_prop},
-            "required": ["_open_id"],
-            "additionalProperties": True,
+            "properties": props,
+            "required": required,
         }
         tools.append(types.Tool(
             name=t["name"],
@@ -139,6 +152,38 @@ async def _list_tools() -> list[types.Tool]:
             inputSchema=schema,
         ))
     return tools
+
+
+def _get_tool_schemas() -> dict[str, dict[str, Any]]:
+    """从 FastAPI app 的 openapi schema 提取每个 MCP 工具的 request body 定义。"""
+    try:
+        from app.main import app as _app
+        spec = _app.openapi()
+        schemas = spec.get("components", {}).get("schemas", {})
+        result: dict[str, dict[str, Any]] = {}
+
+        for path, methods in spec.get("paths", {}).items():
+            if not path.startswith("/mcp/"):
+                continue
+            tool_name = path.replace("/mcp/", "")
+            post = methods.get("post", {})
+            body_ref = (post.get("requestBody", {}).get("content", {})
+                       .get("application/json", {}).get("schema", {}))
+
+            # 解引用 $ref
+            ref = body_ref.get("$ref", "")
+            if ref:
+                schema_name = ref.split("/")[-1]
+                resolved = schemas.get(schema_name, {})
+            else:
+                resolved = body_ref
+
+            if resolved and "properties" in resolved:
+                result[tool_name] = resolved
+        return result
+    except Exception as e:
+        log.warning("Failed to extract openapi schemas for MCP tools: %s", e)
+        return {}
 
 
 async def _handle_bind(loopback: str, arguments: dict[str, Any]) -> list[types.Content]:

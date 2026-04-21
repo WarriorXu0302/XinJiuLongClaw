@@ -307,3 +307,165 @@ async def mcp_generate_subsidy(body: MCPGenerateSubsidyRequest, db: AsyncSession
         created += 1
     await db.flush()
     return {"created": created, "skipped": skipped, "period": body.period}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 17. 创建员工
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPCreateEmployeeRequest(BaseModel):
+    employee_no: str
+    name: str
+    position: Optional[str] = None
+    phone: Optional[str] = None
+    hire_date: Optional[str] = None  # YYYY-MM-DD
+    social_security: float = 0
+    company_social_security: float = 0
+    expected_manufacturer_subsidy: float = 0
+
+
+@router.post("/create-employee")
+async def mcp_create_employee(body: MCPCreateEmployeeRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 创建员工档案。需要 admin/boss/hr 权限。"""
+    from app.models.user import Employee
+    from datetime import date
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "hr")
+    # 检查工号唯一
+    existing = (await db.execute(select(Employee).where(Employee.employee_no == body.employee_no))).scalar_one_or_none()
+    if existing:
+        raise HTTPException(400, f"工号 {body.employee_no} 已存在（{existing.name}）")
+    emp = Employee(
+        id=str(uuid.uuid4()), employee_no=body.employee_no, name=body.name,
+        position=body.position, phone=body.phone,
+        hire_date=date.fromisoformat(body.hire_date) if body.hire_date else None,
+        social_security=Decimal(str(body.social_security)),
+        company_social_security=Decimal(str(body.company_social_security)),
+        expected_manufacturer_subsidy=Decimal(str(body.expected_manufacturer_subsidy)),
+    )
+    db.add(emp)
+    await db.flush()
+    await log_audit(db, action="create_employee", entity_type="Employee", entity_id=emp.id, user=user)
+    return {"employee_id": emp.id, "employee_no": emp.employee_no, "name": emp.name}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 18. 查询员工列表
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPQueryEmployeesRequest(BaseModel):
+    keyword: Optional[str] = None
+    status: Optional[str] = None
+    brand_id: Optional[str] = None
+    limit: int = 50
+
+
+@router.post("/query-employees")
+async def mcp_query_employees(body: MCPQueryEmployeesRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 查询员工列表。"""
+    from app.models.user import Employee
+    from app.models.payroll import EmployeeBrandPosition
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "hr", "finance", "sales_manager")
+    stmt = select(Employee)
+    if body.keyword:
+        kw = f"%{body.keyword}%"
+        stmt = stmt.where(Employee.name.ilike(kw) | Employee.employee_no.ilike(kw))
+    if body.status:
+        stmt = stmt.where(Employee.status == body.status)
+    if body.brand_id:
+        stmt = stmt.join(EmployeeBrandPosition, Employee.id == EmployeeBrandPosition.employee_id).where(EmployeeBrandPosition.brand_id == body.brand_id)
+    stmt = stmt.order_by(Employee.employee_no).limit(body.limit)
+    rows = (await db.execute(stmt)).scalars().all()
+    return [{
+        "id": e.id, "employee_no": e.employee_no, "name": e.name,
+        "position": e.position, "phone": e.phone, "status": e.status,
+    } for e in rows]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 19. 绑定员工品牌岗位
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPBindBrandPositionRequest(BaseModel):
+    employee_id: str
+    brand_id: str
+    position_code: str
+    commission_rate: Optional[float] = None
+    manufacturer_subsidy: float = 0
+    is_primary: bool = False
+
+
+@router.post("/bind-employee-brand")
+async def mcp_bind_brand(body: MCPBindBrandPositionRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 绑定员工到品牌×岗位。"""
+    from app.models.payroll import EmployeeBrandPosition
+    from app.models.user import Employee
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "hr")
+    emp = await db.get(Employee, body.employee_id)
+    if not emp:
+        raise HTTPException(404, f"员工 {body.employee_id} 不存在")
+    existing = (await db.execute(
+        select(EmployeeBrandPosition).where(
+            EmployeeBrandPosition.employee_id == body.employee_id,
+            EmployeeBrandPosition.brand_id == body.brand_id,
+        )
+    )).scalar_one_or_none()
+    if existing:
+        raise HTTPException(400, f"员工 {emp.name} 已绑定此品牌")
+    if body.is_primary:
+        others = (await db.execute(
+            select(EmployeeBrandPosition).where(
+                EmployeeBrandPosition.employee_id == body.employee_id,
+                EmployeeBrandPosition.is_primary == True,
+            )
+        )).scalars().all()
+        for o in others:
+            o.is_primary = False
+    ebp = EmployeeBrandPosition(
+        id=str(uuid.uuid4()), employee_id=body.employee_id,
+        brand_id=body.brand_id, position_code=body.position_code,
+        commission_rate=Decimal(str(body.commission_rate)) if body.commission_rate is not None else None,
+        manufacturer_subsidy=Decimal(str(body.manufacturer_subsidy)),
+        is_primary=body.is_primary,
+    )
+    db.add(ebp)
+    await db.flush()
+    return {"id": ebp.id, "employee": emp.name, "brand_id": body.brand_id, "position": body.position_code, "is_primary": body.is_primary}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 20. 创建用户账号
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPCreateUserRequest(BaseModel):
+    username: str
+    password: str
+    employee_id: Optional[str] = None
+    role_codes: list[str] = []
+
+
+@router.post("/create-user")
+async def mcp_create_user(body: MCPCreateUserRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 创建登录账号并分配角色。需要 admin/boss 权限。"""
+    from app.models.user import User, UserRole, Role
+    from app.core.security import get_password_hash
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss")
+    existing = (await db.execute(select(User).where(User.username == body.username))).scalar_one_or_none()
+    if existing:
+        raise HTTPException(400, f"用户名 '{body.username}' 已存在")
+    new_user = User(
+        id=str(uuid.uuid4()), username=body.username,
+        hashed_password=get_password_hash(body.password),
+        employee_id=body.employee_id,
+    )
+    db.add(new_user)
+    await db.flush()
+    if body.role_codes:
+        roles = (await db.execute(select(Role).where(Role.code.in_(body.role_codes)))).scalars().all()
+        for r in roles:
+            db.add(UserRole(id=str(uuid.uuid4()), user_id=new_user.id, role_id=r.id))
+        await db.flush()
+    return {"user_id": new_user.id, "username": new_user.username, "roles": body.role_codes}

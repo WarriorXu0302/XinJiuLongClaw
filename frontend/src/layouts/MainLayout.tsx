@@ -60,7 +60,7 @@ const menuItems: MenuItem[] = [
         key: 'policies', icon: <AuditOutlined />, label: '政策',
         children: [
           { key: '/policies/requests', icon: <FileTextOutlined />, label: '申请' },
-          { key: '/policies/fulfill', icon: <CheckCircleOutlined />, label: '兑付' },
+          { key: '/policies/fulfill', icon: <CheckCircleOutlined />, label: '兑付', roles: ['admin', 'boss', 'finance'] },
           { key: '/policies/reconcile', icon: <ReconciliationOutlined />, label: '到账对账', roles: ['admin', 'boss', 'finance'] },
           { key: '/policies/tasting-mgmt', icon: <SafetyOutlined />, label: '销瓶对账', roles: ['admin', 'boss', 'finance'] },
           { key: '/policies/dashboard', icon: <BankOutlined />, label: '政策应收', roles: ['admin', 'boss', 'finance'] },
@@ -80,12 +80,12 @@ const menuItems: MenuItem[] = [
   // ─── 仓储采购 ───
   {
     type: 'group', label: '仓储采购',
-    roles: ['admin', 'boss', 'warehouse', 'purchase'],
+    roles: ['admin', 'boss', 'warehouse', 'purchase', 'sales_manager'],
     children: [
       { key: '/inventory/query', icon: <DatabaseOutlined />, label: '库存' },
       { key: '/inventory/stock-flow', icon: <SwapOutlined />, label: '出入库流水' },
       { key: '/inventory/low-stock', icon: <BellOutlined />, label: '低库存预警' },
-      { key: '/purchase/orders', icon: <ShoppingCartOutlined />, label: '采购订单', roles: ['admin', 'boss', 'purchase', 'finance'] },
+      { key: '/purchase/orders', icon: <ShoppingCartOutlined />, label: '采购订单', roles: ['admin', 'boss', 'purchase', 'warehouse', 'finance'] },
       { key: '/purchase/receive', icon: <BarcodeOutlined />, label: '收货扫码', roles: ['admin', 'boss', 'purchase', 'warehouse'] },
     ],
   },
@@ -106,12 +106,12 @@ const menuItems: MenuItem[] = [
   // ─── 人事 ───
   {
     type: 'group', label: '人事',
-    roles: ['admin', 'boss', 'hr'],
+    roles: ['admin', 'boss', 'hr', 'finance'],
     children: [
-      { key: '/hr/employees', icon: <TeamOutlined />, label: '员工' },
-      { key: '/hr/salaries', icon: <AccountBookOutlined />, label: '工资', roles: ['admin', 'boss', 'hr'] },
+      { key: '/hr/employees', icon: <TeamOutlined />, label: '员工', roles: ['admin', 'boss', 'hr'] },
+      { key: '/hr/salaries', icon: <AccountBookOutlined />, label: '工资', roles: ['admin', 'boss', 'hr', 'finance'] },
       { key: '/hr/salary-schemes', icon: <DollarOutlined />, label: '薪酬方案', roles: ['admin', 'boss', 'hr'] },
-      { key: '/hr/manufacturer-subsidies', icon: <BankOutlined />, label: '厂家补贴', roles: ['admin', 'boss', 'hr'] },
+      { key: '/hr/manufacturer-subsidies', icon: <BankOutlined />, label: '厂家补贴', roles: ['admin', 'boss', 'hr', 'finance'] },
       { key: '/hr/performance', icon: <DashboardOutlined />, label: '绩效', roles: ['admin', 'boss', 'hr'] },
       { key: '/hr/kpis', icon: <DashboardOutlined />, label: 'KPI', roles: ['admin', 'boss', 'hr'] },
       { key: '/hr/commissions', icon: <DollarOutlined />, label: '佣金', roles: ['admin', 'boss', 'hr', 'finance'] },

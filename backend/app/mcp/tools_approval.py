@@ -16,6 +16,55 @@ router = APIRouter()
 
 
 # ═══════════════════════════════════════════════════════════════════
+# 28. 订单审批（pending → approved，一步完成提交+审批）
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPApproveOrderRequest(BaseModel):
+    order_no: str
+    action: str = "approve"  # approve / reject
+    reject_reason: Optional[str] = None
+    need_external: bool = False
+
+
+@router.post("/approve-order")
+async def mcp_approve_order(body: MCPApproveOrderRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 审批订单。pending 自动先提交再审批；policy_pending_internal 直接审批。"""
+    from app.models.order import Order
+    from app.models.base import OrderStatus
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, 'boss')
+
+    order = (await db.execute(select(Order).where(Order.order_no == body.order_no))).scalar_one_or_none()
+    if not order:
+        raise HTTPException(404, f"订单 {body.order_no} 不存在")
+
+    if body.action == "reject":
+        if order.status not in (OrderStatus.PENDING, OrderStatus.POLICY_PENDING_INTERNAL, OrderStatus.POLICY_PENDING_EXTERNAL):
+            raise HTTPException(400, f"订单状态为 {order.status}，无法驳回")
+        order.status = OrderStatus.REJECTED
+        order.notes = (order.notes or "") + f"\n驳回: {body.reject_reason or '已驳回'}"
+        await db.flush()
+        await log_audit(db, action="reject_order", entity_type="Order", entity_id=order.id, user=user)
+        return {"order_no": order.order_no, "status": order.status}
+
+    # approve flow
+    if order.status == OrderStatus.PENDING:
+        order.status = OrderStatus.POLICY_PENDING_INTERNAL
+        await db.flush()
+    if order.status == OrderStatus.POLICY_PENDING_INTERNAL:
+        order.status = OrderStatus.POLICY_PENDING_EXTERNAL if body.need_external else OrderStatus.APPROVED
+        await db.flush()
+    elif order.status == OrderStatus.POLICY_PENDING_EXTERNAL:
+        order.status = OrderStatus.APPROVED
+        await db.flush()
+    else:
+        raise HTTPException(400, f"订单状态为 {order.status}，无法审批（需要 pending/policy_pending_internal/policy_pending_external）")
+
+    await log_audit(db, action="approve_order", entity_type="Order", entity_id=order.id, user=user)
+    return {"order_no": order.order_no, "status": order.status}
+
+
+# ═══════════════════════════════════════════════════════════════════
 # 17. 确认收款
 # ═══════════════════════════════════════════════════════════════════
 

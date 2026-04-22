@@ -52,7 +52,7 @@ QUERY_TOOLS: list[ToolEntry] = [
      "roles": ["boss", "finance"],
      "description": "查询厂家工资补贴应收。"},
     {"name": "query-attendance-summary", "path": "/mcp/query-attendance-summary",
-     "roles": ["boss", "finance"],
+     "roles": ["boss", "hr"],
      "description": "查询某月员工考勤汇总（迟到、请假、满勤）。"},
     {"name": "query-policy-templates", "path": "/mcp/query-policy-templates",
      "roles": ["*"],
@@ -168,8 +168,11 @@ ACTION_TOOLS: list[ToolEntry] = [
      "description": "结算提成。将提成状态设为 settled 并记录结算时间。"},
 ]
 
-# ─── 审批类（11）─────────────────────────────────────────────
+# ─── 审批类（12）─────────────────────────────────────────────
 APPROVAL_TOOLS: list[ToolEntry] = [
+    {"name": "approve-order", "path": "/mcp/approve-order",
+     "roles": ["boss"],
+     "description": "审批订单（pending→approved 一步完成）。支持 approve/reject。boss 专属。"},
     {"name": "confirm-order-payment", "path": "/mcp/confirm-order-payment",
      "roles": ["boss", "finance"],
      "description": "财务确认订单收款（delivered+fully_paid → completed）。"},
@@ -198,7 +201,7 @@ APPROVAL_TOOLS: list[ToolEntry] = [
      "roles": ["boss"],
      "description": "拒绝资金调拨申请。将待审批状态改为已驳回。"},
     {"name": "approve-financing-repayment", "path": "/mcp/approve-financing-repayment",
-     "roles": ["boss"],
+     "roles": ["boss", "finance"],
      "description": "审批融资还款。approve（通过并执行扣款）/ reject（驳回）。"},
     {"name": "approve-expense-claim", "path": "/mcp/approve-expense-claim",
      "roles": ["boss", "finance"],

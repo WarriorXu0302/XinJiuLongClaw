@@ -12,11 +12,11 @@ MCP（Model Context Protocol）是系统暴露给 AI Agent 的工具集，让 AI
 
 | 指标 | 数量 |
 |---|---|
-| 总工具数 | 28 |
-| 查询工具 | 10 |
-| 操作工具 | 6 |
+| 总工具数 | 36 |
+| 查询工具 | 14 |
+| 操作工具 | 11 |
 | 审批工具 | 5 |
-| 飞书专用 | 7 |
+| 飞书旧版（legacy） | 6 |
 
 ### 1.2 调用方
 
@@ -64,7 +64,7 @@ Content-Type: application/json
 
 ---
 
-## 3. 查询工具（10 个）
+## 3. 查询工具（14 个）
 
 所有查询工具只读，不修改数据。
 
@@ -206,9 +206,39 @@ POST /mcp/query-attendance-summary
 
 返回：每位员工的出勤天数、迟到次数、请假天数、是否全勤。
 
+### 3.12 query-policy-templates — 政策模板列表
+
+```json
+POST /mcp/query-policy-templates
+{
+  "brand_id": "可选",
+  "keyword": "可选，按名称搜索"
+}
+```
+
+返回：模板 ID、编码、名称、品牌、指导价、客户到手价、最小箱数、政策总价值。建单时需要 `policy_template_id`。
+
+### 3.13 query-brands — 品牌列表
+
+```json
+POST /mcp/query-brands
+{}
+```
+
+返回：品牌 ID、编码（QHL/WLY/FJ/Z15）、名称。建单/建客户/绑岗位时需要 `brand_id`。
+
+### 3.14 query-positions — 岗位字典
+
+```json
+POST /mcp/query-positions
+{}
+```
+
+返回：岗位代码（salesman/sales_manager/finance/warehouse...）和中文名。绑定员工品牌岗位时需要 `position_code`。
+
 ---
 
-## 4. 操作工具（6 个）
+## 4. 操作工具（11 个）
 
 写入数据，受 RLS + 角色约束。
 
@@ -257,6 +287,7 @@ POST /mcp/create-customer
   "code": "C-AI-001",
   "name": "AI创建的客户",
   "brand_id": "品牌 ID",
+  "customer_type": "channel 或 group_purchase，默认 channel",
   "salesman_id": "可选，绑定业务员",
   "contact_name": "联系人",
   "contact_phone": "手机号",
@@ -264,7 +295,8 @@ POST /mcp/create-customer
 }
 ```
 
-自动建 CustomerBrandSalesman 关联。
+- `customer_type`: `Literal["channel", "group_purchase"]`，默认 `"channel"`。渠道客户 vs 团购客户。
+- 自动建 CustomerBrandSalesman 关联。
 
 ### 4.4 create-leave-request — 提交请假
 
@@ -304,6 +336,82 @@ POST /mcp/generate-subsidy-expected
 ```
 
 需要 admin/boss/hr 权限。
+
+### 4.7 create-employee — 创建员工
+
+```json
+POST /mcp/create-employee
+{
+  "employee_no": "E-001",
+  "name": "张三",
+  "position": "可选，职务描述",
+  "phone": "可选",
+  "hire_date": "可选，YYYY-MM-DD",
+  "social_security": 0,
+  "company_social_security": 0,
+  "expected_manufacturer_subsidy": 0
+}
+```
+
+需要 admin/boss/hr 权限。工号全局唯一。
+
+### 4.8 query-employees — 查询员工列表
+
+```json
+POST /mcp/query-employees
+{
+  "keyword": "可选，按姓名/工号搜索",
+  "status": "可选，active/on_leave/left",
+  "brand_id": "可选，按品牌过滤",
+  "limit": 50
+}
+```
+
+需要 boss/hr/finance/sales_manager 权限。
+
+### 4.9 bind-employee-brand — 绑定员工品牌岗位
+
+```json
+POST /mcp/bind-employee-brand
+{
+  "employee_id": "员工 ID",
+  "brand_id": "品牌 ID",
+  "position_code": "岗位代码（如 salesman）",
+  "commission_rate": "可选，个性化提成率",
+  "manufacturer_subsidy": 0,
+  "is_primary": false
+}
+```
+
+需要 boss/hr 权限。`is_primary=true` 时自动取消该员工其他品牌的主属标记。
+
+### 4.10 create-user — 创建登录账号
+
+```json
+POST /mcp/create-user
+{
+  "username": "zhangsan",
+  "password": "初始密码",
+  "employee_id": "可选，关联员工 ID",
+  "role_codes": ["salesman"]
+}
+```
+
+仅 boss/admin 可操作。用户名全局唯一。
+
+### 4.11 create-fund-transfer — 创建资金调拨申请
+
+```json
+POST /mcp/create-fund-transfer
+{
+  "to_brand_name": "可选，品牌名（自动查 brand cash 账户）",
+  "to_account_id": "可选，或直接指定账户 ID",
+  "amount": 50000,
+  "notes": "可选"
+}
+```
+
+从 master 现金池调拨到品牌项目账户（现金或融资）。创建后状态为"待审批"，需老板审批后执行。
 
 ---
 
@@ -374,9 +482,9 @@ POST /mcp/approve-fund-transfer
 
 ---
 
-## 6. 飞书专用工具（7 个，保留旧版）
+## 6. 飞书专用工具（6 个，legacy 保留）
 
-这些工具服务飞书群聊 AI 网关，用 `X-External-Open-Id` 认证。
+这些工具服务飞书群聊 AI 网关，用 `X-External-Open-Id` 认证。通过 MCP Streamable-HTTP bridge 暴露给 openclaw 等外部 Agent。
 
 ### 6.1 allocate-settlement-to-claims — 结算分配预览
 
@@ -478,7 +586,20 @@ AI 解析自然语言，匹配客户/商品/政策，创建订单。
 
 ---
 
-## 8. 安全设计
+## 8. Bridge 超时与错误处理
+
+MCP Streamable-HTTP bridge（`/mcp/stream`）通过 loopback HTTP 调用转发到内部 REST 端点。`call_tool` 执行时用 `httpx.AsyncClient(timeout=30.0)` 发起请求，外层 try-except 捕获两种异常：
+
+| 异常 | 返回信息 |
+|---|---|
+| `httpx.TimeoutException` | `[超时] 调用 {tool_name} 超过 30 秒未响应，请稍后重试` |
+| `httpx.HTTPError` | `[网络错误] {异常类型}: {详情}` |
+
+Agent 收到上述友好错误文本后可自行决定是否重试。
+
+---
+
+## 9. 安全设计
 
 | 层面 | 机制 |
 |---|---|
@@ -490,7 +611,7 @@ AI 解析自然语言，匹配客户/商品/政策，创建订单。
 
 ---
 
-## 9. Agent 调用示例
+## 10. Agent 调用示例
 
 ### Claude Code 查库存
 
@@ -527,17 +648,19 @@ curl -X POST http://localhost:8001/mcp/query-barcode-tracing \
 
 ---
 
-## 10. 模块结构
+## 11. 模块结构
 
 ```
 backend/app/mcp/
 ├── __init__.py          # 路由汇总注册
 ├── auth.py              # 双认证（JWT / Feishu Open ID）
 ├── deps.py              # MCP 专用 DB 依赖（RLS 上下文注入）
-├── tools_query.py       # 10 个查询工具
-├── tools_action.py      # 6 个操作工具
+├── bridge.py            # Streamable-HTTP bridge（loopback 转发 + 超时处理）
+├── catalog.py           # 工具目录（供 bridge 列出 + 路由）
+├── tools_query.py       # 14 个查询工具
+├── tools_action.py      # 11 个操作工具
 ├── tools_approval.py    # 5 个审批工具
-└── tools.py             # 7 个飞书专用工具（旧版保留）
+└── tools.py             # 6 个飞书专用工具（legacy 保留）
 ```
 
 ---

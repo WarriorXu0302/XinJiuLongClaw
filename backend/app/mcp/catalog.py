@@ -54,6 +54,15 @@ QUERY_TOOLS: list[ToolEntry] = [
     {"name": "query-attendance-summary", "path": "/mcp/query-attendance-summary",
      "roles": ["boss", "finance"],
      "description": "查询某月员工考勤汇总（迟到、请假、满勤）。"},
+    {"name": "query-policy-templates", "path": "/mcp/query-policy-templates",
+     "roles": ["*"],
+     "description": "查询政策模板列表（含 ID、指导价、客户到手价）。建单时需要 policy_template_id。"},
+    {"name": "query-brands", "path": "/mcp/query-brands",
+     "roles": ["*"],
+     "description": "查询所有品牌（含 ID）。建单/建客户/绑岗位时需要 brand_id。"},
+    {"name": "query-positions", "path": "/mcp/query-positions",
+     "roles": ["*"],
+     "description": "查询岗位代码列表。绑定员工品牌岗位时需要 position_code。"},
 ]
 
 # ─── 写入类（6）─────────────────────────────────────────────
@@ -88,6 +97,9 @@ ACTION_TOOLS: list[ToolEntry] = [
     {"name": "generate-subsidy-expected", "path": "/mcp/generate-subsidy-expected",
      "roles": ["boss", "finance"],
      "description": "生成本月厂家工资补贴应收。"},
+    {"name": "create-fund-transfer", "path": "/mcp/create-fund-transfer",
+     "roles": ["boss", "finance"],
+     "description": "创建资金调拨申请（master→品牌现金）。可按品牌名自动查账户。需审批后才执行。"},
 ]
 
 # ─── 审批类（5）─────────────────────────────────────────────

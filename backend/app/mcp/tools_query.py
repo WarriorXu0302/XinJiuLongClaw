@@ -353,3 +353,55 @@ async def query_attendance_summary(body: QueryAttendanceRequest, db: AsyncSessio
             "full_attendance": late == 0 and late30 == 0 and leave_days == 0,
         })
     return result
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 12. 查询政策模板
+# ═══════════════════════════════════════════════════════════════════
+
+class QueryPolicyTemplatesRequest(BaseModel):
+    brand_id: Optional[str] = None
+    keyword: Optional[str] = None
+
+@router.post("/query-policy-templates")
+async def query_policy_templates(body: QueryPolicyTemplatesRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """查询政策模板列表（含 ID、指导价、客户到手价、最小箱数）。建单时需要 policy_template_id。"""
+    from app.models.policy_template import PolicyTemplate
+    stmt = select(PolicyTemplate).where(PolicyTemplate.is_active == True)
+    if body.brand_id:
+        stmt = stmt.where(PolicyTemplate.brand_id == body.brand_id)
+    if body.keyword:
+        stmt = stmt.where(PolicyTemplate.name.ilike(f"%{body.keyword}%"))
+    stmt = stmt.order_by(PolicyTemplate.created_at.desc()).limit(50)
+    rows = (await db.execute(stmt)).scalars().all()
+    return [{
+        "id": t.id, "code": t.code, "name": t.name,
+        "brand_id": t.brand_id,
+        "required_unit_price": float(t.required_unit_price or 0),
+        "customer_unit_price": float(t.customer_unit_price or 0),
+        "min_cases": t.min_cases, "total_policy_value": float(t.total_policy_value or 0),
+    } for t in rows]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 13. 查询品牌列表
+# ═══════════════════════════════════════════════════════════════════
+
+@router.post("/query-brands")
+async def query_brands(db: AsyncSession = Depends(get_mcp_db)):
+    """查询所有品牌（含 ID）。建单/建客户/绑岗位时需要 brand_id。"""
+    from app.models.product import Brand
+    rows = (await db.execute(select(Brand).order_by(Brand.code))).scalars().all()
+    return [{"id": b.id, "code": b.code, "name": b.name} for b in rows]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 14. 查询岗位字典
+# ═══════════════════════════════════════════════════════════════════
+
+@router.post("/query-positions")
+async def query_positions(db: AsyncSession = Depends(get_mcp_db)):
+    """查询岗位代码列表。绑定员工品牌岗位时需要 position_code。"""
+    from app.models.payroll import Position
+    rows = (await db.execute(select(Position).where(Position.is_active == True).order_by(Position.sort_order))).scalars().all()
+    return [{"code": p.code, "name": p.name} for p in rows]

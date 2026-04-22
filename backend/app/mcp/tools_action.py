@@ -469,3 +469,64 @@ async def mcp_create_user(body: MCPCreateUserRequest, db: AsyncSession = Depends
             db.add(UserRole(id=str(uuid.uuid4()), user_id=new_user.id, role_id=r.id))
         await db.flush()
     return {"user_id": new_user.id, "username": new_user.username, "roles": body.role_codes}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 21. 创建资金调拨申请
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPCreateTransferRequest(BaseModel):
+    to_brand_name: Optional[str] = None  # 品牌名（自动查 brand cash 账户）
+    to_account_id: Optional[str] = None  # 或直接指定账户 ID
+    amount: float
+    notes: Optional[str] = None
+
+
+@router.post("/create-fund-transfer")
+async def mcp_create_fund_transfer(body: MCPCreateTransferRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 创建资金调拨申请（master → 品牌现金/融资）。需老板审批后才执行。"""
+    from app.models.product import Account, Brand
+    from app.api.routes.accounts import record_fund_flow
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "finance")
+
+    # 源：master 现金池
+    master = (await db.execute(
+        select(Account).where(Account.level == 'master', Account.account_type == 'cash')
+    )).scalar_one_or_none()
+    if not master:
+        raise HTTPException(400, "未找到公司总资金池")
+
+    # 目标：按品牌名查或直接用 ID
+    to_acc = None
+    if body.to_account_id:
+        to_acc = await db.get(Account, body.to_account_id)
+    elif body.to_brand_name:
+        brand = (await db.execute(select(Brand).where(Brand.name.ilike(f"%{body.to_brand_name}%")))).scalar_one_or_none()
+        if not brand:
+            raise HTTPException(400, f"品牌 '{body.to_brand_name}' 不存在")
+        to_acc = (await db.execute(
+            select(Account).where(Account.brand_id == brand.id, Account.account_type == 'cash', Account.level == 'project')
+        )).scalar_one_or_none()
+    if not to_acc:
+        raise HTTPException(400, "未找到目标账户")
+    if to_acc.level != 'project':
+        raise HTTPException(400, "只能拨款到品牌项目账户")
+    if to_acc.account_type not in ('cash', 'financing'):
+        raise HTTPException(400, "只能拨款到现金或融资账户")
+
+    amt = Decimal(str(body.amount))
+    if amt <= 0:
+        raise HTTPException(400, "金额必须大于 0")
+    if master.balance < amt:
+        raise HTTPException(400, f"总资金池余额不足：¥{master.balance}，需拨 ¥{amt}")
+
+    # 创建待审批流水
+    ff = await record_fund_flow(
+        db, account_id=master.id, flow_type='transfer_pending', amount=amt,
+        balance_after=master.balance, related_type='transfer_pending', related_id=to_acc.id,
+        notes=body.notes or f"调拨到 {to_acc.name}", created_by=user.get('employee_id'),
+        brand_id=to_acc.brand_id,
+    )
+    await db.flush()
+    return {"transfer_id": ff.id, "from": master.name, "to": to_acc.name, "amount": float(amt), "status": "待审批"}

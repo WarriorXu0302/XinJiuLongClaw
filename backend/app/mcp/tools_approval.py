@@ -278,3 +278,118 @@ async def mcp_approve_inspection(body: MCPApproveInspectionRequest, db: AsyncSes
         "case_id": case.id, "case_no": case.case_no,
         "status": case.status, "profit_loss": float(case.profit_loss),
     }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 25. 拒绝资金调拨
+# ═══════════════════════════════════════════════════════════════════
+
+class RejectTransferRequest(BaseModel):
+    transfer_id: str
+    reject_reason: Optional[str] = None
+
+
+@router.post("/reject-fund-transfer")
+async def mcp_reject_fund_transfer(body: RejectTransferRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 拒绝资金调拨申请。将 transfer_pending → transfer_rejected。"""
+    from app.models.fund_flow import FundFlow
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, 'boss')
+
+    ff = await db.get(FundFlow, body.transfer_id)
+    if ff is None:
+        raise HTTPException(404, "拨款申请不存在")
+    if ff.flow_type != 'transfer_pending':
+        raise HTTPException(400, "该记录不是待审批的拨款申请")
+
+    ff.flow_type = 'transfer_rejected'
+    reason = body.reject_reason or '已驳回'
+    ff.notes = (ff.notes or '').replace('待审批：', f'已驳回（{reason}）：') if '待审批：' in (ff.notes or '') else f"已驳回：{reason}"
+    await db.flush()
+    await log_audit(db, action="reject_fund_transfer", entity_type="FundFlow", entity_id=ff.id, user=user)
+    return {"transfer_id": ff.id, "status": "rejected"}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 26. 审批融资还款
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPApproveFinancingRepaymentRequest(BaseModel):
+    repayment_id: str
+    action: str = "approve"  # approve / reject
+    reject_reason: Optional[str] = None
+
+
+@router.post("/approve-financing-repayment")
+async def mcp_approve_financing_repayment(body: MCPApproveFinancingRepaymentRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 审批融资还款。approve 调用内部逻辑执行扣款；reject 直接驳回。"""
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, 'boss')
+
+    if body.action == "approve":
+        from app.api.routes.financing import approve_repayment
+        return await approve_repayment(repayment_id=body.repayment_id, user=user, db=db)
+    elif body.action == "reject":
+        from app.models.financing import FinancingRepayment
+        rep = await db.get(FinancingRepayment, body.repayment_id)
+        if not rep:
+            raise HTTPException(404, "还款申请不存在")
+        if rep.status != "pending":
+            raise HTTPException(400, f"状态为 '{rep.status}'，不是待审批")
+        rep.status = "rejected"
+        rep.reject_reason = body.reject_reason or "已驳回"
+        rep.approved_by = user.get("employee_id")
+        # Cancel linked PO if exists
+        if rep.purchase_order_id:
+            from app.models.purchase import PurchaseOrder
+            po = await db.get(PurchaseOrder, rep.purchase_order_id)
+            if po:
+                po.status = "cancelled"
+        await db.flush()
+        await log_audit(db, action="reject_financing_repayment", entity_type="FinancingRepayment", entity_id=rep.id, user=user)
+        return {"repayment_id": rep.id, "status": "rejected"}
+    else:
+        raise HTTPException(400, f"不支持的 action: {body.action}，可选: approve / reject")
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 27. 审批报销理赔
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPApproveExpenseClaimRequest(BaseModel):
+    claim_id: str
+    action: str = "approve"  # approve / reject / pay
+    reject_reason: Optional[str] = None
+
+
+@router.post("/approve-expense-claim")
+async def mcp_approve_expense_claim(body: MCPApproveExpenseClaimRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 审批报销理赔。approve（通过）/ reject（驳回）/ pay（标记已付）。"""
+    from app.models.expense_claim import ExpenseClaim
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, 'boss', 'finance')
+
+    claim = await db.get(ExpenseClaim, body.claim_id)
+    if not claim:
+        raise HTTPException(404, f"报销理赔 {body.claim_id} 不存在")
+
+    if body.action == "approve":
+        if claim.status != "pending":
+            raise HTTPException(400, f"状态为 {claim.status}，只有 pending 可审批通过")
+        claim.status = "approved"
+        claim.approved_by = user.get("employee_id")
+    elif body.action == "reject":
+        if claim.status != "pending":
+            raise HTTPException(400, f"状态为 {claim.status}，只有 pending 可驳回")
+        claim.status = "rejected"
+        claim.notes = (claim.notes or "") + f"\n驳回原因: {body.reject_reason or '已驳回'}"
+    elif body.action == "pay":
+        if claim.status != "approved":
+            raise HTTPException(400, f"状态为 {claim.status}，只有 approved 可标记已付")
+        claim.status = "paid"
+    else:
+        raise HTTPException(400, f"不支持的 action: {body.action}，可选: approve / reject / pay")
+
+    await db.flush()
+    await log_audit(db, action=f"{body.action}_expense_claim", entity_type="ExpenseClaim", entity_id=claim.id, user=user)
+    return {"claim_id": claim.id, "claim_no": claim.claim_no, "status": claim.status}

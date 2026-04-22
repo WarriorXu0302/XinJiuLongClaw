@@ -22,7 +22,7 @@ class ToolEntry(TypedDict):
     # input_schema 先不写死 —— 从 FastAPI 的 openapi.json 动态抽，避免两处写
 
 
-# ─── 查询类（20）─────────────────────────────────────────────
+# ─── 查询类（24）─────────────────────────────────────────────
 QUERY_TOOLS: list[ToolEntry] = [
     {"name": "query-orders", "path": "/mcp/query-orders", "roles": ["*"],
      "description": "查询销售订单列表。支持按品牌/状态/付款状态/关键字过滤。"},
@@ -81,9 +81,21 @@ QUERY_TOOLS: list[ToolEntry] = [
     {"name": "query-financing-orders", "path": "/mcp/query-financing-orders",
      "roles": ["boss", "finance"],
      "description": "查询融资单列表。含本金余额、利率、到期日等信息。"},
+    {"name": "query-expense-claims", "path": "/mcp/query-expense-claims",
+     "roles": ["boss", "finance"],
+     "description": "查询报销理赔单列表。支持按品牌/状态过滤。"},
+    {"name": "query-commissions", "path": "/mcp/query-commissions",
+     "roles": ["boss", "hr", "finance"],
+     "description": "查询提成列表。支持按员工/品牌/状态过滤。"},
+    {"name": "query-leave-requests", "path": "/mcp/query-leave-requests",
+     "roles": ["boss", "hr", "finance"],
+     "description": "查询请假记录。支持按员工/状态/月份过滤。"},
+    {"name": "query-warehouses", "path": "/mcp/query-warehouses",
+     "roles": ["*"],
+     "description": "查询仓库列表。创建采购单/订单时需要 warehouse_id。"},
 ]
 
-# ─── 写入类（17）─────────────────────────────────────────────
+# ─── 写入类（23）─────────────────────────────────────────────
 ACTION_TOOLS: list[ToolEntry] = [
     {"name": "create-order", "path": "/mcp/create-order",
      "roles": ["boss", "salesman", "sales_manager"],
@@ -136,9 +148,27 @@ ACTION_TOOLS: list[ToolEntry] = [
     {"name": "update-order-status", "path": "/mcp/update-order-status",
      "roles": ["boss", "warehouse", "salesman"],
      "description": "更新订单状态：ship（发货）/ confirm-delivery（确认送达）/ cancel（取消）。"},
+    {"name": "create-financing-order", "path": "/mcp/create-financing-order",
+     "roles": ["boss", "finance"],
+     "description": "创建融资单。自动查找品牌融资账户，增加余额，记录流水。"},
+    {"name": "create-product", "path": "/mcp/create-product",
+     "roles": ["boss", "warehouse"],
+     "description": "创建商品（编码、名称、品牌、每箱瓶数、售价、成本价）。"},
+    {"name": "create-supplier", "path": "/mcp/create-supplier",
+     "roles": ["boss", "purchase", "warehouse"],
+     "description": "创建供应商（编码、名称、联系人、联系电话、地址）。"},
+    {"name": "receive-purchase-order", "path": "/mcp/receive-purchase-order",
+     "roles": ["boss", "warehouse", "purchase"],
+     "description": "采购收货。将采购单状态更新为 received。"},
+    {"name": "update-employee", "path": "/mcp/update-employee",
+     "roles": ["boss", "hr"],
+     "description": "编辑员工信息（姓名、电话、状态、社保）。仅更新传入的非空字段。"},
+    {"name": "settle-commission", "path": "/mcp/settle-commission",
+     "roles": ["boss", "hr", "finance"],
+     "description": "结算提成。将提成状态设为 settled 并记录结算时间。"},
 ]
 
-# ─── 审批类（8）─────────────────────────────────────────────
+# ─── 审批类（11）─────────────────────────────────────────────
 APPROVAL_TOOLS: list[ToolEntry] = [
     {"name": "confirm-order-payment", "path": "/mcp/confirm-order-payment",
      "roles": ["boss", "finance"],
@@ -164,6 +194,15 @@ APPROVAL_TOOLS: list[ToolEntry] = [
     {"name": "approve-inspection", "path": "/mcp/approve-inspection",
      "roles": ["boss", "finance"],
      "description": "执行稽查案件（pending → confirmed）。只有已执行案件才进利润台账。"},
+    {"name": "reject-fund-transfer", "path": "/mcp/reject-fund-transfer",
+     "roles": ["boss"],
+     "description": "拒绝资金调拨申请。将待审批状态改为已驳回。"},
+    {"name": "approve-financing-repayment", "path": "/mcp/approve-financing-repayment",
+     "roles": ["boss"],
+     "description": "审批融资还款。approve（通过并执行扣款）/ reject（驳回）。"},
+    {"name": "approve-expense-claim", "path": "/mcp/approve-expense-claim",
+     "roles": ["boss", "finance"],
+     "description": "审批报销理赔。approve（通过）/ reject（驳回）/ pay（标记已付）。"},
 ]
 
 # ─── Legacy（6，不含 external-approve-and-fill-scheme）──────

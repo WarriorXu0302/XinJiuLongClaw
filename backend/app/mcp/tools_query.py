@@ -602,3 +602,138 @@ async def query_financing_orders(body: QueryFinancingOrdersRequest, db: AsyncSes
         "bank_name": fo.bank_name,
         "status": fo.status,
     } for fo in rows]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 21. 查询报销理赔单
+# ═══════════════════════════════════════════════════════════════════
+
+class QueryExpenseClaimsRequest(BaseModel):
+    brand_id: Optional[str] = None
+    status: Optional[str] = None
+    limit: int = 20
+
+@router.post("/query-expense-claims")
+async def query_expense_claims(body: QueryExpenseClaimsRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """查询报销理赔单列表。支持按品牌/状态过滤。"""
+    require_mcp_role(db.info.get("mcp_user", {}), "boss", "finance")
+    from app.models.expense_claim import ExpenseClaim
+    stmt = select(ExpenseClaim)
+    if body.brand_id:
+        stmt = stmt.where(ExpenseClaim.brand_id == body.brand_id)
+    if body.status:
+        stmt = stmt.where(ExpenseClaim.status == body.status)
+    stmt = stmt.order_by(ExpenseClaim.created_at.desc()).limit(body.limit)
+    rows = (await db.execute(stmt)).scalars().all()
+    return [{
+        "id": e.id, "claim_no": e.claim_no,
+        "brand_id": e.brand_id,
+        "category": e.claim_type, "amount": float(e.amount),
+        "status": e.status,
+        "created_at": str(e.created_at),
+    } for e in rows]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 22. 查询提成列表
+# ═══════════════════════════════════════════════════════════════════
+
+class QueryCommissionsRequest(BaseModel):
+    employee_id: Optional[str] = None
+    brand_id: Optional[str] = None
+    status: Optional[str] = None
+    limit: int = 50
+
+@router.post("/query-commissions")
+async def query_commissions(body: QueryCommissionsRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """查询提成列表。支持按员工/品牌/状态过滤。"""
+    require_mcp_role(db.info.get("mcp_user", {}), "boss", "hr", "finance")
+    from app.models.user import Commission
+    from app.models.product import Brand
+    stmt = select(Commission).options(selectinload(Commission.employee))
+    if body.employee_id:
+        stmt = stmt.where(Commission.employee_id == body.employee_id)
+    if body.brand_id:
+        stmt = stmt.where(Commission.brand_id == body.brand_id)
+    if body.status:
+        stmt = stmt.where(Commission.status == body.status)
+    stmt = stmt.order_by(Commission.created_at.desc()).limit(body.limit)
+    rows = (await db.execute(stmt)).scalars().all()
+    # Commission has no brand relationship defined, so fetch brand names separately
+    brand_ids = {c.brand_id for c in rows if c.brand_id}
+    brand_map = {}
+    if brand_ids:
+        brands = (await db.execute(select(Brand).where(Brand.id.in_(brand_ids)))).scalars().all()
+        brand_map = {b.id: b.name for b in brands}
+    return [{
+        "id": c.id,
+        "employee_name": c.employee.name if c.employee else None,
+        "brand_name": brand_map.get(c.brand_id),
+        "order_id": c.order_id,
+        "commission_amount": float(c.commission_amount),
+        "status": c.status,
+    } for c in rows]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 23. 查询请假记录
+# ═══════════════════════════════════════════════════════════════════
+
+class QueryLeaveRequestsRequest(BaseModel):
+    employee_id: Optional[str] = None
+    status: Optional[str] = None
+    period: Optional[str] = None  # YYYY-MM
+    limit: int = 20
+
+@router.post("/query-leave-requests")
+async def query_leave_requests(body: QueryLeaveRequestsRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """查询请假记录。支持按员工/状态/月份过滤。"""
+    require_mcp_role(db.info.get("mcp_user", {}), "boss", "hr", "finance")
+    from app.models.attendance import LeaveRequest
+    from app.models.user import Employee
+    from datetime import date, timedelta
+    stmt = select(LeaveRequest).options(selectinload(LeaveRequest.employee))
+    if body.employee_id:
+        stmt = stmt.where(LeaveRequest.employee_id == body.employee_id)
+    if body.status:
+        stmt = stmt.where(LeaveRequest.status == body.status)
+    if body.period:
+        y, m = map(int, body.period.split("-"))
+        start = date(y, m, 1)
+        end = date(y + 1, 1, 1) - timedelta(days=1) if m == 12 else date(y, m + 1, 1) - timedelta(days=1)
+        stmt = stmt.where(LeaveRequest.start_date <= end, LeaveRequest.end_date >= start)
+    stmt = stmt.order_by(LeaveRequest.start_date.desc()).limit(body.limit)
+    rows = (await db.execute(stmt)).scalars().all()
+    return [{
+        "id": lr.id,
+        "employee_name": lr.employee.name if lr.employee else None,
+        "leave_type": lr.leave_type,
+        "start_date": str(lr.start_date),
+        "end_date": str(lr.end_date),
+        "total_days": float(lr.total_days),
+        "status": lr.status,
+    } for lr in rows]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 24. 查询仓库列表
+# ═══════════════════════════════════════════════════════════════════
+
+class QueryWarehousesRequest(BaseModel):
+    brand_id: Optional[str] = None
+
+@router.post("/query-warehouses")
+async def query_warehouses(body: QueryWarehousesRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """查询仓库列表。任何登录员工可调用。"""
+    require_mcp_employee(db.info.get("mcp_user", {}))
+    from app.models.product import Warehouse
+    stmt = select(Warehouse).where(Warehouse.is_active == True)
+    if body.brand_id:
+        stmt = stmt.where(Warehouse.brand_id == body.brand_id)
+    stmt = stmt.order_by(Warehouse.code)
+    rows = (await db.execute(stmt)).scalars().all()
+    return [{
+        "id": w.id, "code": w.code, "name": w.name,
+        "warehouse_type": w.warehouse_type,
+        "brand_id": w.brand_id,
+    } for w in rows]

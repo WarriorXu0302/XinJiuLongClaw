@@ -324,7 +324,7 @@ class QueryAttendanceRequest(BaseModel):
 @router.post("/query-attendance-summary")
 async def query_attendance_summary(body: QueryAttendanceRequest, db: AsyncSession = Depends(get_mcp_db)):
     """查询某月考勤汇总。"""
-    require_mcp_role(db.info.get("mcp_user", {}), "boss", "finance")
+    require_mcp_role(db.info.get("mcp_user", {}), "boss", "hr")
     period = body.period
     from app.models.attendance import CheckinRecord, LeaveRequest
     from app.models.user import Employee

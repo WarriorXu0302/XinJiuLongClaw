@@ -446,3 +446,189 @@ async def mcp_approve_expense_claim(body: MCPApproveExpenseClaimRequest, db: Asy
     await db.flush()
     await log_audit(db, action=f"{body.action}_expense_claim", entity_type="ExpenseClaim", entity_id=claim.id, user=user)
     return {"claim_id": claim.id, "claim_no": claim.claim_no, "status": claim.status}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 28. 完成订单（delivered → completed）
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPCompleteOrderRequest(BaseModel):
+    order_no: str
+
+
+@router.post("/complete-order")
+async def mcp_complete_order(body: MCPCompleteOrderRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 完成订单。将 delivered 状态的订单标记为 completed。
+    与 confirm-order-payment 不同：本工具不要求 fully_paid。
+    """
+    from app.models.order import Order
+    from app.models.base import OrderStatus
+    from datetime import datetime, timezone
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, 'boss', 'finance')
+
+    order = (await db.execute(select(Order).where(Order.order_no == body.order_no))).scalar_one_or_none()
+    if not order:
+        raise HTTPException(404, f"订单 {body.order_no} 不存在")
+    if order.status != OrderStatus.DELIVERED:
+        raise HTTPException(400, f"订单状态为 {order.status}，需要 delivered 才能完成")
+
+    now = datetime.now(timezone.utc)
+    order.status = OrderStatus.COMPLETED
+    order.completed_at = now
+    await db.flush()
+    await log_audit(db, action="complete_order", entity_type="Order", entity_id=order.id, user=user)
+    return {"order_no": order.order_no, "status": order.status, "completed_at": str(now)}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 29. 审批政策理赔
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPApprovePolicyClaimRequest(BaseModel):
+    claim_id: str
+    action: str = "approve"  # approve / reject
+    reject_reason: Optional[str] = None
+
+
+@router.post("/approve-policy-claim")
+async def mcp_approve_policy_claim(body: MCPApprovePolicyClaimRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 审批政策理赔单。approve（通过）/ reject（驳回）。
+    注意：这是 PolicyClaim（政策理赔），不同于 ExpenseClaim（费用报销）。
+    """
+    from app.models.policy import PolicyClaim
+    from datetime import datetime, timezone
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, 'boss', 'finance')
+
+    claim = await db.get(PolicyClaim, body.claim_id)
+    if not claim:
+        # 也尝试按 claim_no 查
+        claim = (await db.execute(
+            select(PolicyClaim).where(PolicyClaim.claim_no == body.claim_id)
+        )).scalar_one_or_none()
+    if not claim:
+        raise HTTPException(404, f"政策理赔单 {body.claim_id} 不存在")
+
+    if body.action == "approve":
+        if claim.status != "submitted":
+            raise HTTPException(400, f"状态为 {claim.status}，只有 submitted 可审批通过")
+        claim.status = "approved"
+    elif body.action == "reject":
+        if claim.status not in ("submitted", "approved"):
+            raise HTTPException(400, f"状态为 {claim.status}，不可驳回")
+        claim.status = "rejected"
+        claim.notes = (claim.notes or "") + f"\n驳回原因: {body.reject_reason or '已驳回'}"
+    else:
+        raise HTTPException(400, f"不支持的 action: {body.action}，可选: approve / reject")
+
+    await db.flush()
+    await log_audit(db, action=f"{body.action}_policy_claim", entity_type="PolicyClaim",
+                    entity_id=claim.id, user=user)
+    return {"claim_id": claim.id, "claim_no": claim.claim_no, "status": claim.status}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 30. 驳回订单政策
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPRejectOrderPolicyRequest(BaseModel):
+    order_no: str
+    reject_reason: Optional[str] = None
+
+
+@router.post("/reject-order-policy")
+async def mcp_reject_order_policy(body: MCPRejectOrderPolicyRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 驳回订单政策审批。policy_pending_internal/policy_pending_external → policy_rejected。"""
+    from app.models.order import Order
+    from app.models.base import OrderStatus
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, 'boss')
+
+    order = (await db.execute(select(Order).where(Order.order_no == body.order_no))).scalar_one_or_none()
+    if not order:
+        raise HTTPException(404, f"订单 {body.order_no} 不存在")
+    if order.status not in (OrderStatus.POLICY_PENDING_INTERNAL, OrderStatus.POLICY_PENDING_EXTERNAL):
+        raise HTTPException(400, f"订单状态为 {order.status}，需要 policy_pending_internal 或 policy_pending_external 才能驳回")
+
+    order.status = OrderStatus.REJECTED
+    reason = body.reject_reason or "政策审批驳回"
+    order.notes = (order.notes or "") + f"\n政策驳回: {reason}"
+    await db.flush()
+    await log_audit(db, action="reject_order_policy", entity_type="Order", entity_id=order.id, user=user)
+    return {"order_no": order.order_no, "status": order.status}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 31. 确认厂家结算分配
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPConfirmSettlementAllocationRequest(BaseModel):
+    settlement_id: str
+    claim_id: str
+    allocated_amount: float
+
+
+@router.post("/confirm-settlement-allocation")
+async def mcp_confirm_settlement_allocation(body: MCPConfirmSettlementAllocationRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 确认厂家结算分配到政策理赔单。调用 policy_service.confirm_settlement_allocation。"""
+    from decimal import Decimal
+    from app.services.policy_service import confirm_settlement_allocation
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, 'boss', 'finance')
+
+    link = await confirm_settlement_allocation(
+        db=db,
+        settlement_id=body.settlement_id,
+        claim_id=body.claim_id,
+        allocated_amount=Decimal(str(body.allocated_amount)),
+        confirmed_by=user.get("employee_id", ""),
+    )
+    await db.flush()
+    await log_audit(db, action="confirm_settlement_allocation", entity_type="ClaimSettlementLink", entity_id=link.id, user=user)
+    return {"link_id": link.id, "settlement_id": body.settlement_id, "claim_id": body.claim_id, "allocated_amount": body.allocated_amount}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 32. 创建政策理赔单
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPCreatePolicyClaimRequest(BaseModel):
+    policy_request_id: str
+    claim_type: str = "standard"
+    notes: Optional[str] = None
+
+
+@router.post("/create-policy-claim")
+async def mcp_create_policy_claim(body: MCPCreatePolicyClaimRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 创建政策理赔单。自动生成 claim_no，状态 pending。"""
+    from app.models.policy import PolicyRequest, PolicyClaim
+    from datetime import datetime, timezone
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, 'boss', 'finance')
+
+    pr = await db.get(PolicyRequest, body.policy_request_id)
+    if not pr:
+        raise HTTPException(404, f"政策申请 {body.policy_request_id} 不存在")
+
+    now = datetime.now(timezone.utc)
+    ts = now.strftime("%Y%m%d%H%M%S")
+    import uuid
+    claim = PolicyClaim(
+        id=str(uuid.uuid4()),
+        claim_no=f"PC-{ts}-{uuid.uuid4().hex[:6]}",
+        brand_id=pr.brand_id,
+        claim_batch_period=now.strftime("%Y-%m"),
+        notes=body.notes,
+        status="draft",
+        claimed_by=user.get("employee_id"),
+    )
+    db.add(claim)
+    await db.flush()
+    await log_audit(db, action="create_policy_claim", entity_type="PolicyClaim", entity_id=claim.id, user=user)
+    return {"claim_id": claim.id, "claim_no": claim.claim_no, "status": claim.status}

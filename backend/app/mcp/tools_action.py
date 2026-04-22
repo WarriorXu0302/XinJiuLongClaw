@@ -1171,3 +1171,706 @@ async def mcp_create_policy_template(body: MCPCreatePolicyTemplateRequest, db: A
         "customer_unit_price": float(tmpl.customer_unit_price),
         "total_policy_value": float(tmpl.total_policy_value),
     }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 35. 发放工资
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPPaySalaryRequest(BaseModel):
+    salary_record_id: Optional[str] = None
+    batch_mode: bool = False
+    period: Optional[str] = None  # YYYY-MM, required when batch_mode=True
+
+
+@router.post("/pay-salary")
+async def mcp_pay_salary(body: MCPPaySalaryRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 发放工资。单条或批量（按月份批量发放所有已审批工资单）。"""
+    from app.models.payroll import SalaryRecord
+    from datetime import datetime, timezone
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "finance")
+
+    now = datetime.now(timezone.utc)
+    paid_count = 0
+
+    if body.batch_mode:
+        # 批量模式：按月份发放所有 approved 的工资单
+        if not body.period:
+            raise HTTPException(400, "batch_mode=True 时必须提供 period (YYYY-MM)")
+        records = (await db.execute(
+            select(SalaryRecord).where(
+                SalaryRecord.period == body.period,
+                SalaryRecord.status == "approved",
+            )
+        )).scalars().all()
+        if not records:
+            raise HTTPException(400, f"{body.period} 没有待发放（approved）的工资单")
+        for rec in records:
+            rec.status = "paid"
+            rec.paid_at = now
+            rec.paid_by = user.get("employee_id")
+            paid_count += 1
+    else:
+        # 单条模式
+        if not body.salary_record_id:
+            raise HTTPException(400, "非批量模式必须提供 salary_record_id")
+        rec = await db.get(SalaryRecord, body.salary_record_id)
+        if not rec:
+            raise HTTPException(404, f"工资单 {body.salary_record_id} 不存在")
+        if rec.status != "approved":
+            raise HTTPException(400, f"工资单状态为 {rec.status}，需要 approved 才能发放")
+        rec.status = "paid"
+        rec.paid_at = now
+        rec.paid_by = user.get("employee_id")
+        paid_count = 1
+
+    await db.flush()
+    await log_audit(db, action="pay_salary", entity_type="SalaryRecord",
+                    entity_id=body.salary_record_id or f"batch:{body.period}", user=user)
+    return {"paid_count": paid_count, "period": body.period}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 36. 批量提交工资审批
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPBatchSubmitSalaryRequest(BaseModel):
+    period: str  # YYYY-MM
+
+
+@router.post("/batch-submit-salary")
+async def mcp_batch_submit_salary(body: MCPBatchSubmitSalaryRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 批量提交工资审批。将指定月份所有 draft 工资单提交为 pending_approval。"""
+    from app.models.payroll import SalaryRecord
+    from datetime import datetime, timezone
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "hr")
+
+    now = datetime.now(timezone.utc)
+    records = (await db.execute(
+        select(SalaryRecord).where(
+            SalaryRecord.period == body.period,
+            SalaryRecord.status == "draft",
+        )
+    )).scalars().all()
+    if not records:
+        raise HTTPException(400, f"{body.period} 没有 draft 状态的工资单")
+
+    for rec in records:
+        rec.status = "pending_approval"
+        rec.submitted_at = now
+        rec.submitted_by = user.get("employee_id")
+    await db.flush()
+    await log_audit(db, action="batch_submit_salary", entity_type="SalaryRecord",
+                    entity_id=f"batch:{body.period}", user=user)
+    return {"submitted_count": len(records), "period": body.period}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 37. 创建/更新薪酬方案
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPCreateSalarySchemeRequest(BaseModel):
+    brand_id: Optional[str] = None  # null = 公司通用
+    position_code: str
+    fixed_salary: float = 3000
+    variable_salary_max: float = 1500
+    attendance_bonus_full: float = 200
+    commission_rate: float = 0
+    manager_share_rate: float = 0
+    notes: Optional[str] = None
+
+
+@router.post("/create-salary-scheme")
+async def mcp_create_salary_scheme(body: MCPCreateSalarySchemeRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 创建或更新薪酬方案（品牌×岗位）。如果 brand_id+position_code 已存在则更新。"""
+    from app.models.payroll import BrandSalaryScheme
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "hr")
+
+    # 查是否已存在（upsert）
+    stmt = select(BrandSalaryScheme).where(
+        BrandSalaryScheme.position_code == body.position_code,
+    )
+    if body.brand_id:
+        stmt = stmt.where(BrandSalaryScheme.brand_id == body.brand_id)
+    else:
+        stmt = stmt.where(BrandSalaryScheme.brand_id.is_(None))
+    existing = (await db.execute(stmt)).scalar_one_or_none()
+
+    if existing:
+        # 更新
+        existing.fixed_salary = Decimal(str(body.fixed_salary))
+        existing.variable_salary_max = Decimal(str(body.variable_salary_max))
+        existing.attendance_bonus_full = Decimal(str(body.attendance_bonus_full))
+        existing.commission_rate = Decimal(str(body.commission_rate))
+        existing.manager_share_rate = Decimal(str(body.manager_share_rate))
+        if body.notes is not None:
+            existing.notes = body.notes
+        await db.flush()
+        await log_audit(db, action="update_salary_scheme", entity_type="BrandSalaryScheme",
+                        entity_id=existing.id, user=user)
+        return {"id": existing.id, "action": "updated", "position_code": body.position_code}
+    else:
+        # 创建
+        scheme = BrandSalaryScheme(
+            id=str(uuid.uuid4()),
+            brand_id=body.brand_id,
+            position_code=body.position_code,
+            fixed_salary=Decimal(str(body.fixed_salary)),
+            variable_salary_max=Decimal(str(body.variable_salary_max)),
+            attendance_bonus_full=Decimal(str(body.attendance_bonus_full)),
+            commission_rate=Decimal(str(body.commission_rate)),
+            manager_share_rate=Decimal(str(body.manager_share_rate)),
+            notes=body.notes,
+        )
+        db.add(scheme)
+        await db.flush()
+        await log_audit(db, action="create_salary_scheme", entity_type="BrandSalaryScheme",
+                        entity_id=scheme.id, user=user)
+        return {"id": scheme.id, "action": "created", "position_code": body.position_code}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 38. 确认厂家工资补贴到账
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPConfirmSubsidyArrivalRequest(BaseModel):
+    subsidy_ids: list[str]
+    arrival_billcode: Optional[str] = None
+
+
+@router.post("/confirm-subsidy-arrival")
+async def mcp_confirm_subsidy_arrival(body: MCPConfirmSubsidyArrivalRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 确认厂家工资补贴到账。将补贴状态设为 reimbursed 并记录到账信息。"""
+    from app.models.payroll import ManufacturerSalarySubsidy
+    from datetime import datetime, timezone
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "finance")
+
+    if not body.subsidy_ids:
+        raise HTTPException(400, "subsidy_ids 不能为空")
+
+    now = datetime.now(timezone.utc)
+    confirmed_count = 0
+    for sid in body.subsidy_ids:
+        subsidy = await db.get(ManufacturerSalarySubsidy, sid)
+        if not subsidy:
+            raise HTTPException(404, f"补贴记录 {sid} 不存在")
+        if subsidy.status == "reimbursed":
+            continue  # 已到账，跳过
+        subsidy.status = "reimbursed"
+        subsidy.arrival_at = now
+        subsidy.reimbursed_at = now
+        if body.arrival_billcode:
+            subsidy.arrival_billcode = body.arrival_billcode
+        confirmed_count += 1
+
+    await db.flush()
+    await log_audit(db, action="confirm_subsidy_arrival", entity_type="ManufacturerSalarySubsidy",
+                    entity_id=",".join(body.subsidy_ids[:5]), user=user)
+    return {"confirmed_count": confirmed_count, "total_requested": len(body.subsidy_ids)}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 39. 政策物料兑付
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPFulfillPolicyMaterialsRequest(BaseModel):
+    request_id: str
+    items: list[dict]  # [{item_id, fulfilled_quantity}]
+
+
+@router.post("/fulfill-policy-materials")
+async def mcp_fulfill_policy_materials(body: MCPFulfillPolicyMaterialsRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 更新政策物料兑付数量。逐条更新 PolicyRequestItem 的 fulfilled_qty。"""
+    from app.models.policy import PolicyRequest
+    from app.models.policy_request_item import PolicyRequestItem
+    from datetime import datetime, timezone
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "finance")
+
+    pr = await db.get(PolicyRequest, body.request_id)
+    if not pr:
+        raise HTTPException(404, f"政策申请 {body.request_id} 不存在")
+
+    if not body.items:
+        raise HTTPException(400, "items 不能为空")
+
+    now = datetime.now(timezone.utc)
+    updated_count = 0
+    for it in body.items:
+        item_id = it.get("item_id")
+        fulfilled_quantity = it.get("fulfilled_quantity", 0)
+        if not item_id:
+            raise HTTPException(400, "每个 item 必须包含 item_id")
+        item = await db.get(PolicyRequestItem, item_id)
+        if not item:
+            raise HTTPException(404, f"政策项 {item_id} 不存在")
+        if item.policy_request_id != body.request_id:
+            raise HTTPException(400, f"政策项 {item_id} 不属于政策申请 {body.request_id}")
+        item.fulfilled_qty = fulfilled_quantity
+        if fulfilled_quantity >= item.quantity:
+            item.fulfill_status = "fulfilled"
+            item.fulfilled_at = now
+        elif fulfilled_quantity > 0:
+            item.fulfill_status = "applied"
+        updated_count += 1
+
+    # 检查所有 item 是否全部兑付完成
+    all_items = (await db.execute(
+        select(PolicyRequestItem).where(PolicyRequestItem.policy_request_id == body.request_id)
+    )).scalars().all()
+    all_fulfilled = all(i.fulfilled_qty >= i.quantity for i in all_items)
+
+    await db.flush()
+    await log_audit(db, action="fulfill_policy_materials", entity_type="PolicyRequest",
+                    entity_id=body.request_id, user=user)
+    return {
+        "updated_count": updated_count,
+        "all_fulfilled": all_fulfilled,
+        "request_id": body.request_id,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 40. 确认政策到账
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPConfirmPolicyArrivalRequest(BaseModel):
+    request_id: str
+
+
+@router.post("/confirm-policy-arrival")
+async def mcp_confirm_policy_arrival(body: MCPConfirmPolicyArrivalRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 确认政策到账。将政策申请状态设为 approved（已到账确认）。"""
+    from app.models.policy import PolicyRequest
+    from app.models.base import PolicyRequestStatus
+    from datetime import datetime, timezone
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "finance")
+
+    pr = await db.get(PolicyRequest, body.request_id)
+    if not pr:
+        raise HTTPException(404, f"政策申请 {body.request_id} 不存在")
+    if pr.status == PolicyRequestStatus.APPROVED:
+        raise HTTPException(400, "该政策申请已确认到账")
+
+    now = datetime.now(timezone.utc)
+    pr.status = PolicyRequestStatus.APPROVED
+    pr.updated_at = now
+
+    await db.flush()
+    await log_audit(db, action="confirm_policy_arrival", entity_type="PolicyRequest",
+                    entity_id=pr.id, user=user)
+    return {"request_id": pr.id, "status": pr.status}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 41. 确认政策兑付完成
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPConfirmPolicyFulfillRequest(BaseModel):
+    request_id: str
+
+
+@router.post("/confirm-policy-fulfill")
+async def mcp_confirm_policy_fulfill(body: MCPConfirmPolicyFulfillRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 确认政策兑付完成。将政策申请状态标记为 approved（全部兑付）。
+    注意：此工具标记的是政策层面的兑付确认，不同于单项物料兑付。
+    """
+    from app.models.policy import PolicyRequest
+    from app.models.policy_request_item import PolicyRequestItem
+    from app.models.base import PolicyRequestStatus
+    from datetime import datetime, timezone
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "finance")
+
+    pr = await db.get(PolicyRequest, body.request_id)
+    if not pr:
+        raise HTTPException(404, f"政策申请 {body.request_id} 不存在")
+
+    # 检查所有 item 的兑付状态
+    all_items = (await db.execute(
+        select(PolicyRequestItem).where(PolicyRequestItem.policy_request_id == body.request_id)
+    )).scalars().all()
+    unfulfilled = [i for i in all_items if i.fulfill_status not in ("fulfilled", "settled")]
+
+    now = datetime.now(timezone.utc)
+    pr.status = PolicyRequestStatus.APPROVED
+    pr.updated_at = now
+    # 同时将所有 item 标为 fulfilled（如果尚未标记）
+    for item in all_items:
+        if item.fulfill_status == "pending":
+            item.fulfill_status = "fulfilled"
+            item.fulfilled_at = now
+
+    await db.flush()
+    await log_audit(db, action="confirm_policy_fulfill", entity_type="PolicyRequest",
+                    entity_id=pr.id, user=user)
+    return {
+        "request_id": pr.id,
+        "status": pr.status,
+        "total_items": len(all_items),
+        "previously_unfulfilled": len(unfulfilled),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 42. 编辑订单
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPUpdateOrderRequest(BaseModel):
+    order_no: str
+    customer_id: Optional[str] = None
+    salesman_id: Optional[str] = None
+    notes: Optional[str] = None
+    warehouse_id: Optional[str] = None
+
+
+@router.post("/update-order")
+async def mcp_update_order(body: MCPUpdateOrderRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 编辑订单。仅允许 pending 状态下修改非空字段。"""
+    from app.models.order import Order
+    from app.models.base import OrderStatus
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "salesman", "sales_manager")
+
+    order = (await db.execute(select(Order).where(Order.order_no == body.order_no))).scalar_one_or_none()
+    if not order:
+        raise HTTPException(404, f"订单 {body.order_no} 不存在")
+    if order.status != OrderStatus.PENDING:
+        raise HTTPException(400, f"订单状态为 {order.status}，只有 pending 才允许编辑")
+
+    updated_fields = []
+    if body.customer_id is not None:
+        order.customer_id = body.customer_id
+        updated_fields.append("customer_id")
+    if body.salesman_id is not None:
+        order.salesman_id = body.salesman_id
+        updated_fields.append("salesman_id")
+    if body.notes is not None:
+        order.notes = body.notes
+        updated_fields.append("notes")
+    if body.warehouse_id is not None:
+        order.warehouse_id = body.warehouse_id
+        updated_fields.append("warehouse_id")
+    if not updated_fields:
+        raise HTTPException(400, "至少提供一个待更新字段")
+
+    await db.flush()
+    await log_audit(db, action="update_order", entity_type="Order", entity_id=order.id, user=user)
+    return {"order_no": order.order_no, "updated_fields": updated_fields}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 43. 提交订单政策审批
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPSubmitOrderPolicyRequest(BaseModel):
+    order_no: str
+
+
+@router.post("/submit-order-policy")
+async def mcp_submit_order_policy(body: MCPSubmitOrderPolicyRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 提交订单进入政策内部审批。pending → policy_pending_internal。"""
+    from app.models.order import Order
+    from app.models.base import OrderStatus
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "salesman", "sales_manager")
+
+    order = (await db.execute(select(Order).where(Order.order_no == body.order_no))).scalar_one_or_none()
+    if not order:
+        raise HTTPException(404, f"订单 {body.order_no} 不存在")
+    if order.status != OrderStatus.PENDING:
+        raise HTTPException(400, f"订单状态为 {order.status}，需要 pending 才能提交政策审批")
+
+    order.status = OrderStatus.POLICY_PENDING_INTERNAL
+    await db.flush()
+    await log_audit(db, action="submit_order_policy", entity_type="Order", entity_id=order.id, user=user)
+    return {"order_no": order.order_no, "status": order.status}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 44. 重新提交订单（驳回后）
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPResubmitOrderRequest(BaseModel):
+    order_no: str
+
+
+@router.post("/resubmit-order")
+async def mcp_resubmit_order(body: MCPResubmitOrderRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 重新提交被驳回的订单。policy_rejected → pending。"""
+    from app.models.order import Order
+    from app.models.base import OrderStatus
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "salesman", "sales_manager")
+
+    order = (await db.execute(select(Order).where(Order.order_no == body.order_no))).scalar_one_or_none()
+    if not order:
+        raise HTTPException(404, f"订单 {body.order_no} 不存在")
+    if order.status != OrderStatus.REJECTED:
+        raise HTTPException(400, f"订单状态为 {order.status}，需要 policy_rejected 才能重新提交")
+
+    order.status = OrderStatus.PENDING
+    await db.flush()
+    await log_audit(db, action="resubmit_order", entity_type="Order", entity_id=order.id, user=user)
+    return {"order_no": order.order_no, "status": order.status}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 45. 创建政策申请
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPCreatePolicyRequestRequest(BaseModel):
+    brand_id: str
+    order_id: Optional[str] = None
+    policy_template_id: Optional[str] = None
+    scheme_no: Optional[str] = None
+    items: list[dict] = []  # [{product_id, quantity, quantity_unit?}]
+
+
+@router.post("/create-policy-request")
+async def mcp_create_policy_request(body: MCPCreatePolicyRequestRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 创建政策申请（PolicyRequest + PolicyRequestItem）。状态 draft。"""
+    from app.models.policy import PolicyRequest
+    from app.models.policy_request_item import PolicyRequestItem
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "finance", "salesman", "sales_manager")
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    request_no = f"PR-{ts}-{uuid.uuid4().hex[:6]}"
+
+    pr = PolicyRequest(
+        id=str(uuid.uuid4()),
+        brand_id=body.brand_id,
+        order_id=body.order_id,
+        policy_template_id=body.policy_template_id,
+        scheme_no=body.scheme_no,
+        status="draft",
+    )
+    db.add(pr)
+    await db.flush()
+
+    item_count = 0
+    for idx, it in enumerate(body.items):
+        db.add(PolicyRequestItem(
+            id=str(uuid.uuid4()),
+            policy_request_id=pr.id,
+            benefit_type="product",
+            name=it.get("product_id", "unknown"),
+            product_id=it.get("product_id"),
+            quantity=it.get("quantity", 1),
+            quantity_unit=it.get("quantity_unit", "箱"),
+            sort_order=idx,
+        ))
+        item_count += 1
+    await db.flush()
+    await log_audit(db, action="create_policy_request", entity_type="PolicyRequest", entity_id=pr.id, user=user)
+    return {"policy_request_id": pr.id, "request_no": request_no, "items_count": item_count, "status": "draft"}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 46. 绑定客户-品牌-业务员
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPBindCustomerBrandSalesmanRequest(BaseModel):
+    customer_id: str
+    brand_id: str
+    salesman_id: str
+
+
+@router.post("/bind-customer-brand-salesman")
+async def mcp_bind_customer_brand_salesman(body: MCPBindCustomerBrandSalesmanRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 绑定/更新客户×品牌×业务员关系。已存在则更新 salesman，否则新建。"""
+    from app.models.customer import CustomerBrandSalesman
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "salesman", "sales_manager")
+
+    existing = (await db.execute(
+        select(CustomerBrandSalesman).where(
+            CustomerBrandSalesman.customer_id == body.customer_id,
+            CustomerBrandSalesman.brand_id == body.brand_id,
+        )
+    )).scalar_one_or_none()
+
+    if existing:
+        existing.salesman_id = body.salesman_id
+        await db.flush()
+        await log_audit(db, action="update_customer_brand_salesman", entity_type="CustomerBrandSalesman", entity_id=existing.id, user=user)
+        return {"id": existing.id, "action": "updated", "salesman_id": body.salesman_id}
+    else:
+        cbs = CustomerBrandSalesman(
+            id=str(uuid.uuid4()),
+            customer_id=body.customer_id,
+            brand_id=body.brand_id,
+            salesman_id=body.salesman_id,
+        )
+        db.add(cbs)
+        await db.flush()
+        await log_audit(db, action="create_customer_brand_salesman", entity_type="CustomerBrandSalesman", entity_id=cbs.id, user=user)
+        return {"id": cbs.id, "action": "created", "salesman_id": body.salesman_id}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 47. 创建厂家结算记录
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPCreateManufacturerSettlementRequest(BaseModel):
+    brand_id: str
+    settlement_date: str  # YYYY-MM-DD
+    amount: float
+    settlement_type: Optional[str] = None
+    bill_no: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@router.post("/create-manufacturer-settlement")
+async def mcp_create_manufacturer_settlement(body: MCPCreateManufacturerSettlementRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 创建厂家结算（到账）记录。"""
+    from app.models.finance import ManufacturerSettlement
+    from datetime import date
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "finance")
+
+    if body.amount <= 0:
+        raise HTTPException(400, "金额必须大于 0")
+    try:
+        s_date = date.fromisoformat(body.settlement_date)
+    except ValueError:
+        raise HTTPException(400, f"日期格式错误，需要 YYYY-MM-DD，收到 {body.settlement_date}")
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    amt = Decimal(str(body.amount))
+    settlement = ManufacturerSettlement(
+        id=str(uuid.uuid4()),
+        settlement_no=f"MS-{ts}-{uuid.uuid4().hex[:6]}",
+        brand_id=body.brand_id,
+        settlement_amount=amt,
+        unsettled_amount=amt,
+        settlement_date=s_date,
+        notes=body.notes,
+        status="pending",
+    )
+    db.add(settlement)
+    await db.flush()
+    await log_audit(db, action="create_manufacturer_settlement", entity_type="ManufacturerSettlement", entity_id=settlement.id, user=user)
+    return {"settlement_id": settlement.id, "settlement_no": settlement.settlement_no, "amount": float(amt), "status": "pending"}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 48. 提交融资还款
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPSubmitFinancingRepaymentRequest(BaseModel):
+    financing_order_id: str
+    principal_amount: float
+    payment_account_id: str
+    f_class_amount: float = 0
+    notes: Optional[str] = None
+
+
+@router.post("/submit-financing-repayment")
+async def mcp_submit_financing_repayment(body: MCPSubmitFinancingRepaymentRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 提交融资还款申请。自动计算利息，创建 pending 状态还款单。"""
+    from app.models.financing import FinancingOrder, FinancingRepayment
+    from datetime import date
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "finance")
+
+    fo = await db.get(FinancingOrder, body.financing_order_id)
+    if not fo:
+        raise HTTPException(404, f"融资单 {body.financing_order_id} 不存在")
+    if fo.status != "active":
+        raise HTTPException(400, f"融资单状态为 {fo.status}，需要 active")
+
+    principal = Decimal(str(body.principal_amount))
+    if principal <= 0:
+        raise HTTPException(400, "还款本金必须大于 0")
+    if principal > fo.outstanding_balance:
+        raise HTTPException(400, f"还款本金 {principal} 超过剩余本金 {fo.outstanding_balance}")
+
+    # 计算利息：principal * rate / 100 * days / 365
+    today = date.today()
+    days = (today - fo.start_date).days if today > fo.start_date else 0
+    rate = fo.interest_rate or Decimal("0")
+    interest = (principal * rate / Decimal("100") * Decimal(str(days)) / Decimal("365")).quantize(Decimal("0.01"))
+
+    f_class_amt = Decimal(str(body.f_class_amount))
+    total = principal + interest
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    rep = FinancingRepayment(
+        id=str(uuid.uuid4()),
+        repayment_no=f"FR-{ts}-{uuid.uuid4().hex[:6]}",
+        financing_order_id=fo.id,
+        repayment_date=today,
+        interest_days=days,
+        principal_amount=principal,
+        interest_amount=interest,
+        total_amount=total,
+        payment_account_id=body.payment_account_id,
+        f_class_amount=f_class_amt,
+        notes=body.notes,
+        status="pending",
+        created_by=user.get("employee_id"),
+    )
+    db.add(rep)
+    await db.flush()
+    await log_audit(db, action="submit_financing_repayment", entity_type="FinancingRepayment", entity_id=rep.id, user=user)
+    return {
+        "repayment_no": rep.repayment_no, "principal": float(principal),
+        "interest": float(interest), "total": float(total), "status": "pending",
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 49. 创建市场清理案件
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPCreateMarketCleanupCaseRequest(BaseModel):
+    brand_id: str
+    case_type: str
+    product_id: Optional[str] = None
+    quantity: Optional[int] = None
+    quantity_unit: str = "瓶"
+    notes: Optional[str] = None
+
+
+@router.post("/create-market-cleanup-case")
+async def mcp_create_market_cleanup_case(body: MCPCreateMarketCleanupCaseRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 创建市场清理案件。状态 pending。"""
+    from app.models.inspection import MarketCleanupCase
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "finance")
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    case = MarketCleanupCase(
+        id=str(uuid.uuid4()),
+        case_no=f"MC-{ts}-{uuid.uuid4().hex[:6]}",
+        brand_id=body.brand_id,
+        product_id=body.product_id,
+        notes=body.notes,
+        status="pending",
+    )
+    db.add(case)
+    await db.flush()
+    await log_audit(db, action="create_market_cleanup_case", entity_type="MarketCleanupCase", entity_id=case.id, user=user)
+    return {"case_no": case.case_no, "status": "pending"}

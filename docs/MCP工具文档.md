@@ -1,6 +1,6 @@
 # 新鑫久隆 ERP — MCP 工具文档
 
-> 版本：v2.0 | 日期：2026-04-20
+> 版本：v3.0 | 日期：2026-04-22
 
 ---
 
@@ -12,10 +12,10 @@ MCP（Model Context Protocol）是系统暴露给 AI Agent 的工具集，让 AI
 
 | 指标 | 数量 |
 |---|---|
-| 总工具数 | 36 |
-| 查询工具 | 14 |
-| 操作工具 | 11 |
-| 审批工具 | 5 |
+| 总工具数 | 64 |
+| 查询工具 | 24 |
+| 操作工具 | 23 |
+| 审批工具 | 11 |
 | 飞书旧版（legacy） | 6 |
 
 ### 1.2 调用方
@@ -64,11 +64,13 @@ Content-Type: application/json
 
 ---
 
-## 3. 查询工具（14 个）
+## 3. 查询工具（24 个）
 
 所有查询工具只读，不修改数据。
 
 ### 3.1 query-orders — 订单列表
+
+角色：`*`（任何登录员工）
 
 ```json
 POST /mcp/query-orders
@@ -85,6 +87,8 @@ POST /mcp/query-orders
 
 ### 3.2 query-order-detail — 订单详情
 
+角色：`*`（任何登录员工）
+
 ```json
 POST /mcp/query-order-detail
 {
@@ -96,6 +100,8 @@ POST /mcp/query-order-detail
 
 ### 3.3 query-customers — 客户列表
 
+角色：`*`（任何登录员工）
+
 ```json
 POST /mcp/query-customers
 {
@@ -106,6 +112,8 @@ POST /mcp/query-customers
 ```
 
 ### 3.4 query-inventory — 库存查询
+
+角色：`boss / warehouse / salesman / sales_manager / purchase / finance`
 
 ```json
 POST /mcp/query-inventory
@@ -120,6 +128,8 @@ POST /mcp/query-inventory
 
 ### 3.5 query-profit-summary — 利润台账
 
+角色：`boss / finance / sales_manager`
+
 ```json
 POST /mcp/query-profit-summary
 {
@@ -129,9 +139,11 @@ POST /mcp/query-profit-summary
 }
 ```
 
-返回 11 个利润科目汇总。建议直接调 `GET /api/dashboard/profit-summary` 获取完整数据。
+返回 11 个利润科目汇总。
 
 ### 3.6 query-account-balances — 账户余额
+
+角色：`boss / finance`
 
 ```json
 POST /mcp/query-account-balances
@@ -146,6 +158,8 @@ POST /mcp/query-account-balances
 
 ### 3.7 query-salary-records — 工资单
 
+角色：`boss / finance`
+
 ```json
 POST /mcp/query-salary-records
 {
@@ -156,9 +170,9 @@ POST /mcp/query-salary-records
 
 返回：员工、周期、应发、实发、提成、状态。
 
-> 需要 admin/boss/hr 权限才能看到他人工资。
-
 ### 3.8 query-sales-targets — 销售目标
+
+角色：`boss / finance / sales_manager / salesman`
 
 ```json
 POST /mcp/query-sales-targets
@@ -173,6 +187,8 @@ POST /mcp/query-sales-targets
 
 ### 3.9 query-inspection-cases — 稽查案件
 
+角色：`boss / finance`
+
 ```json
 POST /mcp/query-inspection-cases
 {
@@ -186,6 +202,8 @@ POST /mcp/query-inspection-cases
 
 ### 3.10 query-manufacturer-subsidies — 厂家补贴
 
+角色：`boss / finance`
+
 ```json
 POST /mcp/query-manufacturer-subsidies
 {
@@ -197,6 +215,8 @@ POST /mcp/query-manufacturer-subsidies
 
 ### 3.11 query-attendance-summary — 考勤汇总
 
+角色：`boss / hr`
+
 ```json
 POST /mcp/query-attendance-summary
 {
@@ -207,6 +227,8 @@ POST /mcp/query-attendance-summary
 返回：每位员工的出勤天数、迟到次数、请假天数、是否全勤。
 
 ### 3.12 query-policy-templates — 政策模板列表
+
+角色：`*`（任何登录员工）
 
 ```json
 POST /mcp/query-policy-templates
@@ -220,6 +242,8 @@ POST /mcp/query-policy-templates
 
 ### 3.13 query-brands — 品牌列表
 
+角色：`*`（任何登录员工）
+
 ```json
 POST /mcp/query-brands
 {}
@@ -229,6 +253,8 @@ POST /mcp/query-brands
 
 ### 3.14 query-positions — 岗位字典
 
+角色：`*`（任何登录员工）
+
 ```json
 POST /mcp/query-positions
 {}
@@ -236,13 +262,166 @@ POST /mcp/query-positions
 
 返回：岗位代码（salesman/sales_manager/finance/warehouse...）和中文名。绑定员工品牌岗位时需要 `position_code`。
 
+### 3.15 query-purchase-orders — 采购单列表
+
+角色：`boss / purchase / warehouse / finance`
+
+```json
+POST /mcp/query-purchase-orders
+{
+  "brand_id": "可选",
+  "status": "可选",
+  "keyword": "可选，按采购单号搜索",
+  "limit": 20
+}
+```
+
+返回：采购单号、供应商、品牌、总金额、状态、明细行。
+
+### 3.16 query-expenses — 费用/报销列表
+
+角色：`boss / finance`
+
+```json
+POST /mcp/query-expenses
+{
+  "brand_id": "可选",
+  "status": "可选",
+  "limit": 20
+}
+```
+
+返回：报销单号、类型、标题、金额、品牌、申请人、状态。
+
+### 3.17 query-products — 商品列表
+
+角色：`*`（任何登录员工）
+
+```json
+POST /mcp/query-products
+{
+  "brand_id": "可选",
+  "keyword": "可选，按名称/编码搜索",
+  "limit": 50
+}
+```
+
+返回：商品 ID、编码、名称、品牌、每箱瓶数、售价、成本价。
+
+### 3.18 query-suppliers — 供应商列表
+
+角色：`boss / purchase / warehouse`
+
+```json
+POST /mcp/query-suppliers
+{
+  "keyword": "可选，按名称/编码搜索",
+  "limit": 50
+}
+```
+
+返回：供应商 ID、编码、名称、类型、联系人。创建采购单时需要 `supplier_id`。
+
+### 3.19 query-fund-flows — 资金流水
+
+角色：`boss / finance`
+
+```json
+POST /mcp/query-fund-flows
+{
+  "account_id": "可选",
+  "brand_id": "可选",
+  "flow_type": "可选，credit/debit/transfer_pending/transfer_in/transfer_out",
+  "limit": 50
+}
+```
+
+返回：流水号、类型、金额、操作后余额、账户名、关联类型。
+
+### 3.20 query-financing-orders — 融资单列表
+
+角色：`boss / finance`
+
+```json
+POST /mcp/query-financing-orders
+{
+  "brand_id": "可选",
+  "status": "可选，active/settled/overdue",
+  "limit": 20
+}
+```
+
+返回：融资单号、品牌、本金、未还余额、利率、起止日期、银行、状态。
+
+### 3.21 query-expense-claims — 报销理赔单列表
+
+角色：`boss / finance`
+
+```json
+POST /mcp/query-expense-claims
+{
+  "brand_id": "可选",
+  "status": "可选",
+  "limit": 20
+}
+```
+
+返回：理赔单号、品牌、类别、金额、状态。
+
+### 3.22 query-commissions — 提成列表
+
+角色：`boss / hr / finance`
+
+```json
+POST /mcp/query-commissions
+{
+  "employee_id": "可选",
+  "brand_id": "可选",
+  "status": "可选",
+  "limit": 50
+}
+```
+
+返回：员工、品牌、订单关联、提成金额、状态。
+
+### 3.23 query-leave-requests — 请假记录
+
+角色：`boss / hr / finance`
+
+```json
+POST /mcp/query-leave-requests
+{
+  "employee_id": "可选",
+  "status": "可选，pending/approved/rejected",
+  "period": "可选，YYYY-MM",
+  "limit": 20
+}
+```
+
+返回：员工、假别、起止日期、天数、状态。
+
+### 3.24 query-warehouses — 仓库列表
+
+角色：`*`（任何登录员工）
+
+```json
+POST /mcp/query-warehouses
+{
+  "brand_id": "可选"
+}
+```
+
+返回：仓库 ID、编码、名称、类型、品牌。创建采购单/订单时需要 `warehouse_id`。
+
 ---
 
-## 4. 操作工具（11 个）
+## 4. 操作工具（23 个）
 
 写入数据，受 RLS + 角色约束。
 
 ### 4.1 create-order — 创建订单
+
+角色：`boss / salesman / sales_manager`
 
 ```json
 POST /mcp/create-order
@@ -263,8 +442,11 @@ POST /mcp/create-order
 
 - 单价强制从政策模板 `required_unit_price` 取，前端/Agent 无法手填
 - `customer_paid_amount` 按结算模式自动计算
+- salesman 调用时 `salesman_id` 强制=本人
 
 ### 4.2 register-payment — 登记收款
+
+角色：`boss / finance / salesman`
 
 ```json
 POST /mcp/register-payment
@@ -280,6 +462,8 @@ POST /mcp/register-payment
 - 全款跃升时通知财务
 
 ### 4.3 create-customer — 创建客户
+
+角色：`boss / salesman / sales_manager`
 
 ```json
 POST /mcp/create-customer
@@ -300,6 +484,8 @@ POST /mcp/create-customer
 
 ### 4.4 create-leave-request — 提交请假
 
+角色：`*`（任何登录员工）
+
 ```json
 POST /mcp/create-leave-request
 {
@@ -312,32 +498,11 @@ POST /mcp/create-leave-request
 }
 ```
 
-创建后状态为 `pending`，需在审批中心处理。
+创建后状态为 `pending`，需在审批中心处理。`employee_id` 自动=当前用户（admin/boss 除外可代提）。
 
-### 4.5 generate-salary — 生成工资单
+### 4.5 create-employee — 创建员工
 
-```json
-POST /mcp/generate-salary
-{
-  "period": "2026-04",
-  "overwrite": false
-}
-```
-
-需要 admin/boss/hr 权限。返回提示调用 API 端点。
-
-### 4.6 generate-subsidy-expected — 生成补贴应收
-
-```json
-POST /mcp/generate-subsidy-expected
-{
-  "period": "2026-04"
-}
-```
-
-需要 admin/boss/hr 权限。
-
-### 4.7 create-employee — 创建员工
+角色：`boss / hr`
 
 ```json
 POST /mcp/create-employee
@@ -353,9 +518,11 @@ POST /mcp/create-employee
 }
 ```
 
-需要 admin/boss/hr 权限。工号全局唯一。
+工号全局唯一。
 
-### 4.8 query-employees — 查询员工列表
+### 4.6 query-employees — 查询员工列表
+
+角色：`boss / hr / finance / sales_manager`
 
 ```json
 POST /mcp/query-employees
@@ -367,9 +534,9 @@ POST /mcp/query-employees
 }
 ```
 
-需要 boss/hr/finance/sales_manager 权限。
+### 4.7 bind-employee-brand — 绑定员工品牌岗位
 
-### 4.9 bind-employee-brand — 绑定员工品牌岗位
+角色：`boss / hr`
 
 ```json
 POST /mcp/bind-employee-brand
@@ -383,9 +550,11 @@ POST /mcp/bind-employee-brand
 }
 ```
 
-需要 boss/hr 权限。`is_primary=true` 时自动取消该员工其他品牌的主属标记。
+`is_primary=true` 时自动取消该员工其他品牌的主属标记。
 
-### 4.10 create-user — 创建登录账号
+### 4.8 create-user — 创建登录账号
+
+角色：`boss`
 
 ```json
 POST /mcp/create-user
@@ -397,9 +566,38 @@ POST /mcp/create-user
 }
 ```
 
-仅 boss/admin 可操作。用户名全局唯一。
+用户名全局唯一。
+
+### 4.9 generate-salary — 生成工资单
+
+角色：`boss / finance`
+
+```json
+POST /mcp/generate-salary
+{
+  "period": "2026-04",
+  "overwrite": false
+}
+```
+
+一键生成本期工资单。
+
+### 4.10 generate-subsidy-expected — 生成补贴应收
+
+角色：`boss / finance`
+
+```json
+POST /mcp/generate-subsidy-expected
+{
+  "period": "2026-04"
+}
+```
+
+生成本月厂家工资补贴应收。
 
 ### 4.11 create-fund-transfer — 创建资金调拨申请
+
+角色：`boss / finance`
 
 ```json
 POST /mcp/create-fund-transfer
@@ -413,13 +611,226 @@ POST /mcp/create-fund-transfer
 
 从 master 现金池调拨到品牌项目账户（现金或融资）。创建后状态为"待审批"，需老板审批后执行。
 
+### 4.12 update-customer — 编辑客户信息
+
+角色：`boss / salesman / sales_manager`
+
+```json
+POST /mcp/update-customer
+{
+  "customer_id": "客户 ID",
+  "name": "可选",
+  "contact_name": "可选",
+  "contact_phone": "可选",
+  "settlement_mode": "可选"
+}
+```
+
+仅更新传入的非空字段。
+
+### 4.13 create-purchase-order — 创建采购单
+
+角色：`boss / purchase / warehouse`
+
+```json
+POST /mcp/create-purchase-order
+{
+  "supplier_id": "供应商 ID",
+  "brand_id": "品牌 ID",
+  "warehouse_id": "仓库 ID",
+  "items": [
+    {"product_id": "商品 ID", "quantity": 10, "unit_price": 150.00}
+  ],
+  "notes": "可选"
+}
+```
+
+状态为 `pending`，需审批后执行。
+
+### 4.14 create-expense — 创建费用/报销
+
+角色：`boss / finance`
+
+```json
+POST /mcp/create-expense
+{
+  "brand_id": "品牌 ID",
+  "category": "f_class / daily",
+  "amount": 5000,
+  "description": "描述",
+  "expense_date": "可选，YYYY-MM-DD"
+}
+```
+
+状态为 `pending`，需审批。
+
+### 4.15 create-inspection-case — 创建稽查案件
+
+角色：`boss / finance`
+
+```json
+POST /mcp/create-inspection-case
+{
+  "brand_id": "品牌 ID",
+  "case_type": "inspection_violation / market_cleanup / ...",
+  "direction": "outflow / inflow",
+  "product_id": "可选",
+  "quantity": "可选，瓶数",
+  "deal_unit_price": "可选，到手价",
+  "purchase_price": "可选，回收价/买入价",
+  "sale_price": "可选，转卖价",
+  "penalty_amount": "可选，罚款",
+  "notes": "可选"
+}
+```
+
+自动计算 `profit_loss`。A1 亏损公式：`-(回收价 - 到手价) * 瓶数 - 罚款`。
+
+### 4.16 create-sales-target — 创建销售目标
+
+角色：`boss / sales_manager`
+
+```json
+POST /mcp/create-sales-target
+{
+  "target_level": "company / brand / employee",
+  "target_year": 2026,
+  "target_month": "可选",
+  "brand_id": "可选（品牌级必填）",
+  "employee_id": "可选（员工级必填）",
+  "sales_target": 1000000,
+  "receipt_target": 800000
+}
+```
+
+boss 建的目标直接 `approved`；sales_manager 建的走 `pending_approval`。
+
+### 4.17 update-order-status — 更新订单状态
+
+角色：`boss / warehouse / salesman`
+
+```json
+POST /mcp/update-order-status
+{
+  "order_id": "订单 ID",
+  "action": "ship / confirm-delivery / cancel"
+}
+```
+
+- `ship`：approved → shipped（发货）
+- `confirm-delivery`：shipped → delivered（确认送达）
+- `cancel`：pending/approved → rejected（取消）
+
+### 4.18 create-financing-order — 创建融资单
+
+角色：`boss / finance`
+
+```json
+POST /mcp/create-financing-order
+{
+  "brand_id": "品牌 ID",
+  "amount": 100000,
+  "interest_rate": "可选，日利率",
+  "start_date": "YYYY-MM-DD",
+  "maturity_date": "可选，YYYY-MM-DD",
+  "bank_name": "可选",
+  "notes": "可选"
+}
+```
+
+自动查找品牌融资账户，增加余额，记录流水。
+
+### 4.19 create-product — 创建商品
+
+角色：`boss / warehouse`
+
+```json
+POST /mcp/create-product
+{
+  "code": "SKU-001",
+  "name": "商品名",
+  "brand_id": "品牌 ID",
+  "bottles_per_case": 6,
+  "sale_price": "可选，售价",
+  "cost_price": "可选，成本价"
+}
+```
+
+编码全局唯一。
+
+### 4.20 create-supplier — 创建供应商
+
+角色：`boss / purchase / warehouse`
+
+```json
+POST /mcp/create-supplier
+{
+  "code": "SUP-001",
+  "name": "供应商名",
+  "contact_name": "可选",
+  "contact_phone": "可选",
+  "address": "可选"
+}
+```
+
+编码全局唯一。
+
+### 4.21 receive-purchase-order — 采购收货
+
+角色：`boss / warehouse / purchase`
+
+```json
+POST /mcp/receive-purchase-order
+{
+  "po_id": "采购单 ID",
+  "received_items": [
+    {"product_id": "商品 ID", "received_quantity": 10}
+  ]
+}
+```
+
+将采购单状态从 approved/shipped 更新为 received。
+
+### 4.22 update-employee — 编辑员工信息
+
+角色：`boss / hr`
+
+```json
+POST /mcp/update-employee
+{
+  "employee_id": "员工 ID",
+  "name": "可选",
+  "phone": "可选",
+  "status": "可选，active/on_leave/left",
+  "social_security": "可选",
+  "company_social_security": "可选"
+}
+```
+
+仅更新传入的非空字段。
+
+### 4.23 settle-commission — 结算提成
+
+角色：`boss / hr / finance`
+
+```json
+POST /mcp/settle-commission
+{
+  "commission_id": "提成记录 ID"
+}
+```
+
+将提成状态设为 `settled`，记录结算时间。
+
 ---
 
-## 5. 审批工具（5 个）
+## 5. 审批工具（11 个）
 
-仅 boss/admin 可操作（部分 hr 也可）。
+审批类工具，按各自角色要求控制访问。
 
 ### 5.1 confirm-order-payment — 确认收款
+
+角色：`boss / finance`
 
 ```json
 POST /mcp/confirm-order-payment
@@ -432,6 +843,8 @@ POST /mcp/confirm-order-payment
 
 ### 5.2 approve-leave — 审批请假
 
+角色：`boss / hr`
+
 ```json
 POST /mcp/approve-leave
 {
@@ -441,9 +854,9 @@ POST /mcp/approve-leave
 }
 ```
 
-boss/hr 可操作。
-
 ### 5.3 approve-salary — 审批工资
+
+角色：`boss / finance`
 
 ```json
 POST /mcp/approve-salary
@@ -454,9 +867,11 @@ POST /mcp/approve-salary
 }
 ```
 
-仅 boss/admin。前提：`status=pending_approval`。
+前提：`status=pending_approval`。
 
 ### 5.4 approve-sales-target — 审批销售目标
+
+角色：`boss / sales_manager`
 
 ```json
 POST /mcp/approve-sales-target
@@ -467,9 +882,11 @@ POST /mcp/approve-sales-target
 }
 ```
 
-仅 boss/admin。前提：`status=pending_approval`。
+前提：`status=pending_approval`。
 
 ### 5.5 approve-fund-transfer — 审批资金调拨
+
+角色：`boss`
 
 ```json
 POST /mcp/approve-fund-transfer
@@ -478,7 +895,95 @@ POST /mcp/approve-fund-transfer
 }
 ```
 
-仅 boss/admin。返回提示调用 API 端点完成审批。
+批准后直接执行转账（master → 品牌账户）。
+
+### 5.6 approve-purchase-order — 审批采购单
+
+角色：`boss / finance`
+
+```json
+POST /mcp/approve-purchase-order
+{
+  "po_id": "采购单 ID",
+  "action": "approve / reject",
+  "reject_reason": "可选，驳回时填"
+}
+```
+
+approve → approved；reject → cancelled。
+
+### 5.7 approve-expense — 审批费用
+
+角色：`boss / finance`
+
+```json
+POST /mcp/approve-expense
+{
+  "expense_id": "费用 ID",
+  "action": "approve / reject / pay",
+  "reject_reason": "可选，驳回时填"
+}
+```
+
+approve（通过）/ reject（驳回）/ pay（标记已付）。
+
+### 5.8 approve-inspection — 执行稽查案件
+
+角色：`boss / finance`
+
+```json
+POST /mcp/approve-inspection
+{
+  "case_id": "稽查案件 ID",
+  "action": "execute"
+}
+```
+
+pending → confirmed。只有已执行案件才进利润台账。
+
+### 5.9 reject-fund-transfer — 拒绝资金调拨
+
+角色：`boss`
+
+```json
+POST /mcp/reject-fund-transfer
+{
+  "transfer_id": "调拨流水 ID",
+  "reject_reason": "可选"
+}
+```
+
+将待审批状态改为已驳回。
+
+### 5.10 approve-financing-repayment — 审批融资还款
+
+角色：`boss / finance`
+
+```json
+POST /mcp/approve-financing-repayment
+{
+  "repayment_id": "还款申请 ID",
+  "action": "approve / reject",
+  "reject_reason": "可选，驳回时填"
+}
+```
+
+approve（通过并执行扣款）/ reject（驳回）。
+
+### 5.11 approve-expense-claim — 审批报销理赔
+
+角色：`boss / finance`
+
+```json
+POST /mcp/approve-expense-claim
+{
+  "claim_id": "理赔单 ID",
+  "action": "approve / reject / pay",
+  "reject_reason": "可选，驳回时填"
+}
+```
+
+approve（通过）/ reject（驳回）/ pay（标记已付）。
 
 ---
 
@@ -486,7 +991,11 @@ POST /mcp/approve-fund-transfer
 
 这些工具服务飞书群聊 AI 网关，用 `X-External-Open-Id` 认证。通过 MCP Streamable-HTTP bridge 暴露给 openclaw 等外部 Agent。
 
+JWT 模式下的角色如下（从 catalog.py 取）：
+
 ### 6.1 allocate-settlement-to-claims — 结算分配预览
+
+角色：`boss / finance`
 
 ```json
 POST /mcp/allocate-settlement-to-claims
@@ -497,20 +1006,9 @@ POST /mcp/allocate-settlement-to-claims
 
 AI 按比例生成分配建议（只预览不写入），需财务确认。
 
-### 6.2 external-approve-and-fill-scheme — 厂家审批+填方案号
+### 6.2 query-barcode-tracing — 条码追溯
 
-```json
-POST /mcp/external-approve-and-fill-scheme
-X-External-Open-Id: ou_xxxxx
-{
-  "policy_request_id": "政策申请 ID",
-  "scheme_no": "方案号"
-}
-```
-
-厂家人员审批政策并回填方案号。
-
-### 6.3 query-barcode-tracing — 条码追溯
+角色：`boss / warehouse / salesman / sales_manager / finance`
 
 ```json
 POST /mcp/query-barcode-tracing
@@ -521,7 +1019,9 @@ POST /mcp/query-barcode-tracing
 
 返回完整供应链：条码 → 批次 → 入库流水 → 出库订单 → 客户 → 业务员。
 
-### 6.4 submit-policy-approval — 提交政策审批
+### 6.3 submit-policy-approval — 提交政策审批
+
+角色：`boss / finance / sales_manager / salesman`
 
 ```json
 POST /mcp/submit-policy-approval
@@ -530,7 +1030,9 @@ POST /mcp/submit-policy-approval
 }
 ```
 
-### 6.5 create-policy-usage-record — 创建政策使用记录
+### 6.4 create-policy-usage-record — 创建政策使用记录
+
+角色：`boss / finance / salesman`
 
 ```json
 POST /mcp/create-policy-usage-record
@@ -544,7 +1046,9 @@ POST /mcp/create-policy-usage-record
 
 非发货场景（品鉴会、旅游等）手工创建使用记录。
 
-### 6.6 push-manufacturer-update — 推送厂家通知
+### 6.5 push-manufacturer-update — 推送厂家通知
+
+角色：`boss / finance / sales_manager`
 
 ```json
 POST /mcp/push-manufacturer-update
@@ -555,7 +1059,9 @@ POST /mcp/push-manufacturer-update
 }
 ```
 
-### 6.7 create-order-from-text — 自然语言建单
+### 6.6 create-order-from-text — 自然语言建单
+
+角色：`boss / salesman / sales_manager`
 
 ```json
 POST /mcp/create-order-from-text
@@ -565,6 +1071,8 @@ POST /mcp/create-order-from-text
 ```
 
 AI 解析自然语言，匹配客户/商品/政策，创建订单。
+
+> `external-approve-and-fill-scheme` 走飞书 `X-External-Open-Id` 认证，不走 JWT，不在 catalog 中。
 
 ---
 
@@ -605,7 +1113,7 @@ Agent 收到上述友好错误文本后可自行决定是否重试。
 |---|---|
 | 认证 | JWT / Feishu Open ID 双模式 |
 | 数据隔离 | JWT → RLS 14 张表强制过滤；飞书 → brand_scope 过滤 |
-| 角色控制 | 审批工具强制 `require_role('boss')` |
+| 角色控制 | 每个工具在 handler 层强制 `require_mcp_role(...)` 校验 |
 | 审计 | 所有写入操作记 `audit_log` |
 | Agent 防御 | erp_app 角色 NOBYPASSRLS，raw SQL 也无法越权 |
 
@@ -656,10 +1164,10 @@ backend/app/mcp/
 ├── auth.py              # 双认证（JWT / Feishu Open ID）
 ├── deps.py              # MCP 专用 DB 依赖（RLS 上下文注入）
 ├── bridge.py            # Streamable-HTTP bridge（loopback 转发 + 超时处理）
-├── catalog.py           # 工具目录（供 bridge 列出 + 路由）
-├── tools_query.py       # 14 个查询工具
-├── tools_action.py      # 11 个操作工具
-├── tools_approval.py    # 5 个审批工具
+├── catalog.py           # 工具目录（64 个工具，供 bridge 列出 + 路由）
+├── tools_query.py       # 24 个查询工具
+├── tools_action.py      # 23 个操作工具
+├── tools_approval.py    # 11 个审批工具
 └── tools.py             # 6 个飞书专用工具（legacy 保留）
 ```
 

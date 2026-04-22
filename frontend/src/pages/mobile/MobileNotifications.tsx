@@ -2,7 +2,7 @@ import { Badge, Button, Card, Empty, Space, Tag, Typography } from 'antd';
 import { ArrowLeftOutlined, BellOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 
 const { Title, Text } = Typography;
 
@@ -18,7 +18,7 @@ function MobileNotifications() {
 
   const { data: list = [], isLoading } = useQuery<NotificationItem[]>({
     queryKey: ['m-noti-list'],
-    queryFn: () => api.get('/notifications', { params: { limit: 100 } }).then(r => r.data),
+    queryFn: () => api.get('/notifications', { params: { limit: 100 } }).then(r => extractItems<NotificationItem>(r.data)),
   });
 
   const markReadMut = useMutation({

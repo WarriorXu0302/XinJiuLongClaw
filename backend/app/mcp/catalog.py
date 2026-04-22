@@ -75,7 +75,7 @@ ACTION_TOOLS: list[ToolEntry] = [
      "description": "登记订单收款（上传凭证等价动作）。建 Receipt+更新 payment_status。"},
     {"name": "create-customer", "path": "/mcp/create-customer",
      "roles": ["boss", "salesman", "sales_manager"],
-     "description": "创建客户并绑定品牌-业务员关系。"},
+     "description": "创建客户并绑定品牌-业务员关系。customer_type 只能是 channel（渠道）或 group_purchase（团购）。"},
     {"name": "create-leave-request", "path": "/mcp/create-leave-request",
      "roles": ["*"],
      "description": "提交请假申请。employee_id 自动=当前用户（admin/boss 除外可代提）。"},

@@ -5,7 +5,7 @@ import { DownloadOutlined, SyncOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 
 const { Title, Text } = Typography;
 
@@ -18,7 +18,7 @@ interface TrendPoint {
 function EmployeeTrendChart({ employeeId }: { employeeId: string }) {
   const { data, isLoading } = useQuery<{ trend: TrendPoint[] }>({
     queryKey: ['emp-trend', employeeId],
-    queryFn: () => api.get('/performance/employee-trend', { params: { employee_id: employeeId, months: 6 } }).then(r => r.data),
+    queryFn: () => api.get('/performance/employee-trend', { params: { employee_id: employeeId, months: 6 } }).then(r => extractItems(r.data)),
   });
   if (isLoading || !data) return <Text type="secondary">加载中...</Text>;
   const salesChart = data.trend.flatMap(t => ([
@@ -84,7 +84,7 @@ function PerformanceDashboard() {
 
   const { data = [], isLoading, refetch } = useQuery<Row[]>({
     queryKey: ['performance-monthly', period],
-    queryFn: () => api.get(`/performance/employee-monthly`, { params: { period } }).then(r => r.data),
+    queryFn: () => api.get(`/performance/employee-monthly`, { params: { period } }).then(r => extractItems(r.data)),
   });
 
   const refreshMut = useMutation({

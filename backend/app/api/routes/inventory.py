@@ -6,7 +6,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -53,33 +53,35 @@ async def list_batches(
     limit: int = Query(200, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(Inventory).where(Inventory.quantity > 0)
+    base = select(Inventory).where(Inventory.quantity > 0)
     if brand_id:
-        stmt = stmt.join(Product, Inventory.product_id == Product.id).where(Product.brand_id == brand_id)
+        base = base.join(Product, Inventory.product_id == Product.id).where(Product.brand_id == brand_id)
     if product_id:
-        stmt = stmt.where(Inventory.product_id == product_id)
+        base = base.where(Inventory.product_id == product_id)
     if warehouse_id:
-        stmt = stmt.where(Inventory.warehouse_id == warehouse_id)
-    stmt = (
-        stmt.order_by(Inventory.stock_in_date.asc(), Inventory.created_at.asc())
-        .offset(skip)
-        .limit(limit)
-    )
-    rows = (await db.execute(stmt)).scalars().all()
-    return [
-        {
-            "product_id": r.product_id,
-            "warehouse_id": r.warehouse_id,
-            "batch_no": r.batch_no,
-            "quantity": r.quantity,
-            "cost_price": float(r.cost_price),
-            "stock_in_date": str(r.stock_in_date) if r.stock_in_date else None,
-            "product_name": r.product.name if r.product else None,
-            "warehouse_name": r.warehouse.name if r.warehouse else None,
-            "created_at": str(r.created_at) if r.created_at else None,
-        }
-        for r in rows
-    ]
+        base = base.where(Inventory.warehouse_id == warehouse_id)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(
+        base.order_by(Inventory.stock_in_date.asc(), Inventory.created_at.asc())
+        .offset(skip).limit(limit)
+    )).scalars().all()
+    return {
+        "items": [
+            {
+                "product_id": r.product_id,
+                "warehouse_id": r.warehouse_id,
+                "batch_no": r.batch_no,
+                "quantity": r.quantity,
+                "cost_price": float(r.cost_price),
+                "stock_in_date": str(r.stock_in_date) if r.stock_in_date else None,
+                "product_name": r.product.name if r.product else None,
+                "warehouse_name": r.warehouse.name if r.warehouse else None,
+                "created_at": str(r.created_at) if r.created_at else None,
+            }
+            for r in rows
+        ],
+        "total": total,
+    }
 
 
 # ── Stock-out (PRD §3.4.3) ──────────────────────────────────────────
@@ -268,7 +270,7 @@ async def direct_outbound(body: DirectOutboundRequest, user: CurrentUser, db: As
 # ── Stock-flow list (GET /api/inventory/stock-flow) ─────────────────
 
 
-@router.get("/stock-flow", response_model=list[StockFlowResponse])
+@router.get("/stock-flow")
 async def list_stock_flow(
     product_id: Optional[str] = Query(None),
     warehouse_id: Optional[str] = Query(None),
@@ -278,18 +280,18 @@ async def list_stock_flow(
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(StockFlow)
+    base = select(StockFlow)
     if brand_id:
-        stmt = stmt.join(Warehouse, StockFlow.warehouse_id == Warehouse.id).where(Warehouse.brand_id == brand_id)
+        base = base.join(Warehouse, StockFlow.warehouse_id == Warehouse.id).where(Warehouse.brand_id == brand_id)
     if product_id:
-        stmt = stmt.where(StockFlow.product_id == product_id)
+        base = base.where(StockFlow.product_id == product_id)
     if warehouse_id:
-        stmt = stmt.where(StockFlow.warehouse_id == warehouse_id)
+        base = base.where(StockFlow.warehouse_id == warehouse_id)
     if flow_type:
-        stmt = stmt.where(StockFlow.flow_type == flow_type)
-    stmt = stmt.order_by(StockFlow.created_at.desc()).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return rows
+        base = base.where(StockFlow.flow_type == flow_type)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(StockFlow.created_at.desc()).offset(skip).limit(limit))).scalars().all()
+    return {"items": rows, "total": total}
 
 
 # ── Barcode binding (PRD §6.1: POST /api/inventory/stock-ins/{id}/bind-barcodes)

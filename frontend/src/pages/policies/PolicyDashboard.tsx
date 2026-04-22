@@ -1,7 +1,7 @@
 import { Card, Col, Row, Statistic, Table, Tag, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';
 
 const { Title, Text } = Typography;
@@ -25,7 +25,7 @@ function PolicyDashboard() {
 
   const { data: requests = [], isLoading } = useQuery<PolicyRequest[]>({
     queryKey: ['policy-dashboard', brandId],
-    queryFn: () => api.get('/policies/requests', { params: { ...params, limit: '500' } }).then(r => r.data),
+    queryFn: () => api.get('/policies/requests', { params: { ...params, limit: '500' } }).then(r => extractItems<PolicyRequest>(r.data)),
   });
 
   const approvedRequests = requests.filter(r => r.status === 'approved' && r.request_items?.length > 0);

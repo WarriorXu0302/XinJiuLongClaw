@@ -4,7 +4,7 @@ import { BankOutlined, DownloadOutlined, PlusOutlined, SwapOutlined } from '@ant
 import { exportExcel } from '../../utils/exportExcel';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useBrandStore } from '../../stores/brandStore';
 import { useCanSeeMasterAccount } from '../../stores/authStore';
 
@@ -38,14 +38,14 @@ function AccountOverview() {
 
   const { data: flows = [] } = useQuery<FundFlowItem[]>({
     queryKey: ['fund-flows', selectedBrandId],
-    queryFn: () => api.get('/accounts/fund-flows', { params: { limit: '200', ...(selectedBrandId ? { brand_id: selectedBrandId } : {}) } }).then(r => r.data),
+    queryFn: () => api.get('/accounts/fund-flows', { params: { limit: '200', ...(selectedBrandId ? { brand_id: selectedBrandId } : {}) } }).then(r => extractItems(r.data)),
   });
 
   // Financing orders for the selected brand (active/partially_repaid only)
   const { data: financingOrders = [] } = useQuery<FinancingOrder[]>({
     queryKey: ['financing-orders-active', selectedBrandId],
     queryFn: () => api.get('/financing-orders', { params: selectedBrandId ? { brand_id: selectedBrandId } : {} }).then(r =>
-      r.data.filter((o: any) => o.status === 'active' || o.status === 'partially_repaid')
+      extractItems(r.data).filter((o: any) => o.status === 'active' || o.status === 'partially_repaid')
     ),
     enabled: isFinancingMode,
   });
@@ -62,17 +62,17 @@ function AccountOverview() {
   const expectedPoTotal = repayAmount + fClassAmount;
   const { data: suppliers = [] } = useQuery<any[]>({
     queryKey: ['suppliers-select', selectedBrandId],
-    queryFn: () => api.get('/suppliers', { params: selectedBrandId ? { brand_id: selectedBrandId } : {} }).then(r => r.data),
+    queryFn: () => api.get('/suppliers', { params: selectedBrandId ? { brand_id: selectedBrandId } : {} }).then(r => extractItems(r.data)),
     enabled: needPO,
   });
   const { data: warehouses = [] } = useQuery<any[]>({
     queryKey: ['warehouses-select', selectedBrandId],
-    queryFn: () => api.get('/inventory/warehouses', { params: selectedBrandId ? { brand_id: selectedBrandId } : {} }).then(r => r.data),
+    queryFn: () => api.get('/inventory/warehouses', { params: selectedBrandId ? { brand_id: selectedBrandId } : {} }).then(r => extractItems(r.data)),
     enabled: needPO,
   });
   const { data: products = [] } = useQuery<any[]>({
     queryKey: ['products-select', selectedBrandId],
-    queryFn: () => api.get('/products', { params: selectedBrandId ? { brand_id: selectedBrandId } : {} }).then(r => r.data),
+    queryFn: () => api.get('/products', { params: selectedBrandId ? { brand_id: selectedBrandId } : {} }).then(r => extractItems(r.data)),
     enabled: needPO,
   });
   const mainWarehouses = warehouses.filter((w: any) => w.warehouse_type === 'main');

@@ -1,7 +1,7 @@
 """
 Authentication API routes — login, token refresh, user info.
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -182,23 +182,32 @@ def _user_to_dict(u: User) -> dict:
 
 
 @router.get("/users")
-async def list_users(user: CurrentUser, db: AsyncSession = Depends(get_db)):
+async def list_users(
+    user: CurrentUser,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
     """List all user accounts."""
-    stmt = (
-        select(User)
-        .options(
+    from app.core.permissions import require_role
+    require_role(user, "boss", "hr")
+    from sqlalchemy import func
+    base = select(User)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(
+        base.options(
             selectinload(User.roles).selectinload(UserRole.role),
             selectinload(User.employee),
-        )
-        .order_by(User.created_at.desc())
-    )
-    rows = (await db.execute(stmt)).scalars().all()
-    return [_user_to_dict(u) for u in rows]
+        ).order_by(User.created_at.desc()).offset(skip).limit(limit)
+    )).scalars().all()
+    return {"items": [_user_to_dict(u) for u in rows], "total": total}
 
 
 @router.post("/users", status_code=201)
 async def create_user(body: CreateUserRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     """Create a new user account with optional role assignment."""
+    from app.core.permissions import require_role
+    require_role(user, "boss")
     existing = (await db.execute(select(User).where(User.username == body.username))).scalar_one_or_none()
     if existing:
         raise HTTPException(400, f"用户名 '{body.username}' 已存在")
@@ -229,6 +238,8 @@ async def create_user(body: CreateUserRequest, user: CurrentUser, db: AsyncSessi
 
 @router.put("/users/{user_id}")
 async def update_user(user_id: str, body: UpdateUserRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    from app.core.permissions import require_role
+    require_role(user, "boss")
     u = await db.get(User, user_id)
     if u is None:
         raise HTTPException(404, "用户不存在")
@@ -248,6 +259,8 @@ async def update_user(user_id: str, body: UpdateUserRequest, user: CurrentUser, 
 
 @router.post("/users/{user_id}/reset-password")
 async def reset_password(user_id: str, body: ResetPasswordRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    from app.core.permissions import require_role
+    require_role(user, "boss")
     u = await db.get(User, user_id)
     if u is None:
         raise HTTPException(404, "用户不存在")
@@ -259,6 +272,8 @@ async def reset_password(user_id: str, body: ResetPasswordRequest, user: Current
 @router.put("/users/{user_id}/roles")
 async def set_user_roles(user_id: str, body: SetRolesRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     """Replace all roles for a user."""
+    from app.core.permissions import require_role
+    require_role(user, "boss")
     u = await db.get(User, user_id)
     if u is None:
         raise HTTPException(404, "用户不存在")
@@ -267,6 +282,7 @@ async def set_user_roles(user_id: str, body: SetRolesRequest, user: CurrentUser,
     existing = (await db.execute(select(UserRole).where(UserRole.user_id == user_id))).scalars().all()
     for ur in existing:
         await db.delete(ur)
+    await db.flush()
 
     # Add new roles
     if body.role_codes:

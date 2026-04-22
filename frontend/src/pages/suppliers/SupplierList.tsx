@@ -3,7 +3,7 @@ import { Button, Form, Input, InputNumber, message, Modal, Select, Table, Tag } 
 import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';
 
 interface SupplierItem {
@@ -47,16 +47,23 @@ function SupplierList() {
   const [editingRecord, setEditingRecord] = useState<SupplierItem | null>(null);
 
   const { brandId, params } = useBrandFilter();
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
   const { data: brands = [] } = useQuery<{id: string; name: string}[]>({
     queryKey: ['brands-list'],
-    queryFn: () => api.get('/products/brands').then(r => r.data),
+    queryFn: () => api.get('/products/brands').then(r => extractItems(r.data)),
   });
 
-  const { data = [], isLoading } = useQuery({
-    queryKey: ['suppliers', brandId],
-    queryFn: async () => { const { data } = await api.get('/suppliers', { params }); return data; },
+  const { data: listResp, isLoading } = useQuery<{ items: SupplierItem[]; total: number }>({
+    queryKey: ['suppliers', brandId, page, pageSize],
+    queryFn: async () => {
+      const { data } = await api.get('/suppliers', { params: { ...params, skip: (page - 1) * pageSize, limit: pageSize } });
+      return data;
+    },
   });
+  const data = listResp?.items ?? [];
+  const total = listResp?.total ?? 0;
 
   const createMutation = useMutation({
     mutationFn: async (values: SupplierFormValues) => {
@@ -151,7 +158,7 @@ function SupplierList() {
         <h2 style={{ margin: 0 }}>供应商管理</h2>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingRecord(null); setModalOpen(true); }}>新建供应商</Button>
       </div>
-      <Table<SupplierItem> columns={columns} dataSource={data} rowKey="id" loading={isLoading} scroll={{ x: 900 }} pagination={{ pageSize: 20, showSizeChanger: true }} />
+      <Table<SupplierItem> columns={columns} dataSource={data} rowKey="id" loading={isLoading} scroll={{ x: 900 }} pagination={{ current: page, pageSize, total, showTotal: (t) => `共 ${t} 条`, showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }} />
 
       <Modal
         title={editingRecord ? '编辑供应商' : '新建供应商'}

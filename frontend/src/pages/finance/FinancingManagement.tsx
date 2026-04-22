@@ -4,7 +4,7 @@ import { BankOutlined, DollarOutlined, PlusOutlined, RollbackOutlined } from '@a
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';
 
 const { Title, Text } = Typography;
@@ -33,20 +33,24 @@ function FinancingManagement() {
   const [detailOrder, setDetailOrder] = useState<FinancingOrder | null>(null);
   const [createForm] = Form.useForm();
   const { brandId, params } = useBrandFilter();
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
-  const { data: orders = [], isLoading } = useQuery<FinancingOrder[]>({
-    queryKey: ['financing-orders', brandId],
-    queryFn: () => api.get('/financing-orders', { params }).then(r => r.data),
+  const { data: rawOrders, isLoading } = useQuery<{ items: FinancingOrder[]; total: number }>({
+    queryKey: ['financing-orders', brandId, page, pageSize],
+    queryFn: () => api.get('/financing-orders', { params: { ...params, skip: (page - 1) * pageSize, limit: pageSize } }).then(r => r.data),
   });
+  const orders = rawOrders?.items ?? [];
+  const ordersTotal = rawOrders?.total ?? 0;
 
   const { data: accounts = [] } = useQuery<Account[]>({
     queryKey: ['accounts-select', brandId],
-    queryFn: () => api.get('/accounts', { params }).then(r => r.data),
+    queryFn: () => api.get('/accounts', { params }).then(r => extractItems(r.data)),
   });
 
   const { data: repayments = [] } = useQuery<Repayment[]>({
     queryKey: ['financing-repayments', detailOrder?.id],
-    queryFn: () => api.get(`/financing-orders/${detailOrder!.id}/repayments`).then(r => r.data),
+    queryFn: () => api.get(`/financing-orders/${detailOrder!.id}/repayments`).then(r => extractItems(r.data)),
     enabled: !!detailOrder,
   });
 
@@ -149,7 +153,7 @@ function FinancingManagement() {
       </Row>
 
       <Table<FinancingOrder> columns={columns} dataSource={orders} rowKey="id" loading={isLoading}
-        size="middle" pagination={{ pageSize: 20 }} />
+        size="middle" pagination={{ current: page, pageSize, total: ordersTotal, showTotal: t => `共 ${t} 条`, showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }} />
 
       {/* 新建融资订单 */}
       <Modal title="新建融资订单" open={createOpen} width={600}

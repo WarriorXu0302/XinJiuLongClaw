@@ -39,30 +39,30 @@ async def list_notifications(
 ):
     """List notifications for the current user, newest first."""
     user_id = user["sub"]
-    stmt = (
-        select(NotificationLog)
-        .where(
-            NotificationLog.recipient == user_id,
-            NotificationLog.channel == "in_app",
-        )
-        .order_by(NotificationLog.created_at.desc())
-        .offset(skip)
-        .limit(limit)
+    base = select(NotificationLog).where(
+        NotificationLog.recipient == user_id,
+        NotificationLog.channel == "in_app",
     )
-    rows = (await db.execute(stmt)).scalars().all()
-    return [
-        {
-            "id": n.id,
-            "title": n.title,
-            "content": n.content,
-            "status": n.status,
-            "related_entity_type": n.related_entity_type,
-            "related_entity_id": n.related_entity_id,
-            "read_at": str(n.read_at) if n.read_at else None,
-            "created_at": str(n.created_at) if n.created_at else None,
-        }
-        for n in rows
-    ]
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(
+        base.order_by(NotificationLog.created_at.desc()).offset(skip).limit(limit)
+    )).scalars().all()
+    return {
+        "items": [
+            {
+                "id": n.id,
+                "title": n.title,
+                "content": n.content,
+                "status": n.status,
+                "related_entity_type": n.related_entity_type,
+                "related_entity_id": n.related_entity_id,
+                "read_at": str(n.read_at) if n.read_at else None,
+                "created_at": str(n.created_at) if n.created_at else None,
+            }
+            for n in rows
+        ],
+        "total": total,
+    }
 
 
 @router.post("/{notification_id}/mark-read")

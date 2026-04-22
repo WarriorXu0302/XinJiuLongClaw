@@ -4,7 +4,7 @@ MCP 操作类工具 — 写入数据（受 RLS + 角色约束）。
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -171,6 +171,7 @@ class MCPCreateCustomerRequest(BaseModel):
     code: str
     name: str
     brand_id: str
+    customer_type: Literal["channel", "group_purchase"] = "channel"
     salesman_id: Optional[str] = None
     contact_name: Optional[str] = None
     contact_phone: Optional[str] = None
@@ -192,6 +193,7 @@ async def mcp_create_customer(body: MCPCreateCustomerRequest, db: AsyncSession =
         body.salesman_id = emp_id
 
     obj = Customer(id=str(uuid.uuid4()), code=body.code, name=body.name,
+                   customer_type=body.customer_type,
                    contact_name=body.contact_name, contact_phone=body.contact_phone,
                    settlement_mode=body.settlement_mode, salesman_id=body.salesman_id)
     db.add(obj)

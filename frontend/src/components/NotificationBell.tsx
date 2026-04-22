@@ -3,7 +3,7 @@ import { Badge, Button, Empty, Popover, Spin, Typography } from 'antd';
 import { BellOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import api from '../api/client';
+import api, { extractItems } from '../api/client';
 
 const { Text } = Typography;
 
@@ -30,7 +30,7 @@ function NotificationBell() {
 
   const { data: notifications = [], isLoading } = useQuery<NotificationItem[]>({
     queryKey: ['notifications-recent'],
-    queryFn: () => api.get('/notifications', { params: { limit: 20 } }).then(r => r.data),
+    queryFn: () => api.get('/notifications', { params: { limit: 20 } }).then(r => extractItems<NotificationItem>(r.data)),
     refetchInterval: 15_000,
     enabled: open,
   });

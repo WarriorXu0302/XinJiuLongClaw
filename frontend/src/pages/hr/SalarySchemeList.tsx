@@ -3,7 +3,7 @@ import { Button, Form, InputNumber, message, Modal, Select, Space, Table, Tag, T
 import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 
 const { Title, Text } = Typography;
 
@@ -29,18 +29,22 @@ function SalarySchemeList() {
   const [form] = Form.useForm();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Scheme | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
 
-  const { data: schemes = [], isLoading } = useQuery<Scheme[]>({
-    queryKey: ['salary-schemes'],
-    queryFn: () => api.get('/payroll/salary-schemes').then(r => r.data),
+  const { data: rawData, isLoading } = useQuery<{ items: Scheme[]; total: number }>({
+    queryKey: ['salary-schemes', page, pageSize],
+    queryFn: () => api.get('/payroll/salary-schemes', { params: { skip: (page - 1) * pageSize, limit: pageSize } }).then(r => r.data),
   });
+  const schemes = rawData?.items ?? [];
+  const schemesTotal = rawData?.total ?? 0;
   const { data: positions = [] } = useQuery<Position[]>({
     queryKey: ['positions'],
-    queryFn: () => api.get('/payroll/positions').then(r => r.data),
+    queryFn: () => api.get('/payroll/positions').then(r => extractItems<Position>(r.data)),
   });
   const { data: brands = [] } = useQuery<Brand[]>({
     queryKey: ['brands-select'],
-    queryFn: () => api.get('/products/brands').then(r => r.data),
+    queryFn: () => api.get('/products/brands').then(r => extractItems<Brand>(r.data)),
   });
 
   const createMut = useMutation({
@@ -127,13 +131,13 @@ function SalarySchemeList() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Space>
           <Title level={4} style={{ margin: 0 }}>薪酬方案</Title>
-          <Text type="secondary">共 {schemes.length} 套（按"品牌 × 岗位"配置）</Text>
+          <Text type="secondary">共 {schemesTotal} 套（按"品牌 × 岗位"配置）</Text>
         </Space>
         <Button type="primary" icon={<PlusOutlined />} onClick={openNew}>新建方案</Button>
       </div>
 
       <Table<Scheme> columns={columns} dataSource={schemes} rowKey="id" loading={isLoading}
-        pagination={{ pageSize: 50 }} size="middle" />
+        pagination={{ current: page, pageSize, total: schemesTotal, showTotal: t => `共 ${t} 条`, showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }} size="middle" />
 
       <Modal title={editing ? '编辑薪酬方案' : '新建薪酬方案'} open={open}
         onOk={submit} onCancel={() => { setOpen(false); setEditing(null); form.resetFields(); }}

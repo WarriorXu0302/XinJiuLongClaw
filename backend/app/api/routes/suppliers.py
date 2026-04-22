@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
 from app.core.database import get_db
+from app.core.permissions import require_role
 from app.core.security import CurrentUser
 from app.models.product import Supplier
 from app.services.audit_service import log_audit
@@ -75,7 +76,7 @@ async def create_supplier(body: SupplierCreate, user: CurrentUser, db: AsyncSess
     return obj
 
 
-@router.get("", response_model=list[SupplierResponse])
+@router.get("")
 async def list_suppliers(
     user: CurrentUser,
     type: str | None = Query(None),
@@ -85,16 +86,17 @@ async def list_suppliers(
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(Supplier)
+    from sqlalchemy import func
+    base = select(Supplier)
     if type:
-        stmt = stmt.where(Supplier.type == type)
+        base = base.where(Supplier.type == type)
     if brand_id:
-        stmt = stmt.where(Supplier.brand_id == brand_id)
+        base = base.where(Supplier.brand_id == brand_id)
     if status:
-        stmt = stmt.where(Supplier.status == status)
-    stmt = stmt.order_by(Supplier.name).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return rows
+        base = base.where(Supplier.status == status)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(Supplier.name).offset(skip).limit(limit))).scalars().all()
+    return {"items": rows, "total": total}
 
 
 @router.get("/{supplier_id}", response_model=SupplierResponse)
@@ -120,6 +122,7 @@ async def update_supplier(
 
 @router.delete("/{supplier_id}", status_code=204)
 async def delete_supplier(supplier_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "warehouse")
     obj = await db.get(Supplier, supplier_id)
     if obj is None:
         raise HTTPException(404, "Supplier not found")

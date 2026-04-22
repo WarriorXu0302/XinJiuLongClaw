@@ -9,7 +9,7 @@ import { BellOutlined, CameraOutlined, EnvironmentOutlined, LoginOutlined, Logou
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useAuthStore } from '../../stores/authStore';
 
 const { Title, Text } = Typography;
@@ -114,17 +114,17 @@ function MobileCheckin() {
 
   const { data: checkins = [] } = useQuery<Checkin[]>({
     queryKey: ['m-checkin'],
-    queryFn: () => api.get('/attendance/checkin', { params: { start_date: today, end_date: today } }).then(r => r.data),
+    queryFn: () => api.get('/attendance/checkin', { params: { start_date: today, end_date: today } }).then(r => extractItems<Checkin>(r.data)),
     refetchInterval: 60000,
   });
   const { data: visits = [] } = useQuery<Visit[]>({
     queryKey: ['m-visits'],
-    queryFn: () => api.get('/attendance/visits', { params: { start_date: today, end_date: today } }).then(r => r.data),
+    queryFn: () => api.get('/attendance/visits', { params: { start_date: today, end_date: today } }).then(r => extractItems<Visit>(r.data)),
     refetchInterval: 60000,
   });
   const { data: customers = [] } = useQuery<Customer[]>({
     queryKey: ['customers-m'],
-    queryFn: () => api.get('/customers').then(r => r.data),
+    queryFn: () => api.get('/customers').then(r => extractItems<Customer>(r.data)),
   });
 
   const { data: unreadCount = 0 } = useQuery<number>({

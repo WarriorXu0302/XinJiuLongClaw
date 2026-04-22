@@ -3,7 +3,7 @@ import { Button, Checkbox, Form, Input, InputNumber, message, Modal, Select, Tab
 import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';
 
 const { Text } = Typography;
@@ -36,22 +36,26 @@ function ClaimList() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm] = Form.useForm();
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
-  const { data: claims = [], isLoading } = useQuery<PolicyClaim[]>({
-    queryKey: ['policy-claims', brandId],
-    queryFn: () => api.get('/policies/claims', { params }).then(r => r.data),
+  const { data: claimsResp, isLoading } = useQuery<{ items: PolicyClaim[]; total: number }>({
+    queryKey: ['policy-claims', brandId, page, pageSize],
+    queryFn: () => api.get('/policies/claims', { params: { ...params, skip: (page - 1) * pageSize, limit: pageSize } }).then(r => r.data),
   });
+  const claims = claimsResp?.items ?? [];
+  const claimsTotal = claimsResp?.total ?? 0;
 
   const { data: settlements = [] } = useQuery<Settlement[]>({
     queryKey: ['settlements'],
-    queryFn: () => api.get('/manufacturer-settlements').then(r => r.data),
+    queryFn: () => api.get('/manufacturer-settlements').then(r => extractItems<Settlement>(r.data)),
     enabled: allocOpen,
   });
 
   // Fetch approved policy requests with fulfilled items for creating new claims
   const { data: policyRequests = [] } = useQuery<any[]>({
     queryKey: ['policy-requests-for-claim', brandId],
-    queryFn: () => api.get('/policies/requests', { params: { ...params, status: 'approved', has_items: true, limit: 200 } }).then(r => r.data),
+    queryFn: () => api.get('/policies/requests', { params: { ...params, status: 'approved', has_items: true, limit: 200 } }).then(r => extractItems(r.data)),
     enabled: createOpen,
   });
 
@@ -65,7 +69,7 @@ function ClaimList() {
 
   const { data: suppliers = [] } = useQuery<any[]>({
     queryKey: ['suppliers-select'],
-    queryFn: () => api.get('/suppliers', { params: { type: 'manufacturer' } }).then(r => r.data),
+    queryFn: () => api.get('/suppliers', { params: { type: 'manufacturer' } }).then(r => extractItems(r.data)),
     enabled: createOpen,
   });
 
@@ -122,7 +126,7 @@ function ClaimList() {
         <Button type="primary" icon={<PlusOutlined />} onClick={() => { setCreateOpen(true); setSelectedItems([]); createForm.resetFields(); }}>新建申报</Button>
       </div>
 
-      <Table<PolicyClaim> columns={claimColumns} dataSource={claims} rowKey="id" loading={isLoading} pagination={{ pageSize: 20 }} />
+      <Table<PolicyClaim> columns={claimColumns} dataSource={claims} rowKey="id" loading={isLoading} pagination={{ current: page, pageSize, total: claimsTotal, showTotal: (t) => '共 ' + t + ' 条', showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }} />
 
       {/* 核销分配弹窗 */}
       <Modal title={`核销分配 — ${activeClaim?.claim_no ?? ''}`} open={allocOpen}

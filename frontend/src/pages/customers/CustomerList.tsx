@@ -5,7 +5,7 @@ import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import { useBrandFilter } from '../../stores/useBrandFilter';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 
 const { Title } = Typography;
 
@@ -48,13 +48,15 @@ function CustomerList() {
   const [orderBrandFilter, setOrderBrandFilter] = useState<string | null>(null);
   const [brandBindCustomer, setBrandBindCustomer] = useState<CustomerItem | null>(null);
   const [brandBindForm] = Form.useForm();
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
   const { brandId, params: brandParams } = useBrandFilter();
 
-  const { data = [], isLoading } = useQuery({
-    queryKey: ['customers', typeFilter, keyword, settlementFilter, brandId],
+  const { data: listResp, isLoading } = useQuery<{ items: CustomerItem[]; total: number }>({
+    queryKey: ['customers', typeFilter, keyword, settlementFilter, brandId, page, pageSize],
     queryFn: async () => {
-      const params: Record<string, string> = {};
+      const params: Record<string, string | number> = { skip: (page - 1) * pageSize, limit: pageSize };
       if (typeFilter) params.customer_type = typeFilter;
       if (keyword) params.keyword = keyword;
       if (settlementFilter) params.settlement_mode = settlementFilter;
@@ -63,21 +65,23 @@ function CustomerList() {
       return data;
     },
   });
+  const data = listResp?.items ?? [];
+  const total = listResp?.total ?? 0;
 
   const { data: employees = [] } = useQuery<{id: string; name: string}[]>({
     queryKey: ['employees-select', brandId],
-    queryFn: () => api.get('/hr/employees', { params }).then(r => r.data),
+    queryFn: () => api.get('/hr/employees', { params }).then(r => extractItems(r.data)),
   });
 
   const { data: brands = [] } = useQuery<{id: string; name: string}[]>({
     queryKey: ['brands-list'],
-    queryFn: () => api.get('/products/brands').then(r => r.data),
+    queryFn: () => api.get('/products/brands').then(r => extractItems(r.data)),
   });
 
   // Brand bindings for selected customer
   const { data: brandBindings = [] } = useQuery<{ id: string; brand_id: string; salesman_id: string }[]>({
     queryKey: ['customer-brand-salesman', brandBindCustomer?.id],
-    queryFn: () => api.get(`/customers/${brandBindCustomer!.id}/brand-salesman`).then(r => r.data),
+    queryFn: () => api.get(`/customers/${brandBindCustomer!.id}/brand-salesman`).then(r => extractItems(r.data)),
     enabled: !!brandBindCustomer,
   });
 
@@ -100,7 +104,7 @@ function CustomerList() {
 
   const { data: customerOrders = [], isLoading: ordersLoading } = useQuery<OrderItem[]>({
     queryKey: ['customer-orders', drawerCustomer?.id],
-    queryFn: () => api.get(`/customers/${drawerCustomer!.id}/orders`).then(r => r.data),
+    queryFn: () => api.get(`/customers/${drawerCustomer!.id}/orders`).then(r => extractItems<OrderItem>(r.data)),
     enabled: !!drawerCustomer,
   });
 
@@ -197,15 +201,17 @@ function CustomerList() {
         <Space wrap>
           <Title level={4} style={{ margin: 0 }}>客户管理</Title>
           <Input.Search allowClear placeholder="搜索名称/联系人/电话"
-            style={{ width: 240 }} onSearch={setKeyword} />
-          <Select placeholder="全部类型" allowClear style={{ width: 120 }} onChange={setTypeFilter}
+            style={{ width: 240 }} onSearch={(v) => { setKeyword(v); setPage(1); }} />
+          <Select placeholder="全部类型" allowClear style={{ width: 120 }} onChange={(v) => { setTypeFilter(v); setPage(1); }}
             options={[{ value: 'channel', label: '渠道客户' }, { value: 'group_purchase', label: '团购客户' }]} />
-          <Select placeholder="结算方式" allowClear style={{ width: 110 }} onChange={setSettlementFilter}
+          <Select placeholder="结算方式" allowClear style={{ width: 110 }} onChange={(v) => { setSettlementFilter(v); setPage(1); }}
             options={[{ value: 'credit', label: '赊销' }, { value: 'cash', label: '现结' }]} />
         </Space>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingRecord(null); form.resetFields(); setModalOpen(true); }}>新建客户</Button>
       </div>
-      <Table<CustomerItem> columns={columns} dataSource={data} rowKey="id" loading={isLoading} pagination={{ pageSize: 20 }} />
+      <Table<CustomerItem> columns={columns} dataSource={data} rowKey="id" loading={isLoading}
+        pagination={{ current: page, pageSize, total, showTotal: (t) => `共 ${t} 条`, showSizeChanger: true,
+          onChange: (p, ps) => { setPage(p); setPageSize(ps); } }} />
 
       {/* 订单历史抽屉 */}
       <Drawer

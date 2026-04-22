@@ -12,6 +12,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.permissions import require_role
 from app.core.security import CurrentUser
 from app.models.payroll import (
     Position,
@@ -161,6 +162,7 @@ async def update_scheme(scheme_id: str, body: BrandSalarySchemeUpdate, user: Cur
 
 @router.delete("/salary-schemes/{scheme_id}", status_code=204)
 async def delete_scheme(scheme_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "hr")
     obj = await db.get(BrandSalaryScheme, scheme_id)
     if not obj:
         raise HTTPException(404, "薪酬方案不存在")
@@ -284,6 +286,7 @@ async def update_emp_brand_position(ebp_id: str, body: EmpBrandPositionUpdate, u
 
 @router.delete("/brand-positions/{ebp_id}", status_code=204)
 async def delete_emp_brand_position(ebp_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "hr")
     obj = await db.get(EmployeeBrandPosition, ebp_id)
     if not obj:
         raise HTTPException(404, "关系不存在")
@@ -397,6 +400,7 @@ async def update_assessment(item_id: str, body: AssessmentItemUpdate, user: Curr
 
 @router.delete("/assessment-items/{item_id}", status_code=204)
 async def delete_assessment(item_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "hr")
     obj = await db.get(AssessmentItem, item_id)
     if not obj:
         raise HTTPException(404, "考核项不存在")
@@ -780,6 +784,7 @@ async def pay_salary(rec_id: str, body: PaySalaryRequest, user: CurrentUser, db:
 
 @router.delete("/salary-records/{rec_id}", status_code=204)
 async def delete_salary(rec_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "hr")
     obj = await db.get(SalaryRecord, rec_id)
     if not obj:
         raise HTTPException(404, "工资单不存在")
@@ -811,29 +816,32 @@ class SubsidyResponse(BaseModel):
     reimburse_notes: Optional[str] = None
 
 
-@router.get("/manufacturer-subsidies", response_model=list[SubsidyResponse])
+@router.get("/manufacturer-subsidies")
 async def list_subsidies(
     user: CurrentUser,
     brand_id: Optional[str] = Query(None),
     period: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(ManufacturerSalarySubsidy)
+    from sqlalchemy import func as sa_func
+    base = select(ManufacturerSalarySubsidy)
     if brand_id:
-        stmt = stmt.where(ManufacturerSalarySubsidy.brand_id == brand_id)
+        base = base.where(ManufacturerSalarySubsidy.brand_id == brand_id)
     if period:
-        stmt = stmt.where(ManufacturerSalarySubsidy.period == period)
+        base = base.where(ManufacturerSalarySubsidy.period == period)
     if status:
-        stmt = stmt.where(ManufacturerSalarySubsidy.status == status)
-    stmt = stmt.order_by(ManufacturerSalarySubsidy.created_at.desc())
-    rows = (await db.execute(stmt)).scalars().all()
-    return [
+        base = base.where(ManufacturerSalarySubsidy.status == status)
+    total = (await db.execute(select(sa_func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(ManufacturerSalarySubsidy.created_at.desc()).offset(skip).limit(limit))).scalars().all()
+    return {"items": [
         {**SubsidyResponse.model_validate(s).model_dump(),
          "employee_name": s.employee.name if s.employee else None,
          "brand_name": s.brand.name if s.brand else None}
         for s in rows
-    ]
+    ], "total": total}
 
 
 class GenerateExpectedRequest(BaseModel):

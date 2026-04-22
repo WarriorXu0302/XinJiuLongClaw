@@ -3,7 +3,7 @@ import { Button, Card, Col, Descriptions, Divider, Form, Input, InputNumber, mes
 import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';
 
 const { Text } = Typography;
@@ -51,32 +51,36 @@ function InspectionList() {
   const [scanBarcode, setScanBarcode] = useState('');
   const [scannedCodes, setScannedCodes] = useState<string[]>([]);
   const [logisticsUrls, setLogisticsUrls] = useState<string[]>([]);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
-  const { data = [], isLoading } = useQuery<Case[]>({
-    queryKey: ['inspection-cases', brandId],
-    queryFn: () => api.get('/inspection-cases', { params }).then(r => r.data),
+  const { data: listResp, isLoading } = useQuery<{ items: Case[]; total: number }>({
+    queryKey: ['inspection-cases', brandId, page, pageSize],
+    queryFn: () => api.get('/inspection-cases', { params: { ...params, skip: (page - 1) * pageSize, limit: pageSize } }).then(r => r.data),
   });
+  const data = listResp?.items ?? [];
+  const total = listResp?.total ?? 0;
 
   const { data: products = [] } = useQuery<any[]>({
     queryKey: ['products-select', brandId],
-    queryFn: () => api.get('/products', { params: brandId ? params : { limit: 200 } }).then(r => r.data),
+    queryFn: () => api.get('/products', { params: brandId ? params : { limit: 200 } }).then(r => extractItems(r.data)),
   });
 
   const { data: customers = [] } = useQuery<any[]>({
     queryKey: ['customers-select'],
-    queryFn: () => api.get('/customers').then(r => r.data),
+    queryFn: () => api.get('/customers').then(r => extractItems(r.data)),
   });
 
   const { data: warehouses = [] } = useQuery<any[]>({
     queryKey: ['warehouses-select', brandId],
-    queryFn: () => api.get('/inventory/warehouses', { params }).then(r => r.data),
+    queryFn: () => api.get('/inventory/warehouses', { params }).then(r => extractItems(r.data)),
     enabled: !!brandId,
   });
 
   // 拉当前品牌的政策模板（取 customer_unit_price 用于盈亏计算）
   const { data: policyTemplates = [] } = useQuery<any[]>({
     queryKey: ['policy-templates-brand', brandId],
-    queryFn: () => api.get('/policy-templates/templates', { params: { brand_id: brandId, is_active: true } }).then(r => r.data),
+    queryFn: () => api.get('/policy-templates/templates', { params: { brand_id: brandId, is_active: true } }).then(r => extractItems(r.data)),
     enabled: !!brandId,
   });
   const mainWh = warehouses.find((w: any) => w.warehouse_type === 'main');
@@ -84,7 +88,7 @@ function InspectionList() {
 
   const { data: allAccounts = [] } = useQuery<any[]>({
     queryKey: ['accounts-all'],
-    queryFn: () => api.get('/accounts').then(r => r.data),
+    queryFn: () => api.get('/accounts').then(r => extractItems(r.data)),
   });
   const masterAcc = allAccounts.find((a: any) => a.level === 'master');
 
@@ -201,7 +205,7 @@ function InspectionList() {
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
         <Space>
           <h2 style={{ margin: 0 }}>稽查案件</h2>
-          <Select value={dirFilter} onChange={v => setDirFilter(v)} allowClear placeholder="全部" style={{ width: 120 }}
+          <Select value={dirFilter} onChange={v => { setDirFilter(v); setPage(1); }} allowClear placeholder="全部" style={{ width: 120 }}
             options={[{ value: 'outflow', label: '我方外流' }, { value: 'inflow', label: '主动清理' }]} />
         </Space>
         <Button type="primary" icon={<PlusOutlined />} disabled={!brandId} onClick={() => { form.resetFields(); form.setFieldsValue({ direction: 'outflow', quantity_unit: '瓶' }); setModalOpen(true); }}>新建案件</Button>
@@ -213,7 +217,7 @@ function InspectionList() {
         <Card size="small" style={{ flex: 1, textAlign: 'center' }}><div style={{ color: '#888', fontSize: 12 }}>清理盈利</div><div style={{ fontSize: 18, fontWeight: 600, color: '#52c41a' }}>¥{data.filter(c => Number(c.profit_loss || 0) > 0).reduce((s, c) => s + Number(c.profit_loss || 0), 0).toLocaleString()}</div></Card>
       </div>
 
-      <Table columns={columns} dataSource={filtered} rowKey="id" loading={isLoading} size="middle" scroll={{ x: 900 }} pagination={{ pageSize: 20 }} />
+      <Table columns={columns} dataSource={filtered} rowKey="id" loading={isLoading} size="middle" scroll={{ x: 900 }} pagination={{ current: page, pageSize, total, showTotal: (t) => '共 ' + t + ' 条', showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }} />
 
       {/* 新建案件 */}
       <Modal title="新建稽查案件" open={modalOpen} width={650}

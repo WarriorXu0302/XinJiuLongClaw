@@ -5,7 +5,7 @@ import { DownloadOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons'
 import { exportExcel } from '../../utils/exportExcel';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';
 
 interface Order {
@@ -56,11 +56,13 @@ function OrderList() {
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [paymentFilter, setPaymentFilter] = useState<string | undefined>();
   const [keyword, setKeyword] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
-  const { data = [], isLoading } = useQuery({
-    queryKey: ['orders', brandId, statusFilter, paymentFilter, keyword],
+  const { data: listResp, isLoading } = useQuery<{ items: Order[]; total: number }>({
+    queryKey: ['orders', brandId, statusFilter, paymentFilter, keyword, page, pageSize],
     queryFn: async () => {
-      const p: Record<string, string> = { ...params, limit: '100' };
+      const p: Record<string, string | number> = { ...params, skip: (page - 1) * pageSize, limit: pageSize };
       if (statusFilter) p.status = statusFilter;
       if (paymentFilter) p.payment_status = paymentFilter;
       if (keyword) p.keyword = keyword;
@@ -68,25 +70,27 @@ function OrderList() {
       return data;
     },
   });
+  const data = listResp?.items ?? [];
+  const total = listResp?.total ?? 0;
 
   const { data: brands = [] } = useQuery<{id: string; name: string}[]>({
     queryKey: ['brands-select'],
-    queryFn: () => api.get('/products/brands').then(r => r.data),
+    queryFn: () => api.get('/products/brands').then(r => extractItems(r.data)),
   });
 
   const { data: customers = [] } = useQuery<{id: string; name: string}[]>({
     queryKey: ['customers-select', brandId],
-    queryFn: () => api.get('/customers', { params }).then(r => r.data),
+    queryFn: () => api.get('/customers', { params }).then(r => extractItems(r.data)),
   });
 
   const { data: employees = [] } = useQuery<{id: string; name: string}[]>({
     queryKey: ['employees-select', brandId],
-    queryFn: () => api.get('/hr/employees', { params }).then(r => r.data),
+    queryFn: () => api.get('/hr/employees', { params }).then(r => extractItems(r.data)),
   });
 
   const { data: products = [] } = useQuery<{id: string; name: string; brand_id?: string; points_per_case?: number}[]>({
     queryKey: ['products-select', brandId],
-    queryFn: () => api.get('/products', { params }).then(r => r.data),
+    queryFn: () => api.get('/products', { params }).then(r => extractItems(r.data)),
   });
 
   const brandProducts = selectedBrand ? products.filter(p => p.brand_id === selectedBrand) : products;
@@ -379,8 +383,8 @@ function OrderList() {
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
         <Space wrap>
           <h2 style={{ margin: 0 }}>订单管理</h2>
-          <Input.Search allowClear placeholder="订单号/客户名" style={{ width: 200 }} onSearch={setKeyword} />
-          <Select placeholder="订单状态" allowClear style={{ width: 140 }} value={statusFilter} onChange={setStatusFilter}
+          <Input.Search allowClear placeholder="订单号/客户名" style={{ width: 200 }} onSearch={(v) => { setKeyword(v); setPage(1); }} />
+          <Select placeholder="订单状态" allowClear style={{ width: 140 }} value={statusFilter} onChange={(v) => { setStatusFilter(v); setPage(1); }}
             options={[
               { value: 'pending', label: '待审批' },
               { value: 'policy_pending_internal', label: '内部待审' },
@@ -391,7 +395,7 @@ function OrderList() {
               { value: 'completed', label: '已完成' },
               { value: 'policy_rejected', label: '已驳回' },
             ]} />
-          <Select placeholder="付款状态" allowClear style={{ width: 120 }} value={paymentFilter} onChange={setPaymentFilter}
+          <Select placeholder="付款状态" allowClear style={{ width: 120 }} value={paymentFilter} onChange={(v) => { setPaymentFilter(v); setPage(1); }}
             options={[
               { value: 'unpaid', label: '未付款' },
               { value: 'partially_paid', label: '部分' },
@@ -420,7 +424,7 @@ function OrderList() {
           <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingRecord(null); setSelectedPolicy(null); setAdjustedRules(''); setMatchedPolicies([]); setSelectedBrand(null); form.resetFields(); form.setFieldsValue({ items: [{}] }); setModalOpen(true); }}>新建订单</Button>
         </Space>
       </div>
-      <Table<Order> columns={columns} dataSource={data} rowKey="id" loading={isLoading} size="middle" scroll={{ x: 1100 }} pagination={{ pageSize: 20, showSizeChanger: true }} />
+      <Table<Order> columns={columns} dataSource={data} rowKey="id" loading={isLoading} size="middle" scroll={{ x: 1100 }} pagination={{ current: page, pageSize, total, showTotal: (t) => `共 ${t} 条`, showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }} />
 
       <Modal
         title={editingRecord ? '编辑订单' : '新建订单'}

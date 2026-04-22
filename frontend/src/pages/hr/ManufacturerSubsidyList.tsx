@@ -3,7 +3,7 @@ import { Button, Card, Col, Input, message, Modal, Row, Select, Space, Table, Ta
 import { BankOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 
 const { Title, Text } = Typography;
 
@@ -42,23 +42,27 @@ function ManufacturerSubsidyList() {
   const [period, setPeriod] = useState<string>('');
   const [genPeriod, setGenPeriod] = useState<string>(ym());
   const [genOpen, setGenOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
 
   const { data: brands = [] } = useQuery<Brand[]>({
     queryKey: ['brands-select'],
-    queryFn: () => api.get('/products/brands').then(r => r.data),
+    queryFn: () => api.get('/products/brands').then(r => extractItems<Brand>(r.data)),
   });
 
   const statusParam = tab === 'pending_advanced' ? undefined : 'reimbursed';
-  const { data: allData = [], isLoading } = useQuery<Subsidy[]>({
-    queryKey: ['subsidies', brandFilter, period, tab],
+  const { data: rawSubsidyData, isLoading } = useQuery<{ items: Subsidy[]; total: number }>({
+    queryKey: ['subsidies', brandFilter, period, tab, page, pageSize],
     queryFn: () => {
-      const params: Record<string, string> = {};
+      const params: Record<string, string | number> = { skip: (page - 1) * pageSize, limit: pageSize };
       if (brandFilter) params.brand_id = brandFilter;
       if (period) params.period = period;
       if (statusParam) params.status = statusParam;
       return api.get('/payroll/manufacturer-subsidies', { params }).then(r => r.data);
     },
   });
+  const allData = rawSubsidyData?.items ?? [];
+  const subsidyTotal = rawSubsidyData?.total ?? 0;
 
   const data = tab === 'pending_advanced'
     ? allData.filter(r => r.status === 'pending' || r.status === 'advanced')
@@ -134,17 +138,17 @@ function ManufacturerSubsidyList() {
         <Space wrap>
           <span>品牌</span>
           <Select placeholder="全部" allowClear style={{ width: 150 }} value={brandFilter}
-            onChange={setBrandFilter} options={brands.map(b => ({ value: b.id, label: b.name }))} />
+            onChange={(v) => { setBrandFilter(v); setPage(1); }} options={brands.map(b => ({ value: b.id, label: b.name }))} />
           <span>周期</span>
           <Input style={{ width: 120 }} placeholder="2026-04 留空=全部" value={period}
-            onChange={e => setPeriod(e.target.value)} />
+            onChange={e => { setPeriod(e.target.value); setPage(1); }} />
           <Text type="secondary" style={{ fontSize: 12 }}>
             对账入口在 <a href="/policies/reconcile">政策到账对账</a>（Excel 上传，金额+周期自动匹配）
           </Text>
         </Space>
       </Card>
 
-      <Tabs activeKey={tab} onChange={setTab} items={[
+      <Tabs activeKey={tab} onChange={(v) => { setTab(v); setPage(1); }} items={[
         {
           key: 'pending_advanced',
           label: <span>待到账 <Tag color="orange">{groups.reduce((s, g) => s + g.items.filter(i => i.status !== 'reimbursed').length, 0)}</Tag></span>,
@@ -167,7 +171,7 @@ function ManufacturerSubsidyList() {
                   ]} />
               </Card>
               <Table<Subsidy> columns={columns} dataSource={data} rowKey="id" loading={isLoading}
-                pagination={{ pageSize: 50 }} size="small" />
+                pagination={{ current: page, pageSize, total: subsidyTotal, showTotal: t => `共 ${t} 条`, showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }} size="small" />
             </>
           )
         },
@@ -176,7 +180,7 @@ function ManufacturerSubsidyList() {
           label: <span>已到账</span>,
           children: (
             <Table<Subsidy> columns={columns} dataSource={allData} rowKey="id" loading={isLoading}
-              pagination={{ pageSize: 50 }} size="small" />
+              pagination={{ current: page, pageSize, total: subsidyTotal, showTotal: t => `共 ${t} 条`, showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }} size="small" />
           )
         },
       ]} />

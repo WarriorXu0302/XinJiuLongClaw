@@ -3,7 +3,7 @@ import { Button, Descriptions, Empty, Form, Image, message, Modal, Select, Space
 import { CheckCircleOutlined, CloseCircleOutlined, DollarOutlined, UploadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';
 
 const { Title } = Typography;
@@ -30,7 +30,7 @@ function FinanceApproval() {
   // Pending purchase orders
   const { data: pendingPOs = [] } = useQuery<any[]>({
     queryKey: ['pending-pos', brandId],
-    queryFn: () => api.get('/purchase-orders', { params: { ...params, status: undefined } }).then(r => r.data.filter((po: any) => po.status === 'pending')),
+    queryFn: () => api.get('/purchase-orders', { params: { ...params, status: undefined } }).then(r => extractItems(r.data).filter((po: any) => po.status === 'pending')),
     refetchInterval: 5000,
   });
   const approvePOMut = useMutation({
@@ -48,7 +48,7 @@ function FinanceApproval() {
   // Pending financing repayments
   const { data: pendingFinancing = [] } = useQuery<any[]>({
     queryKey: ['pending-financing-repayments'],
-    queryFn: () => api.get('/financing-orders/pending-repayments').then(r => r.data),
+    queryFn: () => api.get('/financing-orders/pending-repayments').then(r => extractItems(r.data)),
     refetchInterval: 5000,
   });
   const approveFinancingMut = useMutation({
@@ -68,7 +68,7 @@ function FinanceApproval() {
 
   const { data: pendingTransfers = [] } = useQuery<any[]>({
     queryKey: ['pending-transfers'],
-    queryFn: () => api.get('/accounts/pending-transfers').then(r => r.data),
+    queryFn: () => api.get('/accounts/pending-transfers').then(r => extractItems(r.data)),
     refetchInterval: 5000,
   });
   const approveTransferMut = useMutation({
@@ -84,23 +84,23 @@ function FinanceApproval() {
 
   const { data: expenses = [], isLoading: expLoading } = useQuery<Expense[]>({
     queryKey: ['expenses-approval', brandId],
-    queryFn: () => api.get('/expenses', { params: { ...params, limit: 100 } }).then(r => r.data),
+    queryFn: () => api.get('/expenses', { params: { ...params, limit: 100 } }).then(r => extractItems(r.data)),
     refetchInterval: 5000,
   });
   const { data: paymentRequests = [], isLoading: prLoading } = useQuery<PaymentRequest[]>({
     queryKey: ['payment-requests-approval', brandId],
-    queryFn: () => api.get('/payment-requests', { params }).then(r => r.data),
+    queryFn: () => api.get('/payment-requests', { params }).then(r => extractItems(r.data)),
     refetchInterval: 5000,
   });
   const { data: accounts = [] } = useQuery<Account[]>({
     queryKey: ['accounts-select', brandId],
-    queryFn: () => api.get('/accounts', { params }).then(r => r.data),
+    queryFn: () => api.get('/accounts', { params }).then(r => extractItems(r.data)),
   });
 
   // Pending inspection cases
   const { data: pendingCases = [] } = useQuery<any[]>({
     queryKey: ['pending-inspection-cases', brandId],
-    queryFn: () => api.get('/inspection-cases', { params: { ...params, status: 'pending' } }).then(r => r.data),
+    queryFn: () => api.get('/inspection-cases', { params: { ...params, status: 'pending' } }).then(r => extractItems(r.data)),
     refetchInterval: 5000,
   });
   const approveCaseMut = useMutation({
@@ -111,7 +111,7 @@ function FinanceApproval() {
   // Pending share-out claims
   const { data: pendingShares = [] } = useQuery<any[]>({
     queryKey: ['pending-shares'],
-    queryFn: () => api.get('/expense-claims', { params: { claim_type: 'share_out', status: 'pending', limit: 50 } }).then(r => r.data),
+    queryFn: () => api.get('/expense-claims', { params: { claim_type: 'share_out', status: 'pending', limit: 50 } }).then(r => extractItems(r.data)),
     refetchInterval: 5000,
   });
   const approveShareMut = useMutation({
@@ -132,7 +132,7 @@ function FinanceApproval() {
   // Pending salary approvals
   const { data: pendingSalaries = [] } = useQuery<any[]>({
     queryKey: ['pending-salaries'],
-    queryFn: () => api.get('/payroll/salary-records', { params: { status: 'pending_approval' } }).then(r => r.data),
+    queryFn: () => api.get('/payroll/salary-records', { params: { status: 'pending_approval' } }).then(r => extractItems(r.data)),
     refetchInterval: 5000,
   });
   const approveSalaryMut = useMutation({
@@ -145,7 +145,7 @@ function FinanceApproval() {
   // Pending sales target approvals
   const { data: pendingTargets = [] } = useQuery<any[]>({
     queryKey: ['pending-targets'],
-    queryFn: () => api.get('/sales-targets', { params: { status: 'pending_approval' } }).then(r => r.data),
+    queryFn: () => api.get('/sales-targets', { params: { status: 'pending_approval' } }).then(r => extractItems(r.data)),
     refetchInterval: 5000,
   });
 
@@ -154,7 +154,7 @@ function FinanceApproval() {
     queryKey: ['pending-confirm-payment', brandId],
     queryFn: () => api.get('/orders', {
       params: { ...params, status: 'delivered', payment_status: 'fully_paid', limit: 200 },
-    }).then(r => r.data),
+    }).then(r => extractItems(r.data)),
     refetchInterval: 5000,
   });
   const confirmOrderPayMut = useMutation({
@@ -169,7 +169,7 @@ function FinanceApproval() {
   // Pending leave requests
   const { data: pendingLeaves = [] } = useQuery<any[]>({
     queryKey: ['pending-leaves'],
-    queryFn: () => api.get('/attendance/leave-requests', { params: { status: 'pending' } }).then(r => r.data),
+    queryFn: () => api.get('/attendance/leave-requests', { params: { status: 'pending' } }).then(r => extractItems(r.data)),
     refetchInterval: 5000,
   });
   const approveLeaveMut = useMutation({

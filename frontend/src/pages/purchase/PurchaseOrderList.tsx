@@ -4,7 +4,7 @@ import { Button, Card, Col, DatePicker, Divider, Form, Input, InputNumber, messa
 import { PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';
 
 const { Title, Text } = Typography;
@@ -20,19 +20,23 @@ function PurchaseOrderList() {
   const [form] = Form.useForm();
   const [modalOpen, setModalOpen] = useState(false);
   const { brandId, params } = useBrandFilter();
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
-  const { data = [], isLoading } = useQuery<PO[]>({
-    queryKey: ['purchase-orders', brandId],
-    queryFn: () => api.get('/purchase-orders', { params }).then(r => r.data),
+  const { data: listResp, isLoading } = useQuery<{ items: PO[]; total: number }>({
+    queryKey: ['purchase-orders', brandId, page, pageSize],
+    queryFn: () => api.get('/purchase-orders', { params: { ...params, skip: (page - 1) * pageSize, limit: pageSize } }).then(r => r.data),
   });
+  const data = listResp?.items ?? [];
+  const total = listResp?.total ?? 0;
 
   const { data: suppliers = [] } = useQuery<any[]>({
     queryKey: ['suppliers-select', brandId],
-    queryFn: () => api.get('/suppliers', { params }).then(r => r.data),
+    queryFn: () => api.get('/suppliers', { params }).then(r => extractItems(r.data)),
   });
   const { data: warehouses = [] } = useQuery<any[]>({
     queryKey: ['warehouses-select', brandId],
-    queryFn: () => api.get('/inventory/warehouses', { params }).then(r => r.data),
+    queryFn: () => api.get('/inventory/warehouses', { params }).then(r => extractItems(r.data)),
   });
   const mainWarehouses = warehouses.filter((w: any) => w.warehouse_type === 'main');
   const tastingWarehouses = warehouses.filter((w: any) => w.warehouse_type === 'tasting');
@@ -41,11 +45,11 @@ function PurchaseOrderList() {
 
   const { data: products = [] } = useQuery<any[]>({
     queryKey: ['products-select', brandId],
-    queryFn: () => api.get('/products', { params }).then(r => r.data),
+    queryFn: () => api.get('/products', { params }).then(r => extractItems(r.data)),
   });
   const { data: accounts = [] } = useQuery<any[]>({
     queryKey: ['accounts-select', brandId],
-    queryFn: () => api.get('/accounts', { params }).then(r => r.data),
+    queryFn: () => api.get('/accounts', { params }).then(r => extractItems(r.data)),
   });
 
   const brandCashAccounts = accounts.filter((a: any) => a.level === 'project' && a.account_type === 'cash');
@@ -138,7 +142,7 @@ function PurchaseOrderList() {
           {brandId ? '新建采购单' : '请先选择品牌'}
         </Button>
       </Space>
-      <Table<PO> columns={columns} dataSource={data} rowKey="id" loading={isLoading} size="middle" pagination={{ pageSize: 20 }} />
+      <Table<PO> columns={columns} dataSource={data} rowKey="id" loading={isLoading} size="middle" pagination={{ current: page, pageSize, total, showTotal: (t) => `共 ${t} 条`, showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }} />
 
       <Modal title="新建采购单（提交后需审批）" open={modalOpen} width={750}
         onOk={() => form.validateFields().then(v => createMutation.mutate(v))}

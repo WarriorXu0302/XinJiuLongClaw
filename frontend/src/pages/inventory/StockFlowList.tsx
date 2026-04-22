@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Table, Tag } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
@@ -34,16 +35,19 @@ const columns: ColumnsType<StockFlowItem> = [
 
 function StockFlowList() {
   const { brandId, params } = useBrandFilter();
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
 
-  const { data = [], isLoading } = useQuery({
-    queryKey: ['stock-flow', brandId],
-    queryFn: async () => { const { data } = await api.get('/inventory/stock-flow', { params }); return data; },
+  const { data, isLoading } = useQuery<{ items: StockFlowItem[]; total: number }>({
+    queryKey: ['stock-flow', brandId, page, pageSize],
+    queryFn: async () => { const { data } = await api.get('/inventory/stock-flow', { params: { ...params, skip: (page - 1) * pageSize, limit: pageSize } }); return data; },
   });
 
   return (
     <>
       <h2>出入库记录</h2>
-      <Table<StockFlowItem> columns={columns} dataSource={data} rowKey="id" loading={isLoading} style={{ marginTop: 16 }} pagination={{ pageSize: 50, showSizeChanger: true }} />
+      <Table<StockFlowItem> columns={columns} dataSource={data?.items ?? []} rowKey="id" loading={isLoading} style={{ marginTop: 16 }}
+        pagination={{ current: page, pageSize, total: data?.total ?? 0, showTotal: t => `共 ${t} 条`, showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }} />
     </>
   );
 }

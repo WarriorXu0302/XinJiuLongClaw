@@ -3,7 +3,7 @@ import { Button, Card, Checkbox, Divider, Form, Input, InputNumber, message, Mod
 import { PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';
 import type { PolicyRequest, RequestItem } from './policyTypes';
 import { BENEFIT_LABEL } from './policyTypes';
@@ -34,7 +34,7 @@ function ArrivalReconcile() {
   // 等待到账的政策项
   const { data = [], isLoading } = useQuery<PolicyRequest[]>({
     queryKey: ['policy-requests-reconcile', brandId],
-    queryFn: () => api.get('/policies/requests', { params: { ...params, has_items: true, status: 'approved', limit: 200 } }).then(r => r.data),
+    queryFn: () => api.get('/policies/requests', { params: { ...params, has_items: true, status: 'approved', limit: 200 } }).then(r => extractItems<PolicyRequest>(r.data)),
   });
   const waitingItems = data.flatMap(r => (r.request_items ?? []).filter(i => i.fulfill_status === 'applied').map(i => ({
     ...i, _customer: r.customer?.name ?? r.order?.customer?.name ?? '-', _orderNo: r.order?.order_no ?? '-', _requestId: r.id, _source: r.request_source,
@@ -43,13 +43,13 @@ function ArrivalReconcile() {
   // F类账户流水（从accounts fund-flows拉取）
   const { data: accounts = [] } = useQuery<any[]>({
     queryKey: ['accounts-select', brandId],
-    queryFn: () => api.get('/accounts', { params }).then(r => r.data),
+    queryFn: () => api.get('/accounts', { params }).then(r => extractItems(r.data)),
   });
   const fClassAcc = accounts.find((a: any) => a.account_type === 'f_class' && a.level === 'project');
 
   const { data: fFlows = [] } = useQuery<any[]>({
     queryKey: ['f-class-flows', fClassAcc?.id],
-    queryFn: () => api.get('/accounts/fund-flows', { params: { account_id: fClassAcc?.id, limit: 50 } }).then(r => r.data),
+    queryFn: () => api.get('/accounts/fund-flows', { params: { account_id: fClassAcc?.id, limit: 50 } }).then(r => extractItems(r.data)),
     enabled: !!fClassAcc,
   });
 

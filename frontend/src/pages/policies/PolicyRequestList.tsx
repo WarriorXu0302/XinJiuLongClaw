@@ -3,7 +3,7 @@ import { Button, Card, Divider, Form, Input, InputNumber, message, Modal, Select
 import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';
 import type { PolicyRequest, RequestItem } from './policyTypes';
 import { BENEFIT_LABEL, PAYER_LABEL, SETTLEMENT_LABEL } from './policyTypes';
@@ -21,11 +21,15 @@ function PolicyRequestList() {
   const [fulfillRequestId, setFulfillRequestId] = useState('');
   const [fulfillForm] = Form.useForm();
   const watchActualCost = Form.useWatch('actual_cost', fulfillForm) ?? 0;
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
-  const { data = [], isLoading } = useQuery<PolicyRequest[]>({
-    queryKey: ['policy-requests', brandId],
-    queryFn: () => api.get('/policies/requests', { params: { ...params, has_items: true, limit: 200 } }).then(r => r.data),
+  const { data: listResp, isLoading } = useQuery<{ items: PolicyRequest[]; total: number }>({
+    queryKey: ['policy-requests', brandId, page, pageSize],
+    queryFn: () => api.get('/policies/requests', { params: { ...params, has_items: true, skip: (page - 1) * pageSize, limit: pageSize } }).then(r => r.data),
   });
+  const data = listResp?.items ?? [];
+  const total = listResp?.total ?? 0;
 
   // 物料出库弹窗
   const [materialOpen, setMaterialOpen] = useState(false);
@@ -40,7 +44,7 @@ function PolicyRequestList() {
 
   const { data: products = [] } = useQuery<any[]>({
     queryKey: ['products-select', brandId],
-    queryFn: () => api.get('/products', { params }).then(r => r.data),
+    queryFn: () => api.get('/products', { params }).then(r => extractItems(r.data)),
     enabled: !!brandId,
   });
 
@@ -258,7 +262,7 @@ function PolicyRequestList() {
         columns={columns} dataSource={approvedRequests} rowKey="id" loading={isLoading}
         size="middle" scroll={{ x: 700 }}
         expandable={{ expandedRowRender, rowExpandable: r => (r.request_items?.length ?? 0) > 0, expandIcon: () => null, expandRowByClick: true }}
-        pagination={{ pageSize: 20 }}
+        pagination={{ current: page, pageSize, total, showTotal: (t) => '共 ' + t + ' 条', showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }}
       />
 
       {/* 申请兑付弹窗 */}

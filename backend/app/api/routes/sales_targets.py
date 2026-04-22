@@ -200,7 +200,7 @@ async def _assert_sub_in_brand(
     return next(iter(common))
 
 
-@router.get("", response_model=list[TargetResponse])
+@router.get("")
 async def list_targets(
     user: CurrentUser,
     target_year: Optional[int] = Query(None),
@@ -209,6 +209,8 @@ async def list_targets(
     brand_id: Optional[str] = Query(None),
     employee_id: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(SalesTarget)
@@ -254,13 +256,15 @@ async def list_targets(
         # 其他角色默认只看已批准目标
         stmt = stmt.where(SalesTarget.status == 'approved')
 
-    stmt = stmt.order_by(SalesTarget.target_year.desc(), SalesTarget.target_month.asc().nulls_first())
+    from sqlalchemy import func as sa_func
+    total = (await db.execute(select(sa_func.count()).select_from(stmt.subquery()))).scalar() or 0
+    stmt = stmt.order_by(SalesTarget.target_year.desc(), SalesTarget.target_month.asc().nulls_first()).offset(skip).limit(limit)
     rows = (await db.execute(stmt)).scalars().all()
     result = []
     for r in rows:
         s, rc = await _calc_actual(db, r.target_level, r.target_year, r.target_month, r.brand_id, r.employee_id)
         result.append(_to_response(r, s, rc))
-    return result
+    return {"items": result, "total": total}
 
 
 @router.post("", response_model=TargetResponse, status_code=201)

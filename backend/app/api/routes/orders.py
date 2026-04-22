@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
-from app.core.permissions import apply_data_scope
+from app.core.permissions import apply_data_scope, require_role
 from app.core.security import CurrentUser
 from app.models.base import CustomerSettlementMode, OrderStatus
 from app.models.customer import Customer, Receivable
@@ -181,7 +181,7 @@ async def create_order(body: OrderCreate, user: CurrentUser, db: AsyncSession = 
     return refreshed
 
 
-@router.get("", response_model=list[OrderResponse])
+@router.get("")
 async def list_orders(
     user: CurrentUser,
     brand_id: str | None = Query(None),
@@ -199,47 +199,46 @@ async def list_orders(
     db: AsyncSession = Depends(get_db),
 ):
     from datetime import datetime as _dt
-    stmt = (
-        select(Order)
-        .options(
-            selectinload(Order.items).selectinload(OrderItem.product),
-            selectinload(Order.customer),
-            selectinload(Order.salesman),
-        )
-    )
+    base = select(Order)
     if brand_id:
-        stmt = stmt.where(Order.brand_id == brand_id)
+        base = base.where(Order.brand_id == brand_id)
     if status:
-        stmt = stmt.where(Order.status == status)
+        base = base.where(Order.status == status)
     if payment_status:
-        stmt = stmt.where(Order.payment_status == payment_status)
+        base = base.where(Order.payment_status == payment_status)
     if customer_id:
-        stmt = stmt.where(Order.customer_id == customer_id)
+        base = base.where(Order.customer_id == customer_id)
     if salesman_id:
-        stmt = stmt.where(Order.salesman_id == salesman_id)
+        base = base.where(Order.salesman_id == salesman_id)
     if amount_min is not None:
-        stmt = stmt.where(Order.total_amount >= amount_min)
+        base = base.where(Order.total_amount >= amount_min)
     if amount_max is not None:
-        stmt = stmt.where(Order.total_amount <= amount_max)
+        base = base.where(Order.total_amount <= amount_max)
     if date_from:
         try:
-            stmt = stmt.where(Order.created_at >= _dt.strptime(date_from, "%Y-%m-%d"))
+            base = base.where(Order.created_at >= _dt.strptime(date_from, "%Y-%m-%d"))
         except ValueError:
             pass
     if date_to:
         try:
-            stmt = stmt.where(Order.created_at <= _dt.strptime(date_to, "%Y-%m-%d").replace(hour=23, minute=59, second=59))
+            base = base.where(Order.created_at <= _dt.strptime(date_to, "%Y-%m-%d").replace(hour=23, minute=59, second=59))
         except ValueError:
             pass
     if keyword:
         kw = f"%{keyword}%"
-        stmt = stmt.outerjoin(Customer, Customer.id == Order.customer_id).where(
+        base = base.outerjoin(Customer, Customer.id == Order.customer_id).where(
             (Order.order_no.ilike(kw)) | (Customer.name.ilike(kw))
         )
-    stmt = apply_data_scope(stmt, user, salesman_column=Order.salesman_id)
-    stmt = stmt.order_by(Order.created_at.desc()).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return rows
+    base = apply_data_scope(base, user, salesman_column=Order.salesman_id)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(
+        base.options(
+            selectinload(Order.items).selectinload(OrderItem.product),
+            selectinload(Order.customer),
+            selectinload(Order.salesman),
+        ).order_by(Order.created_at.desc()).offset(skip).limit(limit)
+    )).scalars().all()
+    return {"items": rows, "total": total}
 
 
 @router.get("/{order_id}", response_model=OrderResponse)
@@ -299,6 +298,7 @@ async def update_order(
 
 @router.delete("/{order_id}", status_code=204)
 async def delete_order(order_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss")
     order = await db.get(Order, order_id)
     if order is None:
         raise HTTPException(404, "Order not found")

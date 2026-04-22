@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Button, Space, Table, Tag, Typography } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
@@ -45,11 +46,15 @@ const columns: ColumnsType<Receivable> = [
 
 function ReceivableList() {
   const { brandId, params } = useBrandFilter();
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
-  const { data, isLoading } = useQuery<Receivable[]>({
-    queryKey: ['receivables', brandId],
-    queryFn: () => api.get('/receivables', { params }).then((r) => r.data),
+  const { data: listResp, isLoading } = useQuery<{ items: Receivable[]; total: number }>({
+    queryKey: ['receivables', brandId, page, pageSize],
+    queryFn: () => api.get('/receivables', { params: { ...params, skip: (page - 1) * pageSize, limit: pageSize } }).then((r) => r.data),
   });
+  const data = listResp?.items ?? [];
+  const total = listResp?.total ?? 0;
 
   const handleExport = () => {
     const rows = (data ?? []).map(r => ({
@@ -81,10 +86,10 @@ function ReceivableList() {
       <Table
         rowKey="id"
         columns={columns}
-        dataSource={data ?? []}
+        dataSource={data}
         loading={isLoading}
         size="middle"
-        pagination={{ pageSize: 20 }}
+        pagination={{ current: page, pageSize, total, showTotal: (t) => '共 ' + t + ' 条', showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }}
         scroll={{ x: 1000 }}
       />
     </>

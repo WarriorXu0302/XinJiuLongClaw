@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
+from app.core.permissions import require_role
 from app.core.security import CurrentUser
 from app.models.base import ClaimStatusEnum
 from app.models.policy import (
@@ -290,23 +291,23 @@ async def list_policy_requests(
     from app.models.order import Order as _Ord
     from app.core.permissions import is_salesman
 
-    stmt = select(PolicyRequest)
+    base = select(PolicyRequest)
     if brand_id:
-        stmt = stmt.where(PolicyRequest.brand_id == brand_id)
+        base = base.where(PolicyRequest.brand_id == brand_id)
     if status:
-        stmt = stmt.where(PolicyRequest.status == status)
+        base = base.where(PolicyRequest.status == status)
     if has_items:
-        stmt = stmt.where(PolicyRequest.id.in_(
+        base = base.where(PolicyRequest.id.in_(
             select(PolicyRequestItem.policy_request_id).distinct()
         ))
     # 业务员只看自己订单的政策
     if is_salesman(user) and user.get("employee_id"):
-        stmt = stmt.outerjoin(_Ord, _Ord.id == PolicyRequest.order_id).where(
+        base = base.outerjoin(_Ord, _Ord.id == PolicyRequest.order_id).where(
             (_Ord.salesman_id == user["employee_id"]) | (PolicyRequest.order_id.is_(None))
         )
-    stmt = stmt.order_by(PolicyRequest.created_at.desc()).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return [_pr_to_response(pr) for pr in rows]
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(PolicyRequest.created_at.desc()).offset(skip).limit(limit))).scalars().all()
+    return {"items": [_pr_to_response(pr) for pr in rows], "total": total}
 
 
 @router.get("/requests/{request_id}")
@@ -332,8 +333,9 @@ async def update_policy_request(
 
 @router.delete("/requests/{request_id}", status_code=204)
 async def delete_policy_request(
-    request_id: str, db: AsyncSession = Depends(get_db)
+    request_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
+    require_role(user, "boss", "finance")
     pr = await db.get(PolicyRequest, request_id)
     if pr is None:
         raise HTTPException(404, "PolicyRequest not found")
@@ -358,7 +360,7 @@ async def create_usage_record(
     return rec
 
 
-@router.get("/usage-records", response_model=list[PolicyUsageRecordResponse])
+@router.get("/usage-records")
 async def list_usage_records(
     user: CurrentUser,
     policy_request_id: str | None = Query(None),
@@ -367,14 +369,14 @@ async def list_usage_records(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(PolicyUsageRecord)
+    base = select(PolicyUsageRecord)
     if policy_request_id:
-        stmt = stmt.where(PolicyUsageRecord.policy_request_id == policy_request_id)
+        base = base.where(PolicyUsageRecord.policy_request_id == policy_request_id)
     if brand_id:
-        stmt = stmt.join(PolicyRequest, PolicyUsageRecord.policy_request_id == PolicyRequest.id).where(PolicyRequest.brand_id == brand_id)
-    stmt = stmt.order_by(PolicyUsageRecord.created_at.desc()).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return rows
+        base = base.join(PolicyRequest, PolicyUsageRecord.policy_request_id == PolicyRequest.id).where(PolicyRequest.brand_id == brand_id)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(PolicyUsageRecord.created_at.desc()).offset(skip).limit(limit))).scalars().all()
+    return {"items": rows, "total": total}
 
 
 @router.get(
@@ -729,6 +731,7 @@ async def update_item_expense(
 
 @router.delete("/expenses/{expense_id}", status_code=204)
 async def delete_item_expense(expense_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     from app.models.policy_item_expense import PolicyItemExpense
     exp = await db.get(PolicyItemExpense, expense_id)
     if exp is None:
@@ -1115,7 +1118,7 @@ async def create_policy_claim(
     return claim
 
 
-@router.get("/claims", response_model=list[PolicyClaimResponse])
+@router.get("/claims")
 async def list_policy_claims(
     user: CurrentUser,
     brand_id: str | None = Query(None),
@@ -1123,15 +1126,15 @@ async def list_policy_claims(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = (
-        select(PolicyClaim)
-        .options(selectinload(PolicyClaim.items))
-    )
+    base = select(PolicyClaim)
     if brand_id:
-        stmt = stmt.where(PolicyClaim.brand_id == brand_id)
-    stmt = stmt.order_by(PolicyClaim.created_at.desc()).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return rows
+        base = base.where(PolicyClaim.brand_id == brand_id)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(
+        base.options(selectinload(PolicyClaim.items))
+        .order_by(PolicyClaim.created_at.desc()).offset(skip).limit(limit)
+    )).scalars().all()
+    return {"items": rows, "total": total}
 
 
 @router.get("/claims/{claim_id}", response_model=PolicyClaimResponse)
@@ -1162,7 +1165,8 @@ async def update_policy_claim(
 
 
 @router.delete("/claims/{claim_id}", status_code=204)
-async def delete_policy_claim(claim_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_policy_claim(claim_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     claim = await db.get(PolicyClaim, claim_id)
     if claim is None:
         raise HTTPException(404, "PolicyClaim not found")

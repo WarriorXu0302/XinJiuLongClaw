@@ -1,7 +1,7 @@
 import { Card, Space, Table, Tag, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';
 
 const { Title, Text } = Typography;
@@ -20,14 +20,14 @@ function SpecialWarehouseManage() {
 
   const { data: warehouses = [] } = useQuery<{ id: string; name: string; warehouse_type: string }[]>({
     queryKey: ['warehouses-all', brandId],
-    queryFn: () => api.get('/inventory/warehouses', { params }).then(r => r.data),
+    queryFn: () => api.get('/inventory/warehouses', { params }).then(r => extractItems<{ id: string; name: string; warehouse_type: string }>(r.data)),
   });
 
   const tastingWarehouses = warehouses.filter(w => w.warehouse_type === 'tasting');
 
   const { data: flows = [] } = useQuery<StockFlowItem[]>({
     queryKey: ['tasting-wh-flows', brandId],
-    queryFn: () => api.get('/inventory/stock-flow', { params }).then(r => r.data),
+    queryFn: () => api.get('/inventory/stock-flow', { params }).then(r => extractItems<StockFlowItem>(r.data)),
   });
 
   const tastingWhIds = new Set(tastingWarehouses.map(w => w.id));

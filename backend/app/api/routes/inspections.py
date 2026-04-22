@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import CurrentUser
+from app.core.permissions import require_role
 from app.models.inspection import InspectionCase, MarketCleanupCase
 from app.models.inventory import Inventory, StockFlow
 from app.schemas.inspection import (
@@ -86,6 +87,7 @@ async def _bottles_of(case: InspectionCase, db: AsyncSession) -> int:
 async def create_inspection_case(
     body: InspectionCaseCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
+    require_role(user, "boss", "finance")
     obj = InspectionCase(
         id=str(uuid.uuid4()), case_no=_gen_no("IC"), **body.model_dump()
     )
@@ -132,7 +134,7 @@ async def create_inspection_case(
     return obj
 
 
-@router.get("/inspection-cases", response_model=list[InspectionCaseResponse])
+@router.get("/inspection-cases")
 async def list_inspection_cases(
     user: CurrentUser,
     status: str | None = Query(None),
@@ -140,12 +142,13 @@ async def list_inspection_cases(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(InspectionCase)
+    from sqlalchemy import func
+    base = select(InspectionCase)
     if status:
-        stmt = stmt.where(InspectionCase.status == status)
-    stmt = stmt.order_by(InspectionCase.created_at.desc()).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return rows
+        base = base.where(InspectionCase.status == status)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(InspectionCase.created_at.desc()).offset(skip).limit(limit))).scalars().all()
+    return {"items": rows, "total": total}
 
 
 @router.get("/inspection-cases/{case_id}", response_model=InspectionCaseResponse)
@@ -162,6 +165,7 @@ async def get_inspection_case(
 async def update_inspection_case(
     case_id: str, body: InspectionCaseUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
+    require_role(user, "boss", "finance")
     obj = await db.get(InspectionCase, case_id)
     if obj is None:
         raise HTTPException(404, "InspectionCase not found")
@@ -197,6 +201,7 @@ async def execute_inspection_case(
       B1 inflow_resell: 从备用库出库 + 加master(回售收入)
       B2 inflow_transfer: 入主仓(成本=售价)  ※回款已在create时加
     """
+    require_role(user, "boss", "finance")
     from app.models.product import Account, Product, Warehouse
     from app.api.routes.accounts import record_fund_flow
 
@@ -376,6 +381,7 @@ async def execute_inspection_case(
 async def delete_inspection_case(
     case_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
+    require_role(user, "boss", "finance")
     obj = await db.get(InspectionCase, case_id)
     if obj is None:
         raise HTTPException(404, "InspectionCase not found")
@@ -434,7 +440,7 @@ async def create_cleanup_case(
     return obj
 
 
-@router.get("/cleanup-cases", response_model=list[MarketCleanupCaseResponse])
+@router.get("/cleanup-cases")
 async def list_cleanup_cases(
     user: CurrentUser,
     status: str | None = Query(None),
@@ -442,12 +448,13 @@ async def list_cleanup_cases(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(MarketCleanupCase)
+    from sqlalchemy import func
+    base = select(MarketCleanupCase)
     if status:
-        stmt = stmt.where(MarketCleanupCase.status == status)
-    stmt = stmt.order_by(MarketCleanupCase.created_at.desc()).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return rows
+        base = base.where(MarketCleanupCase.status == status)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(MarketCleanupCase.created_at.desc()).offset(skip).limit(limit))).scalars().all()
+    return {"items": rows, "total": total}
 
 
 @router.get("/cleanup-cases/{case_id}", response_model=MarketCleanupCaseResponse)
@@ -477,6 +484,7 @@ async def update_cleanup_case(
 async def delete_cleanup_case(
     case_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
+    require_role(user, "boss", "finance")
     obj = await db.get(MarketCleanupCase, case_id)
     if obj is None:
         raise HTTPException(404, "MarketCleanupCase not found")

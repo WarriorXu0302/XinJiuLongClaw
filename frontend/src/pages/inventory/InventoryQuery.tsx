@@ -4,7 +4,7 @@ import { DownloadOutlined } from '@ant-design/icons';
 import { exportExcel } from '../../utils/exportExcel';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useBrandStore } from '../../stores/brandStore';
 
 const { Title, Text } = Typography;
@@ -38,17 +38,17 @@ function InventoryQuery() {
 
   const { data = [], isLoading } = useQuery<InvRow[]>({
     queryKey: ['inventory-value', brandId],
-    queryFn: () => api.get('/inventory/value-summary', { params }).then(r => r.data),
+    queryFn: () => api.get('/inventory/value-summary', { params }).then(r => extractItems<InvRow>(r.data)),
   });
 
   const { data: allWarehouses = [] } = useQuery<Warehouse[]>({
     queryKey: ['warehouses-all', brandId],
-    queryFn: () => api.get('/inventory/warehouses', { params }).then(r => r.data),
+    queryFn: () => api.get('/inventory/warehouses', { params }).then(r => extractItems<Warehouse>(r.data)),
   });
 
   const { data: flows = [], isLoading: flowsLoading } = useQuery<StockFlowRow[]>({
     queryKey: ['stock-flows', brandId],
-    queryFn: () => api.get('/inventory/stock-flow', { params: { ...params, limit: 200 } }).then(r => r.data),
+    queryFn: () => api.get('/inventory/stock-flow', { params: { ...params, limit: 200 } }).then(r => extractItems<StockFlowRow>(r.data)),
   });
 
   // Group warehouses by type

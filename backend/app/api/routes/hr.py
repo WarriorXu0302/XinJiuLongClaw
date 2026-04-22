@@ -12,6 +12,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from app.core.database import get_db
+from app.core.permissions import require_role
 from app.core.security import CurrentUser
 from app.models.user import Commission, Employee, KPI
 from app.models.payroll import EmployeeBrandPosition
@@ -82,7 +83,7 @@ async def create_employee(body: EmployeeCreate, user: CurrentUser, db: AsyncSess
     return obj
 
 
-@router.get("/employees", response_model=list[EmployeeResponse])
+@router.get("/employees")
 async def list_employees(
     user: CurrentUser,
     brand_id: str | None = Query(None),
@@ -91,14 +92,15 @@ async def list_employees(
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(Employee)
+    from sqlalchemy import func
+    base = select(Employee)
     if brand_id:
-        stmt = stmt.join(EmployeeBrandPosition, Employee.id == EmployeeBrandPosition.employee_id).where(EmployeeBrandPosition.brand_id == brand_id)
+        base = base.join(EmployeeBrandPosition, Employee.id == EmployeeBrandPosition.employee_id).where(EmployeeBrandPosition.brand_id == brand_id)
     if status:
-        stmt = stmt.where(Employee.status == status)
-    stmt = stmt.order_by(Employee.employee_no).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return rows
+        base = base.where(Employee.status == status)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(Employee.employee_no).offset(skip).limit(limit))).scalars().all()
+    return {"items": rows, "total": total}
 
 
 @router.get("/employees/{emp_id}", response_model=EmployeeResponse)
@@ -124,6 +126,7 @@ async def update_employee(
 
 @router.delete("/employees/{emp_id}", status_code=204)
 async def delete_employee(emp_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "hr")
     obj = await db.get(Employee, emp_id)
     if obj is None:
         raise HTTPException(404, "Employee not found")
@@ -220,7 +223,7 @@ async def create_kpi(body: KPICreate, user: CurrentUser, db: AsyncSession = Depe
     return obj
 
 
-@router.get("/kpis", response_model=list[KPIResponse])
+@router.get("/kpis")
 async def list_kpis(
     user: CurrentUser,
     employee_id: str | None = Query(None),
@@ -230,16 +233,17 @@ async def list_kpis(
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(KPI)
+    from sqlalchemy import func
+    base = select(KPI)
     if employee_id:
-        stmt = stmt.where(KPI.employee_id == employee_id)
+        base = base.where(KPI.employee_id == employee_id)
     if period_type:
-        stmt = stmt.where(KPI.period_type == period_type)
+        base = base.where(KPI.period_type == period_type)
     if brand_id:
-        stmt = stmt.where(KPI.brand_id == brand_id)
-    stmt = stmt.order_by(KPI.created_at.desc()).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return rows
+        base = base.where(KPI.brand_id == brand_id)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(KPI.created_at.desc()).offset(skip).limit(limit))).scalars().all()
+    return {"items": rows, "total": total}
 
 
 @router.get("/kpis/{kpi_id}", response_model=KPIResponse)
@@ -265,6 +269,7 @@ async def update_kpi(
 
 @router.delete("/kpis/{kpi_id}", status_code=204)
 async def delete_kpi(kpi_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "hr")
     obj = await db.get(KPI, kpi_id)
     if obj is None:
         raise HTTPException(404, "KPI not found")
@@ -285,7 +290,7 @@ async def create_commission(body: CommissionCreate, user: CurrentUser, db: Async
     return obj
 
 
-@router.get("/commissions", response_model=list[CommissionResponse])
+@router.get("/commissions")
 async def list_commissions(
     user: CurrentUser,
     employee_id: str | None = Query(None),
@@ -295,20 +300,21 @@ async def list_commissions(
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
+    from sqlalchemy import func
     from app.core.permissions import is_salesman
-    stmt = select(Commission)
+    base = select(Commission)
     if employee_id:
-        stmt = stmt.where(Commission.employee_id == employee_id)
+        base = base.where(Commission.employee_id == employee_id)
     if status:
-        stmt = stmt.where(Commission.status == status)
+        base = base.where(Commission.status == status)
     if brand_id:
-        stmt = stmt.where(Commission.brand_id == brand_id)
+        base = base.where(Commission.brand_id == brand_id)
     # 业务员只看自己的佣金
     if is_salesman(user) and user.get("employee_id"):
-        stmt = stmt.where(Commission.employee_id == user["employee_id"])
-    stmt = stmt.order_by(Commission.created_at.desc()).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return rows
+        base = base.where(Commission.employee_id == user["employee_id"])
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(Commission.created_at.desc()).offset(skip).limit(limit))).scalars().all()
+    return {"items": rows, "total": total}
 
 
 @router.get("/commissions/{commission_id}", response_model=CommissionResponse)
@@ -334,6 +340,7 @@ async def update_commission(
 
 @router.delete("/commissions/{commission_id}", status_code=204)
 async def delete_commission(commission_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "hr")
     obj = await db.get(Commission, commission_id)
     if obj is None:
         raise HTTPException(404, "Commission not found")

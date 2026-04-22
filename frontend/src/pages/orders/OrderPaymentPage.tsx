@@ -4,7 +4,7 @@ import { Alert, Button, Card, Descriptions, InputNumber, message, Radio, Space, 
 import { ArrowLeftOutlined, CheckCircleOutlined, FileImageOutlined, LockOutlined, PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UploadFile } from 'antd/es/upload';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 
 const { Title, Text } = Typography;
 
@@ -42,7 +42,7 @@ function OrderPaymentPage() {
 
   const { data: receipts = [] } = useQuery<Receipt[]>({
     queryKey: ['order-receipts', orderId],
-    queryFn: () => api.get('/receipts').then(r => r.data.filter((rc: any) => rc.order_id === orderId)),
+    queryFn: () => api.get('/receipts').then(r => extractItems(r.data).filter((rc: any) => rc.order_id === orderId)),
     enabled: !!orderId,
   });
 

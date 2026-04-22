@@ -4,7 +4,7 @@ import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';
 
 interface ReceiptItem {
@@ -39,20 +39,24 @@ function ReceiptList() {
   const [form] = Form.useForm<ReceiptCreateForm>();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<ReceiptItem | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
-  const { data = [], isLoading } = useQuery({
-    queryKey: ['receipts', brandId],
-    queryFn: async () => { const { data } = await api.get('/receipts'); return data; },
+  const { data: listResp, isLoading } = useQuery<{ items: ReceiptItem[]; total: number }>({
+    queryKey: ['receipts', brandId, page, pageSize],
+    queryFn: async () => { const { data } = await api.get('/receipts', { params: { skip: (page - 1) * pageSize, limit: pageSize } }); return data; },
   });
+  const data = listResp?.items ?? [];
+  const total = listResp?.total ?? 0;
 
   const { data: customers = [] } = useQuery<{id: string; name: string}[]>({
     queryKey: ['customers-select', brandId],
-    queryFn: () => api.get('/customers', { params }).then(r => r.data),
+    queryFn: () => api.get('/customers', { params }).then(r => extractItems(r.data)),
   });
 
   const { data: orders = [] } = useQuery<{id: string; order_no: string}[]>({
     queryKey: ['orders-select'],
-    queryFn: () => api.get('/orders').then(r => r.data),
+    queryFn: () => api.get('/orders').then(r => extractItems(r.data)),
   });
 
   const createMutation = useMutation({
@@ -147,7 +151,7 @@ function ReceiptList() {
         <h2 style={{ margin: 0 }}>收款管理</h2>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingRecord(null); setModalOpen(true); }}>新建收款</Button>
       </div>
-      <Table<ReceiptItem> columns={columns} dataSource={data} rowKey="id" loading={isLoading} pagination={{ pageSize: 20, showSizeChanger: true }} />
+      <Table<ReceiptItem> columns={columns} dataSource={data} rowKey="id" loading={isLoading} pagination={{ current: page, pageSize, total, showTotal: (t) => '共 ' + t + ' 条', showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }} />
 
       <Modal
         title={editingRecord ? '编辑收款' : '新建收款'}

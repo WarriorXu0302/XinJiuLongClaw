@@ -181,20 +181,22 @@ async def create_financing_order(
     return order
 
 
-@router.get("", response_model=list[FinancingOrderResponse])
+@router.get("")
 async def list_financing_orders(
     user: CurrentUser, brand_id: str | None = Query(None),
     status: str | None = Query(None),
     skip: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(FinancingOrder)
+    from sqlalchemy import func
+    base = select(FinancingOrder)
     if brand_id:
-        stmt = stmt.where(FinancingOrder.brand_id == brand_id)
+        base = base.where(FinancingOrder.brand_id == brand_id)
     if status:
-        stmt = stmt.where(FinancingOrder.status == status)
-    stmt = stmt.order_by(FinancingOrder.created_at.desc()).offset(skip).limit(limit)
-    return (await db.execute(stmt)).scalars().all()
+        base = base.where(FinancingOrder.status == status)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(FinancingOrder.created_at.desc()).offset(skip).limit(limit))).scalars().all()
+    return {"items": rows, "total": total}
 
 
 @router.get("/pending-repayments", response_model=list[RepaymentResponse])

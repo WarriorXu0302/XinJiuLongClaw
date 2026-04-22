@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import CurrentUser
+from app.core.permissions import require_role
 from app.models.base import PaymentRequestStatus, PaymentStatus
 from app.models.customer import Receivable
 from app.models.finance import (
@@ -61,6 +62,7 @@ def _gen_no(prefix: str) -> str:
 
 @router.post("/receipts", response_model=ReceiptResponse, status_code=201)
 async def create_receipt(body: ReceiptCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance", "salesman")
     # 收款强制进公司总资金池（master 现金账户）
     master_cash = (await db.execute(
         select(Account).where(
@@ -281,7 +283,7 @@ async def create_receipt(body: ReceiptCreate, user: CurrentUser, db: AsyncSessio
     return obj
 
 
-@router.get("/receipts", response_model=list[ReceiptResponse])
+@router.get("/receipts")
 async def list_receipts(
     user: CurrentUser,
     brand_id: str | None = Query(None),
@@ -290,15 +292,15 @@ async def list_receipts(
     db: AsyncSession = Depends(get_db),
 ):
     from app.core.permissions import is_salesman
-    stmt = select(Receipt)
+    base = select(Receipt)
     if brand_id:
-        stmt = stmt.where(Receipt.brand_id == brand_id)
+        base = base.where(Receipt.brand_id == brand_id)
     # 业务员只看自己订单的收款
     if is_salesman(user) and user.get("employee_id"):
-        stmt = stmt.join(Order, Order.id == Receipt.order_id).where(Order.salesman_id == user["employee_id"])
-    stmt = stmt.order_by(Receipt.created_at.desc()).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return rows
+        base = base.join(Order, Order.id == Receipt.order_id).where(Order.salesman_id == user["employee_id"])
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(Receipt.created_at.desc()).offset(skip).limit(limit))).scalars().all()
+    return {"items": rows, "total": total}
 
 
 @router.get("/receipts/{receipt_id}", response_model=ReceiptResponse)
@@ -311,6 +313,7 @@ async def get_receipt(receipt_id: str, user: CurrentUser, db: AsyncSession = Dep
 
 @router.put("/receipts/{receipt_id}", response_model=ReceiptResponse)
 async def update_receipt(receipt_id: str, body: ReceiptUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     obj = await db.get(Receipt, receipt_id)
     if obj is None:
         raise HTTPException(404, "Receipt not found")
@@ -322,6 +325,7 @@ async def update_receipt(receipt_id: str, body: ReceiptUpdate, user: CurrentUser
 
 @router.delete("/receipts/{receipt_id}", status_code=204)
 async def delete_receipt(receipt_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     obj = await db.get(Receipt, receipt_id)
     if obj is None:
         raise HTTPException(404, "Receipt not found")
@@ -336,6 +340,7 @@ async def delete_receipt(receipt_id: str, user: CurrentUser, db: AsyncSession = 
 
 @router.post("/payments", response_model=PaymentResponse, status_code=201)
 async def create_payment(body: PaymentCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     if body.account_id:
         account = await db.get(Account, body.account_id)
         if account and account.balance < Decimal(str(body.amount)):
@@ -361,7 +366,7 @@ async def create_payment(body: PaymentCreate, user: CurrentUser, db: AsyncSessio
     return obj
 
 
-@router.get("/payments", response_model=list[PaymentResponse])
+@router.get("/payments")
 async def list_payments(
     user: CurrentUser,
     brand_id: str | None = Query(None),
@@ -369,12 +374,12 @@ async def list_payments(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(Payment)
+    base = select(Payment)
     if brand_id:
-        stmt = stmt.where(Payment.brand_id == brand_id)
-    stmt = stmt.order_by(Payment.created_at.desc()).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return rows
+        base = base.where(Payment.brand_id == brand_id)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(Payment.created_at.desc()).offset(skip).limit(limit))).scalars().all()
+    return {"items": rows, "total": total}
 
 
 @router.get("/payments/{payment_id}", response_model=PaymentResponse)
@@ -398,6 +403,7 @@ async def update_payment(payment_id: str, body: PaymentUpdate, user: CurrentUser
 
 @router.delete("/payments/{payment_id}", status_code=204)
 async def delete_payment(payment_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     obj = await db.get(Payment, payment_id)
     if obj is None:
         raise HTTPException(404, "Payment not found")
@@ -418,7 +424,7 @@ async def create_expense(body: ExpenseCreate, user: CurrentUser, db: AsyncSessio
     return obj
 
 
-@router.get("/expenses", response_model=list[ExpenseResponse])
+@router.get("/expenses")
 async def list_expenses(
     user: CurrentUser,
     brand_id: str | None = Query(None),
@@ -426,12 +432,12 @@ async def list_expenses(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(Expense)
+    base = select(Expense)
     if brand_id:
-        stmt = stmt.where(Expense.brand_id == brand_id)
-    stmt = stmt.order_by(Expense.created_at.desc()).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return rows
+        base = base.where(Expense.brand_id == brand_id)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(Expense.created_at.desc()).offset(skip).limit(limit))).scalars().all()
+    return {"items": rows, "total": total}
 
 
 @router.get("/expenses/{expense_id}", response_model=ExpenseResponse)
@@ -455,6 +461,7 @@ async def update_expense(expense_id: str, body: ExpenseUpdate, user: CurrentUser
 
 @router.delete("/expenses/{expense_id}", status_code=204)
 async def delete_expense(expense_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     obj = await db.get(Expense, expense_id)
     if obj is None:
         raise HTTPException(404, "Expense not found")
@@ -547,7 +554,7 @@ async def create_settlement(body: ManufacturerSettlementCreate, user: CurrentUse
     return obj
 
 
-@router.get("/manufacturer-settlements", response_model=list[ManufacturerSettlementResponse])
+@router.get("/manufacturer-settlements")
 async def list_settlements(
     user: CurrentUser,
     brand_id: str | None = Query(None),
@@ -555,12 +562,12 @@ async def list_settlements(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(ManufacturerSettlement)
+    base = select(ManufacturerSettlement)
     if brand_id:
-        stmt = stmt.where(ManufacturerSettlement.brand_id == brand_id)
-    stmt = stmt.order_by(ManufacturerSettlement.created_at.desc()).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return rows
+        base = base.where(ManufacturerSettlement.brand_id == brand_id)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(ManufacturerSettlement.created_at.desc()).offset(skip).limit(limit))).scalars().all()
+    return {"items": rows, "total": total}
 
 
 @router.get("/manufacturer-settlements/{settlement_id}", response_model=ManufacturerSettlementResponse)
@@ -726,7 +733,7 @@ async def create_payment_request(body: PaymentRequestCreate, user: CurrentUser, 
     return obj
 
 
-@router.get("/payment-requests", response_model=list[PaymentRequestResponse])
+@router.get("/payment-requests")
 async def list_payment_requests(
     user: CurrentUser,
     brand_id: str | None = Query(None),
@@ -735,14 +742,14 @@ async def list_payment_requests(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(FinancePaymentRequest)
+    base = select(FinancePaymentRequest)
     if brand_id:
-        stmt = stmt.where(FinancePaymentRequest.brand_id == brand_id)
+        base = base.where(FinancePaymentRequest.brand_id == brand_id)
     if status:
-        stmt = stmt.where(FinancePaymentRequest.status == status)
-    stmt = stmt.order_by(FinancePaymentRequest.created_at.desc()).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return rows
+        base = base.where(FinancePaymentRequest.status == status)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(FinancePaymentRequest.created_at.desc()).offset(skip).limit(limit))).scalars().all()
+    return {"items": rows, "total": total}
 
 
 @router.get("/payment-requests/{request_id}", response_model=PaymentRequestResponse)
@@ -855,7 +862,7 @@ class ReceivableResponse(BaseModel):
     created_at: datetime
 
 
-@router.get("/receivables", response_model=list[ReceivableResponse])
+@router.get("/receivables")
 async def list_receivables(
     user: CurrentUser,
     brand_id: str | None = Query(None),
@@ -865,20 +872,20 @@ async def list_receivables(
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(Receivable)
-    if brand_id:
-        stmt = stmt.where(Receivable.brand_id == brand_id)
-    if status:
-        stmt = stmt.where(Receivable.status == status)
-    if customer_id:
-        stmt = stmt.where(Receivable.customer_id == customer_id)
-    # 业务员过滤
     from app.core.permissions import is_salesman
+    base = select(Receivable)
+    if brand_id:
+        base = base.where(Receivable.brand_id == brand_id)
+    if status:
+        base = base.where(Receivable.status == status)
+    if customer_id:
+        base = base.where(Receivable.customer_id == customer_id)
+    # 业务员过滤
     if is_salesman(user) and user.get("employee_id"):
-        stmt = stmt.join(Order, Order.id == Receivable.order_id).where(Order.salesman_id == user["employee_id"])
-    stmt = stmt.order_by(Receivable.created_at.desc()).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return rows
+        base = base.join(Order, Order.id == Receivable.order_id).where(Order.salesman_id == user["employee_id"])
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(Receivable.created_at.desc()).offset(skip).limit(limit))).scalars().all()
+    return {"items": rows, "total": total}
 
 @router.get("/receivables/aging")
 async def receivables_aging(

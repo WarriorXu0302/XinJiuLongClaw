@@ -3,7 +3,7 @@ import { Button, Form, Input, message, Modal, Select, Space, Switch, Table, Tag 
 import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 
 interface UserItem {
   id: string; username: string; employee_id?: string; employee_name?: string;
@@ -39,20 +39,24 @@ function UserList() {
   const [editingUser, setEditingUser] = useState<UserItem | null>(null);
   const [resetPwdUser, setResetPwdUser] = useState<UserItem | null>(null);
   const [newPassword, setNewPassword] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
-  const { data: users = [], isLoading } = useQuery<UserItem[]>({
-    queryKey: ['users'],
-    queryFn: () => api.get('/auth/users').then(r => r.data),
+  const { data: rawUsers, isLoading } = useQuery<{ items: UserItem[]; total: number }>({
+    queryKey: ['users', page, pageSize],
+    queryFn: () => api.get('/auth/users', { params: { skip: (page - 1) * pageSize, limit: pageSize } }).then(r => r.data),
   });
+  const users = rawUsers?.items ?? [];
+  const usersTotal = rawUsers?.total ?? 0;
 
   const { data: roles = [] } = useQuery<RoleItem[]>({
     queryKey: ['roles'],
-    queryFn: () => api.get('/auth/roles').then(r => r.data),
+    queryFn: () => api.get('/auth/roles').then(r => extractItems<RoleItem>(r.data)),
   });
 
   const { data: employees = [] } = useQuery<{ id: string; name: string }[]>({
     queryKey: ['employees-select'],
-    queryFn: () => api.get('/hr/employees').then(r => r.data),
+    queryFn: () => api.get('/hr/employees').then(r => extractItems(r.data)),
   });
 
   const createMut = useMutation({
@@ -81,27 +85,37 @@ function UserList() {
     onError: (e: any) => message.error(e?.response?.data?.detail ?? '重置失败'),
   });
 
-  const handleOk = () => {
-    form.validateFields().then(values => {
+  const handleOk = async () => {
+    try {
+      const values = await form.validateFields();
       if (editingUser) {
         const { password, role_codes, ...rest } = values;
-        updateMut.mutate({ id: editingUser.id, ...rest });
-        if (role_codes) setRolesMut.mutate({ userId: editingUser.id, role_codes });
+        await api.put(`/auth/users/${editingUser.id}`, rest);
+        if (role_codes) await api.put(`/auth/users/${editingUser.id}/roles`, { role_codes });
+        message.success('更新成功');
+        queryClient.invalidateQueries({ queryKey: ['users'] });
+        setModalOpen(false);
+        setEditingUser(null);
+        form.resetFields();
       } else {
         createMut.mutate(values);
       }
-    });
+    } catch (e: any) {
+      if (e?.response?.data?.detail) message.error(e.response.data.detail);
+    }
   };
 
   const handleEdit = (record: UserItem) => {
     setEditingUser(record);
-    form.setFieldsValue({
-      username: record.username,
-      employee_id: record.employee_id,
-      is_active: record.is_active,
-      role_codes: record.roles,
-    });
     setModalOpen(true);
+    setTimeout(() => {
+      form.setFieldsValue({
+        username: record.username,
+        employee_id: record.employee_id,
+        is_active: record.is_active,
+        role_codes: record.roles,
+      });
+    }, 0);
   };
 
   const columns: ColumnsType<UserItem> = [
@@ -136,7 +150,8 @@ function UserList() {
         <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingUser(null); form.resetFields(); form.setFieldsValue({ is_active: true }); setModalOpen(true); }}>新建用户</Button>
       </div>
 
-      <Table<UserItem> columns={columns} dataSource={users} rowKey="id" loading={isLoading} pagination={{ pageSize: 20 }} />
+      <Table<UserItem> columns={columns} dataSource={users} rowKey="id" loading={isLoading}
+        pagination={{ current: page, pageSize, total: usersTotal, showTotal: t => `共 ${t} 条`, showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }} />
 
       {/* 新建/编辑弹窗 */}
       <Modal title={editingUser ? '编辑用户' : '新建用户'} open={modalOpen}

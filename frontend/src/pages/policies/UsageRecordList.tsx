@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Table, Tag, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
@@ -31,16 +32,20 @@ const columns: ColumnsType<UsageRecord> = [
 
 function UsageRecordList() {
   const { brandId, params } = useBrandFilter();
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
-  const { data = [], isLoading } = useQuery({
-    queryKey: ['usage-records', brandId],
-    queryFn: async () => { const { data } = await api.get('/policies/usage-records', { params }); return data; },
+  const { data: listResp, isLoading } = useQuery<{ items: UsageRecord[]; total: number }>({
+    queryKey: ['usage-records', brandId, page, pageSize],
+    queryFn: async () => { const { data } = await api.get('/policies/usage-records', { params: { ...params, skip: (page - 1) * pageSize, limit: pageSize } }); return data; },
   });
+  const data = listResp?.items ?? [];
+  const total = listResp?.total ?? 0;
 
   return (
     <>
       <Title level={4}>执行记录</Title>
-      <Table<UsageRecord> columns={columns} dataSource={data} rowKey="id" loading={isLoading} pagination={{ pageSize: 20, showSizeChanger: true }} />
+      <Table<UsageRecord> columns={columns} dataSource={data} rowKey="id" loading={isLoading} pagination={{ current: page, pageSize, total, showTotal: (t) => '共 ' + t + ' 条', showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }} />
     </>
   );
 }

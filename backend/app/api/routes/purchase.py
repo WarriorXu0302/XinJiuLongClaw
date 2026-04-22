@@ -167,7 +167,7 @@ def _po_to_response(po: PurchaseOrder) -> dict:
     return d
 
 
-@router.get("", response_model=list[POResponse])
+@router.get("")
 async def list_purchase_orders(
     user: CurrentUser,
     brand_id: str | None = Query(None),
@@ -175,12 +175,13 @@ async def list_purchase_orders(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(PurchaseOrder)
+    from sqlalchemy import func
+    base = select(PurchaseOrder)
     if brand_id:
-        stmt = stmt.where(PurchaseOrder.brand_id == brand_id)
-    stmt = stmt.order_by(PurchaseOrder.created_at.desc()).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return [_po_to_response(po) for po in rows]
+        base = base.where(PurchaseOrder.brand_id == brand_id)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(PurchaseOrder.created_at.desc()).offset(skip).limit(limit))).scalars().all()
+    return {"items": [_po_to_response(po) for po in rows], "total": total}
 
 
 @router.get("/{po_id}", response_model=POResponse)

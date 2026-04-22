@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Card, Col, DatePicker, Input, Row, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -85,20 +85,22 @@ function AuditLogList() {
   const [action, setAction] = useState<string | undefined>();
   const [keyword, setKeyword] = useState('');
   const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
 
   const { data: entityTypes = [] } = useQuery<string[]>({
     queryKey: ['audit-entity-types'],
-    queryFn: () => api.get('/audit-logs/entity-types').then(r => r.data),
+    queryFn: () => api.get('/audit-logs/entity-types').then(r => extractItems<string>(r.data)),
   });
   const { data: actions = [] } = useQuery<string[]>({
     queryKey: ['audit-actions'],
-    queryFn: () => api.get('/audit-logs/actions').then(r => r.data),
+    queryFn: () => api.get('/audit-logs/actions').then(r => extractItems<string>(r.data)),
   });
 
-  const { data, isLoading } = useQuery<AuditLog[]>({
-    queryKey: ['audit-logs', entityType, action, keyword, dateRange?.[0]?.format('YYYY-MM-DD'), dateRange?.[1]?.format('YYYY-MM-DD')],
+  const { data, isLoading } = useQuery<{ items: AuditLog[]; total: number }>({
+    queryKey: ['audit-logs', entityType, action, keyword, dateRange?.[0]?.format('YYYY-MM-DD'), dateRange?.[1]?.format('YYYY-MM-DD'), page, pageSize],
     queryFn: () => {
-      const params: Record<string, string> = { limit: '200' };
+      const params: Record<string, string | number> = { skip: (page - 1) * pageSize, limit: pageSize };
       if (entityType) params.entity_type = entityType;
       if (action) params.action = action;
       if (keyword) params.keyword = keyword;
@@ -150,18 +152,18 @@ function AuditLogList() {
       <Card size="small" style={{ marginBottom: 12 }}>
         <Row gutter={12} align="middle">
           <Col><Text type="secondary">时间范围</Text></Col>
-          <Col><RangePicker value={dateRange} onChange={(v) => setDateRange(v as any)} allowClear /></Col>
+          <Col><RangePicker value={dateRange} onChange={(v) => { setDateRange(v as any); setPage(1); }} allowClear /></Col>
           <Col><Text type="secondary">实体</Text></Col>
           <Col><Select placeholder="全部类型" allowClear style={{ width: 150 }} value={entityType}
-            onChange={setEntityType} options={entityOpts} showSearch optionFilterProp="label" /></Col>
+            onChange={(v) => { setEntityType(v); setPage(1); }} options={entityOpts} showSearch optionFilterProp="label" /></Col>
           <Col><Text type="secondary">动作</Text></Col>
           <Col><Select placeholder="全部动作" allowClear style={{ width: 170 }} value={action}
-            onChange={setAction} options={actionOpts} showSearch optionFilterProp="label" /></Col>
+            onChange={(v) => { setAction(v); setPage(1); }} options={actionOpts} showSearch optionFilterProp="label" /></Col>
           <Col flex="200px"><Input.Search placeholder="搜索关键字" allowClear value={keyword}
-            onChange={e => setKeyword(e.target.value)} /></Col>
+            onChange={e => { setKeyword(e.target.value); setPage(1); }} /></Col>
           <Col>
             <Space>
-              <Text type="secondary" style={{ fontSize: 12 }}>共 {data?.length ?? 0} 条</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>共 {data?.total ?? 0} 条</Text>
             </Space>
           </Col>
         </Row>
@@ -170,10 +172,10 @@ function AuditLogList() {
       <Table
         rowKey="id"
         columns={columns}
-        dataSource={data ?? []}
+        dataSource={data?.items ?? []}
         loading={isLoading}
         size="small"
-        pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
+        pagination={{ current: page, pageSize, total: data?.total ?? 0, showTotal: t => `共 ${t} 条`, showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }}
         scroll={{ x: 1000 }}
       />
     </>

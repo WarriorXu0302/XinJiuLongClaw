@@ -3,7 +3,7 @@ import { Button, Card, Image, message, Modal, Space, Table, Tag, Typography, Upl
 import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';
 import { useAuthStore } from '../../stores/authStore';
 import type { PolicyRequest, RequestItem } from './policyTypes';
@@ -27,7 +27,7 @@ function FulfillManage() {
 
   const { data = [], isLoading } = useQuery<PolicyRequest[]>({
     queryKey: ['policy-requests-fulfill', brandId],
-    queryFn: () => api.get('/policies/requests', { params: { ...params, has_items: true, status: 'approved', limit: 200 } }).then(r => r.data),
+    queryFn: () => api.get('/policies/requests', { params: { ...params, has_items: true, status: 'approved', limit: 200 } }).then(r => extractItems<PolicyRequest>(r.data)),
   });
 
   // 只取有 arrived/fulfilled/settled 项的

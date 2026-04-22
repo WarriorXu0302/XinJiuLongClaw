@@ -3,7 +3,7 @@ import { Button, Card, Col, Form, InputNumber, message, Modal, Progress, Row, Se
 import { AimOutlined, PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useIsAdmin, useHasRole } from '../../stores/authStore';
 
 const { Title, Text } = Typography;
@@ -55,23 +55,27 @@ function SalesTargetManage() {
   const [form] = Form.useForm();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Target | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(30);
 
-  const { data: targets = [], isLoading } = useQuery<Target[]>({
-    queryKey: ['targets', year, month, level],
+  const { data: rawTargets, isLoading } = useQuery<{ items: Target[]; total: number }>({
+    queryKey: ['targets', year, month, level, page, pageSize],
     queryFn: () => {
-      const params: Record<string, string | number> = { target_year: year, target_level: level };
+      const params: Record<string, string | number> = { target_year: year, target_level: level, skip: (page - 1) * pageSize, limit: pageSize };
       if (month !== undefined) params.target_month = month;
       return api.get('/sales-targets', { params }).then(r => r.data);
     },
   });
+  const targets = rawTargets?.items ?? [];
+  const targetsTotal = rawTargets?.total ?? 0;
 
   const { data: brands = [] } = useQuery<Brand[]>({
     queryKey: ['brands-select'],
-    queryFn: () => api.get('/products/brands').then(r => r.data),
+    queryFn: () => api.get('/products/brands').then(r => extractItems<Brand>(r.data)),
   });
   const { data: employees = [] } = useQuery<Employee[]>({
     queryKey: ['employees-all'],
-    queryFn: () => api.get('/hr/employees').then(r => r.data),
+    queryFn: () => api.get('/hr/employees').then(r => extractItems<Employee>(r.data)),
   });
 
   const saveMut = useMutation({
@@ -185,10 +189,10 @@ function SalesTargetManage() {
       <Card size="small" style={{ marginBottom: 12 }}>
         <Space wrap>
           <span>年份</span>
-          <InputNumber value={year} onChange={v => setYear(v || ym())} min={2020} max={2099} />
+          <InputNumber value={year} onChange={v => { setYear(v || ym()); setPage(1); }} min={2020} max={2099} />
           <span>月份</span>
           <Select placeholder="全年" allowClear style={{ width: 120 }} value={month}
-            onChange={setMonth}
+            onChange={(v) => { setMonth(v); setPage(1); }}
             options={Array.from({length: 12}, (_, i) => ({ value: i + 1, label: `${i + 1} 月` }))} />
           <Button type="primary" icon={<PlusOutlined />} onClick={openNew}>设置目标</Button>
         </Space>
@@ -205,7 +209,7 @@ function SalesTargetManage() {
           <div style={{ fontSize: 18, fontWeight: 600, color: '#52c41a' }}>¥{totalReceipt.toLocaleString()}</div></Card></Col>
       </Row>
 
-      <Tabs activeKey={level} onChange={setLevel} items={[
+      <Tabs activeKey={level} onChange={(v) => { setLevel(v); setPage(1); }} items={[
         ...(canSetCompanyBrand ? [
           { key: 'company', label: '公司整体' },
           { key: 'brand', label: '品牌目标' },
@@ -214,7 +218,7 @@ function SalesTargetManage() {
       ]} />
 
       <Table<Target> columns={columns} dataSource={targets} rowKey="id" loading={isLoading}
-        pagination={{ pageSize: 30 }} size="middle" />
+        pagination={{ current: page, pageSize, total: targetsTotal, showTotal: t => `共 ${t} 条`, showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }} size="middle" />
 
       <Modal title={editing ? '编辑目标' : '设置目标'} open={open}
         onOk={submit} onCancel={() => { setOpen(false); setEditing(null); form.resetFields(); }}

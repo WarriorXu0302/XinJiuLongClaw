@@ -4,7 +4,7 @@ import { Alert, Button, Card, Descriptions, Input, message, Select, Space, Table
 import { BarcodeOutlined, DeleteOutlined, UploadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import * as XLSX from 'xlsx';
 
 const { Title, Text } = Typography;
@@ -40,7 +40,7 @@ function ReceiveScanPage() {
   // 拉取待收货的采购单（paid / shipped 状态）
   const { data: poList = [] } = useQuery<PurchaseOrder[]>({
     queryKey: ['po-for-receive'],
-    queryFn: () => api.get('/purchase-orders').then(r => r.data),
+    queryFn: () => api.get('/purchase-orders').then(r => extractItems<PurchaseOrder>(r.data)),
   });
 
   const receivablePOs = poList.filter(po => ['pending', 'approved', 'paid', 'shipped'].includes(po.status));

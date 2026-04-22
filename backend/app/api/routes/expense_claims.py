@@ -8,11 +8,12 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import CurrentUser
+from app.core.permissions import require_role
 from app.models.expense_claim import ExpenseClaim
 from app.services.audit_service import log_audit
 
@@ -88,19 +89,20 @@ async def list_claims(
     claim_type: Optional[str] = Query(None),
     brand_id: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
+    skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(ExpenseClaim)
+    base = select(ExpenseClaim)
     if claim_type:
-        stmt = stmt.where(ExpenseClaim.claim_type == claim_type)
+        base = base.where(ExpenseClaim.claim_type == claim_type)
     if brand_id:
-        stmt = stmt.where(ExpenseClaim.brand_id == brand_id)
+        base = base.where(ExpenseClaim.brand_id == brand_id)
     if status:
-        stmt = stmt.where(ExpenseClaim.status == status)
-    stmt = stmt.order_by(ExpenseClaim.created_at.desc()).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return [_to_response(c) for c in rows]
+        base = base.where(ExpenseClaim.status == status)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(ExpenseClaim.created_at.desc()).offset(skip).limit(limit))).scalars().all()
+    return {"items": [_to_response(c) for c in rows], "total": total}
 
 
 @router.get("/{claim_id}")
@@ -128,6 +130,7 @@ async def update_claim(claim_id: str, body: ClaimUpdate, user: CurrentUser, db: 
 
 @router.post("/{claim_id}/approve")
 async def approve_claim(claim_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     c = await db.get(ExpenseClaim, claim_id)
     if not c:
         raise HTTPException(404, "不存在")
@@ -172,6 +175,7 @@ async def approve_claim(claim_id: str, user: CurrentUser, db: AsyncSession = Dep
 
 @router.post("/{claim_id}/reject")
 async def reject_claim(claim_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     c = await db.get(ExpenseClaim, claim_id)
     if not c:
         raise HTTPException(404, "不存在")
@@ -210,6 +214,7 @@ async def confirm_arrival(claim_id: str, user: CurrentUser, arrived_amount: floa
 @router.post("/{claim_id}/fulfill")
 async def fulfill_claim(claim_id: str, body: ClaimUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     """提交兑付/付款凭证"""
+    require_role(user, "boss", "finance")
     c = await db.get(ExpenseClaim, claim_id)
     if not c:
         raise HTTPException(404, "不存在")
@@ -225,6 +230,7 @@ async def fulfill_claim(claim_id: str, body: ClaimUpdate, user: CurrentUser, db:
 @router.post("/{claim_id}/pay")
 async def pay_daily_claim(claim_id: str, user: CurrentUser, account_id: str = Query(...), db: AsyncSession = Depends(get_db)):
     """日常开销：从总资金池拨款"""
+    require_role(user, "boss", "finance")
     from app.models.product import Account
     from app.api.routes.accounts import record_fund_flow
 
@@ -255,6 +261,7 @@ async def pay_daily_claim(claim_id: str, user: CurrentUser, account_id: str = Qu
 @router.post("/{claim_id}/settle")
 async def settle_claim(claim_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     """归档"""
+    require_role(user, "boss", "finance")
     c = await db.get(ExpenseClaim, claim_id)
     if not c:
         raise HTTPException(404, "不存在")
@@ -266,6 +273,7 @@ async def settle_claim(claim_id: str, user: CurrentUser, db: AsyncSession = Depe
 
 @router.delete("/{claim_id}", status_code=204)
 async def delete_claim(claim_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     c = await db.get(ExpenseClaim, claim_id)
     if not c:
         raise HTTPException(404, "不存在")

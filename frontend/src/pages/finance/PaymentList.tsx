@@ -4,7 +4,7 @@ import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';
 
 interface PaymentItem {
@@ -36,15 +36,19 @@ function PaymentList() {
   const [form] = Form.useForm<PaymentFormValues>();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<PaymentItem | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
-  const { data = [], isLoading } = useQuery({
-    queryKey: ['payments', brandId],
-    queryFn: async () => { const { data } = await api.get('/payments'); return data; },
+  const { data: listResp, isLoading } = useQuery<{ items: PaymentItem[]; total: number }>({
+    queryKey: ['payments', brandId, page, pageSize],
+    queryFn: async () => { const { data } = await api.get('/payments', { params: { skip: (page - 1) * pageSize, limit: pageSize } }); return data; },
   });
+  const data = listResp?.items ?? [];
+  const total = listResp?.total ?? 0;
 
   const { data: accounts = [] } = useQuery<{id: string; name: string; account_type: string; balance: number}[]>({
     queryKey: ['accounts-select', brandId],
-    queryFn: () => api.get('/accounts', { params }).then(r => r.data),
+    queryFn: () => api.get('/accounts').then(r => extractItems(r.data)),
   });
 
   const createMutation = useMutation({
@@ -131,7 +135,7 @@ function PaymentList() {
         <h2 style={{ margin: 0 }}>付款管理</h2>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingRecord(null); setModalOpen(true); }}>新建付款</Button>
       </div>
-      <Table<PaymentItem> columns={columns} dataSource={data} rowKey="id" loading={isLoading} pagination={{ pageSize: 20, showSizeChanger: true }} />
+      <Table<PaymentItem> columns={columns} dataSource={data} rowKey="id" loading={isLoading} pagination={{ current: page, pageSize, total, showTotal: (t) => '共 ' + t + ' 条', showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }} />
 
       <Modal
         title={editingRecord ? '编辑付款' : '新建付款'}

@@ -4,7 +4,7 @@ import { CameraOutlined, CheckCircleOutlined, EnvironmentOutlined, LoginOutlined
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -107,7 +107,7 @@ function WorkCheckinPanel() {
     queryKey: ['today-checkin'],
     queryFn: () => api.get('/attendance/checkin', {
       params: { start_date: dayjs().format('YYYY-MM-DD'), end_date: dayjs().format('YYYY-MM-DD') },
-    }).then(r => r.data),
+    }).then(r => extractItems<Checkin>(r.data)),
     refetchInterval: 60000,
   });
 
@@ -192,14 +192,14 @@ function VisitPanel() {
 
   const { data: customers = [] } = useQuery<Customer[]>({
     queryKey: ['customers-select'],
-    queryFn: () => api.get('/customers').then(r => r.data),
+    queryFn: () => api.get('/customers').then(r => extractItems<Customer>(r.data)),
   });
 
   const { data: myVisits = [] } = useQuery<Visit[]>({
     queryKey: ['my-visits-today'],
     queryFn: () => api.get('/attendance/visits', {
       params: { start_date: dayjs().format('YYYY-MM-DD'), end_date: dayjs().format('YYYY-MM-DD') },
-    }).then(r => r.data),
+    }).then(r => extractItems<Visit>(r.data)),
     refetchInterval: 60000,
   });
 
@@ -328,7 +328,7 @@ function LeavePanel() {
 
   const { data: leaves = [] } = useQuery<Leave[]>({
     queryKey: ['my-leaves'],
-    queryFn: () => api.get('/attendance/leave-requests').then(r => r.data),
+    queryFn: () => api.get('/attendance/leave-requests').then(r => extractItems<Leave>(r.data)),
   });
 
   const createMut = useMutation({

@@ -5,10 +5,11 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.permissions import require_role
 from app.core.security import CurrentUser
 from app.models.inventory import Inventory, StockFlow
 from app.models.product import Product
@@ -226,7 +227,7 @@ async def _create_transfer_flows(
 # ═══════════════════════════════════════════════════════════════════
 
 
-@router.get("/tasting-wine-usage", response_model=list[TastingWineUsageResponse])
+@router.get("/tasting-wine-usage")
 async def list_tasting_wine_usage(
     user: CurrentUser,
     brand_id: str | None = Query(None),
@@ -234,12 +235,12 @@ async def list_tasting_wine_usage(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(TastingWineUsage)
+    base = select(TastingWineUsage)
     if brand_id:
-        stmt = stmt.join(Product, TastingWineUsage.product_id == Product.id).where(Product.brand_id == brand_id)
-    stmt = stmt.order_by(TastingWineUsage.created_at.desc()).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return rows
+        base = base.join(Product, TastingWineUsage.product_id == Product.id).where(Product.brand_id == brand_id)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(TastingWineUsage.created_at.desc()).offset(skip).limit(limit))).scalars().all()
+    return {"items": rows, "total": total}
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -291,6 +292,7 @@ async def delete_tasting_wine_usage(
     user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    require_role(user, "boss", "warehouse")
     record = await db.get(TastingWineUsage, record_id)
     if record is None:
         raise HTTPException(404, "TastingWineUsage not found")
@@ -365,7 +367,7 @@ async def create_bottle_destruction(
     return obj
 
 
-@router.get("/bottle-destructions", response_model=list[BottleDestructionResponse])
+@router.get("/bottle-destructions")
 async def list_bottle_destructions(
     user: CurrentUser,
     brand_id: str | None = Query(None),
@@ -374,14 +376,14 @@ async def list_bottle_destructions(
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(BottleDestruction)
+    base = select(BottleDestruction)
     if brand_id:
-        stmt = stmt.where(BottleDestruction.brand_id == brand_id)
+        base = base.where(BottleDestruction.brand_id == brand_id)
     if period:
-        stmt = stmt.where(BottleDestruction.period == period)
-    stmt = stmt.order_by(BottleDestruction.created_at.desc()).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return rows
+        base = base.where(BottleDestruction.period == period)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(BottleDestruction.created_at.desc()).offset(skip).limit(limit))).scalars().all()
+    return {"items": rows, "total": total}
 
 
 @router.get("/bottle-reconciliation", response_model=list[BottleReconciliation])

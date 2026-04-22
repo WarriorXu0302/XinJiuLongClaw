@@ -3,7 +3,7 @@ import { Button, Card, Col, Form, Input, InputNumber, message, Modal, Progress, 
 import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';
 
 const { Text } = Typography;
@@ -38,30 +38,30 @@ function PaymentProgress() {
 
   const { data: accounts = [] } = useQuery<any[]>({
     queryKey: ['accounts-select', brandId],
-    queryFn: () => api.get('/accounts', { params }).then(r => r.data),
+    queryFn: () => api.get('/accounts', { params }).then(r => extractItems(r.data)),
   });
   const ptmAcc = accounts.find((a: any) => a.account_type === 'payment_to_mfr');
 
   const { data: flows = [] } = useQuery<any[]>({
     queryKey: ['ptm-flows', ptmAcc?.id],
-    queryFn: () => api.get('/accounts/fund-flows', { params: { account_id: ptmAcc?.id, limit: 100 } }).then(r => r.data),
+    queryFn: () => api.get('/accounts/fund-flows', { params: { account_id: ptmAcc?.id, limit: 100 } }).then(r => extractItems(r.data)),
     enabled: !!ptmAcc,
   });
 
   const { data: shares = [] } = useQuery<any[]>({
     queryKey: ['share-records', brandId],
-    queryFn: () => api.get('/expense-claims', { params: { claim_type: 'share_out', brand_id: brandId, limit: 50 } }).then(r => r.data),
+    queryFn: () => api.get('/expense-claims', { params: { claim_type: 'share_out', brand_id: brandId, limit: 50 } }).then(r => extractItems(r.data)),
     enabled: !!brandId,
   });
 
   const { data: products = [] } = useQuery<any[]>({
     queryKey: ['products-select', brandId],
-    queryFn: () => api.get('/products', { params: brandId ? params : { limit: 200 } }).then(r => r.data),
+    queryFn: () => api.get('/products', { params: brandId ? params : { limit: 200 } }).then(r => extractItems(r.data)),
   });
 
   const { data: warehouses = [] } = useQuery<any[]>({
     queryKey: ['warehouses-select', brandId],
-    queryFn: () => api.get('/inventory/warehouses', { params }).then(r => r.data),
+    queryFn: () => api.get('/inventory/warehouses', { params }).then(r => extractItems(r.data)),
     enabled: !!brandId,
   });
   const mainWh = warehouses.find((w: any) => w.warehouse_type === 'main');

@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Alert, Button, Card, Descriptions, Input, InputNumber, message, Modal, Progress, Select, Space, Tag, Typography } from 'antd';
 import { BarcodeOutlined, CheckCircleOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 
 const { Title, Text } = Typography;
 
@@ -39,7 +39,7 @@ function OrderStockOutPage() {
   // Fetch warehouses for this order's brand
   const { data: warehouses = [] } = useQuery<Warehouse[]>({
     queryKey: ['warehouses-stockout', order?.brand_id],
-    queryFn: () => api.get('/inventory/warehouses', { params: { brand_id: order?.brand_id } }).then(r => r.data),
+    queryFn: () => api.get('/inventory/warehouses', { params: { brand_id: order?.brand_id } }).then(r => extractItems(r.data)),
     enabled: !!order?.brand_id,
   });
 

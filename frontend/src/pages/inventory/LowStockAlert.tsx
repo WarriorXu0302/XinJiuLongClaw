@@ -3,7 +3,7 @@ import { Alert, Button, Card, InputNumber, message, Space, Table, Tag, Typograph
 import { BellOutlined, WarningOutlined } from '@ant-design/icons';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useBrandStore } from '../../stores/brandStore';
 
 const { Title, Text } = Typography;
@@ -28,7 +28,7 @@ function LowStockAlert() {
     queryFn: () => {
       const params: Record<string, string | number> = { threshold_cases: threshold };
       if (brandId) params.brand_id = brandId;
-      return api.get('/inventory/low-stock', { params }).then(r => r.data);
+      return api.get('/inventory/low-stock', { params }).then(r => extractItems<LowStockRow>(r.data));
     },
   });
 

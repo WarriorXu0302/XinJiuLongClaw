@@ -243,6 +243,7 @@ async def reject_fund_transfer(
     transfer_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
     """Reject a pending transfer."""
+    require_role(user, "boss")
     ff = await db.get(FundFlow, transfer_id)
     if ff is None:
         raise HTTPException(404, "拨款申请不存在")
@@ -371,6 +372,7 @@ async def create_manual_fund_flow(
     body: ManualFundFlowCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
     """Manual fund flow entry — for F-class arrivals, deductions, rewards, etc."""
+    require_role(user, "boss", "finance")
     account = await db.get(Account, body.account_id)
     if not account:
         raise HTTPException(404, "账户不存在")

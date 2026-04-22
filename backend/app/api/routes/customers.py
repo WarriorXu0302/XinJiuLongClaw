@@ -4,10 +4,11 @@ Customer API routes — CRUD + order history.
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.permissions import require_role
 from app.core.security import CurrentUser
 from app.models.customer import Customer, CustomerBrandSalesman
 from app.models.order import Order
@@ -57,7 +58,7 @@ async def create_customer(body: CustomerCreate, user: CurrentUser, db: AsyncSess
     return obj
 
 
-@router.get("", response_model=list[CustomerResponse])
+@router.get("")
 async def list_customers(
     user: CurrentUser,
     customer_type: str | None = Query(None),
@@ -70,22 +71,21 @@ async def list_customers(
     limit: int = Query(20, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(Customer)
+    base = select(Customer)
     if customer_type:
-        stmt = stmt.where(Customer.customer_type == customer_type)
+        base = base.where(Customer.customer_type == customer_type)
     if status:
-        stmt = stmt.where(Customer.status == status)
+        base = base.where(Customer.status == status)
     if settlement_mode:
-        stmt = stmt.where(Customer.settlement_mode == settlement_mode)
+        base = base.where(Customer.settlement_mode == settlement_mode)
     if keyword:
         kw = f"%{keyword}%"
-        stmt = stmt.where(
+        base = base.where(
             (Customer.name.ilike(kw))
             | (Customer.contact_name.ilike(kw))
             | (Customer.contact_phone.ilike(kw))
         )
 
-    # customer_brand_salesman 过滤（只 JOIN 一次，同时收 brand_id / salesman_id / 业务员自身隔离）
     roles = user.get("roles", [])
     force_own = (
         "salesman" in roles
@@ -93,17 +93,19 @@ async def list_customers(
         and user.get("employee_id")
     )
     if brand_id or salesman_id or force_own:
-        stmt = stmt.join(CustomerBrandSalesman, CustomerBrandSalesman.customer_id == Customer.id)
+        base = base.join(CustomerBrandSalesman, CustomerBrandSalesman.customer_id == Customer.id)
         if brand_id:
-            stmt = stmt.where(CustomerBrandSalesman.brand_id == brand_id)
+            base = base.where(CustomerBrandSalesman.brand_id == brand_id)
         if salesman_id:
-            stmt = stmt.where(CustomerBrandSalesman.salesman_id == salesman_id)
+            base = base.where(CustomerBrandSalesman.salesman_id == salesman_id)
         if force_own:
-            stmt = stmt.where(CustomerBrandSalesman.salesman_id == user["employee_id"])
+            base = base.where(CustomerBrandSalesman.salesman_id == user["employee_id"])
 
-    stmt = stmt.order_by(Customer.created_at.desc()).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return rows
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(
+        base.order_by(Customer.created_at.desc()).offset(skip).limit(limit)
+    )).scalars().all()
+    return {"items": rows, "total": total}
 
 
 @router.get("/{customer_id}", response_model=CustomerResponse)
@@ -148,6 +150,7 @@ async def update_customer(
 
 @router.delete("/{customer_id}", status_code=204)
 async def delete_customer(customer_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "sales_manager")
     obj = await db.get(Customer, customer_id)
     if obj is None:
         raise HTTPException(404, "Customer not found")
@@ -203,6 +206,7 @@ async def bind_customer_brand_salesman(
 async def unbind_customer_brand_salesman(
     customer_id: str, brand_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
+    require_role(user, "boss", "sales_manager")
     obj = (await db.execute(
         select(CustomerBrandSalesman).where(
             CustomerBrandSalesman.customer_id == customer_id,

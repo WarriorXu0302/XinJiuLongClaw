@@ -37,11 +37,18 @@ function ProductList() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<ProductItem | null>(null);
   const { brandId, params } = useBrandFilter();
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
-  const { data = [], isLoading } = useQuery({
-    queryKey: ['products', brandId],
-    queryFn: async () => { const { data } = await api.get('/products', { params }); return data; },
+  const { data: listResp, isLoading } = useQuery<{ items: ProductItem[]; total: number }>({
+    queryKey: ['products', brandId, page, pageSize],
+    queryFn: async () => {
+      const { data } = await api.get('/products', { params: { ...params, skip: (page - 1) * pageSize, limit: pageSize } });
+      return data;
+    },
   });
+  const data = listResp?.items ?? [];
+  const total = listResp?.total ?? 0;
 
   const createMutation = useMutation({
     mutationFn: async (values: any) => {
@@ -109,7 +116,7 @@ function ProductList() {
           {brandId ? '新建商品' : '请先选择品牌'}
         </Button>
       </div>
-      <Table<ProductItem> columns={columns} dataSource={data} rowKey="id" loading={isLoading} pagination={{ pageSize: 20 }} />
+      <Table<ProductItem> columns={columns} dataSource={data} rowKey="id" loading={isLoading} pagination={{ current: page, pageSize, total, showTotal: (t) => `共 ${t} 条`, showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }} />
 
       <Modal title={editingRecord ? '编辑商品' : '新建商品'} open={modalOpen} onOk={handleOk}
         onCancel={() => { setModalOpen(false); setEditingRecord(null); form.resetFields(); }}

@@ -31,7 +31,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../stores/authStore';
 import { useBrandStore } from '../stores/brandStore';
-import api from '../api/client';
+import api, { extractItems } from '../api/client';
 
 const { Header, Sider, Content } = Layout;
 
@@ -164,7 +164,7 @@ function MainLayout() {
   const { selectedBrandId, setBrand } = useBrandStore();
   const { data: allBrands = [] } = useQuery<{id: string; code: string; name: string}[]>({
     queryKey: ['brands-list'],
-    queryFn: () => api.get('/products/brands').then(r => r.data),
+    queryFn: () => api.get('/products/brands').then(r => extractItems<{id: string; code: string; name: string}>(r.data)),
   });
 
   // Admin/boss see all brands; others only see their bound brands

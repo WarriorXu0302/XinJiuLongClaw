@@ -265,8 +265,13 @@ async def _call_tool(name: str, arguments: dict[str, Any]) -> list[types.Content
     url = f"{loopback}{entry['path']}"
     headers = {"Authorization": f"Bearer {bearer}"}
 
-    async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
-        resp = await client.post(url, headers=headers, json=arguments or {})
+    try:
+        async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
+            resp = await client.post(url, headers=headers, json=arguments or {})
+    except httpx.TimeoutException:
+        return [types.TextContent(type="text", text=f"[超时] 调用 {name} 超过 30 秒未响应，请稍后重试")]
+    except httpx.HTTPError as exc:
+        return [types.TextContent(type="text", text=f"[网络错误] {type(exc).__name__}: {exc}")]
 
     if resp.status_code >= 400:
         body = resp.text

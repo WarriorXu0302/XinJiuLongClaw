@@ -3,7 +3,7 @@ import { Alert, Button, Card, Col, Divider, Form, Input, InputNumber, message, M
 import { CheckCircleOutlined, WarningOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';
 
 const { Title, Text } = Typography;
@@ -20,7 +20,7 @@ function TastingManagement() {
 
   const { data: brands = [] } = useQuery<{ id: string; name: string }[]>({
     queryKey: ['brands-select'],
-    queryFn: () => api.get('/products/brands').then(r => r.data),
+    queryFn: () => api.get('/products/brands').then(r => extractItems(r.data)),
   });
 
   const { data: destructions = [] } = useQuery<Destruction[]>({
@@ -28,7 +28,7 @@ function TastingManagement() {
     queryFn: () => {
       const p: Record<string, string> = { period };
       if (brandId) p.brand_id = brandId;
-      return api.get('/bottle-destructions', { params: p }).then(r => r.data);
+      return api.get('/bottle-destructions', { params: p }).then(r => extractItems(r.data));
     },
   });
 
@@ -37,7 +37,7 @@ function TastingManagement() {
     queryFn: () => {
       const p: Record<string, string> = { period };
       if (brandId) p.brand_id = brandId;
-      return api.get('/bottle-reconciliation', { params: p }).then(r => r.data);
+      return api.get('/bottle-reconciliation', { params: p }).then(r => extractItems(r.data));
     },
   });
 

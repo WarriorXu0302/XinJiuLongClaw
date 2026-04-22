@@ -38,6 +38,8 @@ class BrandUpdate(_BM):
 
 @router.post("/brands", status_code=201)
 async def create_brand(body: BrandCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    from app.core.permissions import require_role
+    require_role(user, "boss")
     from app.models.product import Account, Warehouse
 
     obj = Brand(id=str(uuid.uuid4()), **body.model_dump())
@@ -72,6 +74,8 @@ async def create_brand(body: BrandCreate, user: CurrentUser, db: AsyncSession = 
 
 @router.put("/brands/{brand_id}")
 async def update_brand(brand_id: str, body: BrandUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    from app.core.permissions import require_role
+    require_role(user, "boss")
     obj = await db.get(Brand, brand_id)
     if obj is None:
         raise HTTPException(404, "Brand not found")
@@ -83,6 +87,8 @@ async def update_brand(brand_id: str, body: BrandUpdate, user: CurrentUser, db: 
 
 @router.delete("/brands/{brand_id}", status_code=204)
 async def delete_brand(brand_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    from app.core.permissions import require_role
+    require_role(user, "boss")
     obj = await db.get(Brand, brand_id)
     if obj is None:
         raise HTTPException(404, "Brand not found")
@@ -92,13 +98,15 @@ async def delete_brand(brand_id: str, user: CurrentUser, db: AsyncSession = Depe
 
 @router.post("", response_model=ProductResponse, status_code=201)
 async def create_product(body: ProductCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    from app.core.permissions import require_role
+    require_role(user, "boss", "warehouse")
     obj = Product(id=str(uuid.uuid4()), **body.model_dump())
     db.add(obj)
     await db.flush()
     return obj
 
 
-@router.get("", response_model=list[ProductResponse])
+@router.get("")
 async def list_products(
     user: CurrentUser,
     brand_id: str | None = Query(None),
@@ -107,14 +115,15 @@ async def list_products(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(Product)
+    from sqlalchemy import func
+    base = select(Product)
     if brand_id:
-        stmt = stmt.where(Product.brand_id == brand_id)
+        base = base.where(Product.brand_id == brand_id)
     if status:
-        stmt = stmt.where(Product.status == status)
-    stmt = stmt.order_by(Product.created_at.desc()).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return rows
+        base = base.where(Product.status == status)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(Product.created_at.desc()).offset(skip).limit(limit))).scalars().all()
+    return {"items": rows, "total": total}
 
 
 @router.get("/{product_id}", response_model=ProductResponse)
@@ -127,8 +136,10 @@ async def get_product(product_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.put("/{product_id}", response_model=ProductResponse)
 async def update_product(
-    product_id: str, body: ProductUpdate, db: AsyncSession = Depends(get_db)
+    product_id: str, body: ProductUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
+    from app.core.permissions import require_role
+    require_role(user, "boss", "warehouse")
     obj = await db.get(Product, product_id)
     if obj is None:
         raise HTTPException(404, "Product not found")
@@ -139,7 +150,9 @@ async def update_product(
 
 
 @router.delete("/{product_id}", status_code=204)
-async def delete_product(product_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_product(product_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    from app.core.permissions import require_role
+    require_role(user, "boss")
     obj = await db.get(Product, product_id)
     if obj is None:
         raise HTTPException(404, "Product not found")

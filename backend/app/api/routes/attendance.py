@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import CurrentUser
+from app.core.permissions import require_role
 from app.models.attendance import AttendanceRule, CheckinRecord, CustomerVisit, LeaveRequest
 from app.models.user import Employee
 from app.models.customer import Customer
@@ -96,6 +97,7 @@ async def list_rules(user: CurrentUser, db: AsyncSession = Depends(get_db)):
 
 @router.post("/rules", response_model=RuleResponse, status_code=201)
 async def upsert_rule(body: RuleCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "hr")
     # 同员工/全局只能一条
     existing = (await db.execute(
         select(AttendanceRule).where(
@@ -497,6 +499,7 @@ class LeaveApprove(BaseModel):
 
 @router.post("/leave-requests/{req_id}/approve", response_model=LeaveResponse)
 async def approve_leave(req_id: str, body: LeaveApprove, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "hr")
     rec = await db.get(LeaveRequest, req_id)
     if not rec:
         raise HTTPException(404, "请假申请不存在")

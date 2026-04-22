@@ -4,7 +4,7 @@ import { Table, Tag, Typography, Button, Descriptions, Modal, Form, Input, Input
 import { PlusOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';
 import { useAuthStore } from '../../stores/authStore';
 
@@ -38,20 +38,24 @@ function PolicyTemplateList() {
   const canSeeValuation = roles.some(r => ['admin', 'boss', 'finance'].includes(r));
   const { brandId, params } = useBrandFilter();
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
-  const { data, isLoading } = useQuery<TemplateItem[]>({
-    queryKey: ['policy-templates', brandId],
-    queryFn: () => api.get('/policy-templates/templates', { params }).then(r => r.data),
+  const { data: listResp, isLoading } = useQuery<{ items: TemplateItem[]; total: number }>({
+    queryKey: ['policy-templates', brandId, page, pageSize],
+    queryFn: () => api.get('/policy-templates/templates', { params: { ...params, skip: (page - 1) * pageSize, limit: pageSize } }).then(r => r.data),
   });
+  const templateData = listResp?.items ?? [];
+  const total = listResp?.total ?? 0;
 
   const { data: brands = [] } = useQuery<{ id: string; name: string }[]>({
     queryKey: ['brands-select'],
-    queryFn: () => api.get('/products/brands').then(r => r.data),
+    queryFn: () => api.get('/products/brands').then(r => extractItems<{ id: string; name: string }>(r.data)),
   });
 
   const { data: products = [] } = useQuery<{ id: string; name: string }[]>({
     queryKey: ['products-select', brandId],
-    queryFn: () => api.get('/products', { params }).then(r => r.data),
+    queryFn: () => api.get('/products', { params }).then(r => extractItems<{ id: string; name: string }>(r.data)),
   });
 
   const createMutation = useMutation({
@@ -153,12 +157,12 @@ function PolicyTemplateList() {
       <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
         <Space>
           <Title level={4} style={{ margin: 0 }}>政策模板</Title>
-          <Select placeholder="全部类型" allowClear style={{ width: 120 }} onChange={(v) => setTypeFilter(v ?? null)}
+          <Select placeholder="全部类型" allowClear style={{ width: 120 }} onChange={(v) => { setTypeFilter(v ?? null); setPage(1); }}
             options={[{ value: 'channel', label: '渠道' }, { value: 'group_purchase', label: '团购' }]} />
         </Space>
         <Button type="primary" onClick={() => { setEditingRecord(null); form.resetFields(); form.setFieldsValue({ template_type: 'channel', brand_id: brandId || undefined, benefits: [{ quantity: 1 }] }); setModalOpen(true); }}>新建</Button>
       </Space>
-      <Table rowKey="id" columns={columns} dataSource={(data ?? []).filter(t => !typeFilter || t.template_type === typeFilter)} loading={isLoading} size="middle" pagination={{ pageSize: 20 }} scroll={{ x: 1200 }} />
+      <Table rowKey="id" columns={columns} dataSource={templateData.filter(t => !typeFilter || t.template_type === typeFilter)} loading={isLoading} size="middle" pagination={{ current: page, pageSize, total, showTotal: (t) => '共 ' + t + ' 条', showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }} scroll={{ x: 1200 }} />
 
       <Modal title={editingRecord ? '编辑模板' : '新建模板'} open={modalOpen} onOk={handleSubmit}
         onCancel={() => { setModalOpen(false); setEditingRecord(null); form.resetFields(); }}

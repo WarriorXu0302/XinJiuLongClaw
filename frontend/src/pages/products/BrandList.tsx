@@ -3,7 +3,7 @@ import { Button, Form, Input, message, Modal, Select, Space, Table, Tag, Typogra
 import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 
 const { Title } = Typography;
 
@@ -23,12 +23,12 @@ function BrandList() {
 
   const { data = [], isLoading } = useQuery<BrandItem[]>({
     queryKey: ['brands'],
-    queryFn: () => api.get('/products/brands').then(r => r.data),
+    queryFn: () => api.get('/products/brands').then(r => extractItems<BrandItem>(r.data)),
   });
 
   const { data: suppliers = [] } = useQuery<{id: string; name: string; type: string}[]>({
     queryKey: ['suppliers-select'],
-    queryFn: () => api.get('/suppliers').then(r => r.data),
+    queryFn: () => api.get('/suppliers').then(r => extractItems<{id: string; name: string; type: string}>(r.data)),
   });
 
   const manufacturers = suppliers.filter(s => s.type === 'manufacturer');

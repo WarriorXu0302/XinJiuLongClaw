@@ -36,11 +36,15 @@ function SettlementList() {
   const [form] = Form.useForm<SettlementFormValues>();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<SettlementItem | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
-  const { data = [], isLoading } = useQuery({
-    queryKey: ['settlements', brandId],
-    queryFn: async () => { const { data } = await api.get('/manufacturer-settlements', { params }); return data; },
+  const { data: listResp, isLoading } = useQuery<{ items: SettlementItem[]; total: number }>({
+    queryKey: ['settlements', brandId, page, pageSize],
+    queryFn: async () => { const { data } = await api.get('/manufacturer-settlements', { params: { ...params, skip: (page - 1) * pageSize, limit: pageSize } }); return data; },
   });
+  const data = listResp?.items ?? [];
+  const total = listResp?.total ?? 0;
 
   const createMutation = useMutation({
     mutationFn: async (values: SettlementFormValues) => {
@@ -160,7 +164,7 @@ function SettlementList() {
           <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingRecord(null); setModalOpen(true); }}>录入到账</Button>
         </Space>
       </div>
-      <Table<SettlementItem> columns={columns} dataSource={data} rowKey="id" loading={isLoading} pagination={{ pageSize: 20, showSizeChanger: true }} />
+      <Table<SettlementItem> columns={columns} dataSource={data} rowKey="id" loading={isLoading} pagination={{ current: page, pageSize, total, showTotal: (t) => '共 ' + t + ' 条', showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }} />
 
       <Modal
         title={editingRecord ? '编辑结算' : '录入到账'}

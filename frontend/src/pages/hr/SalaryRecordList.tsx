@@ -5,7 +5,7 @@ import * as XLSX from 'xlsx';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import { Link } from 'react-router-dom';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useAuthStore } from '../../stores/authStore';
 
 const { Title, Text } = Typography;
@@ -60,6 +60,8 @@ function SalaryRecordList() {
   const isBoss = roles.includes('boss') || roles.includes('admin');
 
   const [period, setPeriod] = useState(ym());
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(30);
   const [editOpen, setEditOpen] = useState<SalaryRecord | null>(null);
   const [payOpen, setPayOpen] = useState<SalaryRecord | null>(null);
   const [batchPayOpen, setBatchPayOpen] = useState(false);
@@ -73,14 +75,16 @@ function SalaryRecordList() {
   const [batchForm] = Form.useForm();
   const [rejectForm] = Form.useForm();
 
-  const { data = [], isLoading } = useQuery<SalaryRecord[]>({
-    queryKey: ['salary-records', period],
-    queryFn: () => api.get('/payroll/salary-records', { params: { period } }).then(r => r.data),
+  const { data: rawData, isLoading } = useQuery<{ items: SalaryRecord[]; total: number }>({
+    queryKey: ['salary-records', period, page, pageSize],
+    queryFn: () => api.get('/payroll/salary-records', { params: { period, skip: (page - 1) * pageSize, limit: pageSize } }).then(r => r.data),
   });
+  const data = rawData?.items ?? [];
+  const total = rawData?.total ?? 0;
   // 工资只能从品牌现金账户发
   const { data: accounts = [] } = useQuery<Account[]>({
     queryKey: ['accounts-master'],
-    queryFn: () => api.get('/accounts').then(r => r.data.filter((a: Account) => a.level === 'project' && a.account_type === 'cash')),
+    queryFn: () => api.get('/accounts').then(r => extractItems<Account>(r.data).filter((a) => a.level === 'project' && a.account_type === 'cash')),
   });
 
   const updateMut = useMutation({
@@ -362,7 +366,7 @@ function SalaryRecordList() {
         <Space>
           <Title level={4} style={{ margin: 0 }}>月度工资</Title>
           <span>周期：</span>
-          <Input style={{ width: 110 }} value={period} onChange={e => setPeriod(e.target.value)} placeholder="2026-04" />
+          <Input style={{ width: 110 }} value={period} onChange={e => { setPeriod(e.target.value); setPage(1); }} placeholder="2026-04" />
         </Space>
         <Space>
           <Button icon={<ThunderboltOutlined />} type="primary" style={{ background: '#722ed1' }}
@@ -390,7 +394,8 @@ function SalaryRecordList() {
       </div>
 
       <Table<SalaryRecord> columns={columns} dataSource={data} rowKey="id"
-        loading={isLoading} pagination={{ pageSize: 30 }} size="small" scroll={{ x: 1400 }}
+        loading={isLoading} size="small" scroll={{ x: 1400 }}
+        pagination={{ current: page, pageSize, total, showTotal: t => `共 ${t} 条`, showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }}
         rowSelection={{
           selectedRowKeys: selected,
           onChange: (keys) => setSelected(keys as string[]),

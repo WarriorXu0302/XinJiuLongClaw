@@ -4,7 +4,7 @@ import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import { useBrandFilter } from '../../stores/useBrandFilter';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 
 const { Title, Text } = Typography;
 
@@ -55,13 +55,13 @@ function PolicyApproval() {
 
   const { data: pendingInternal = [], isLoading: loadingInternal } = useQuery<PolicyRequest[]>({
     queryKey: ['policy-requests-approval-internal', brandId],
-    queryFn: () => api.get('/policies/requests', { params: { status: 'pending_internal', limit: 200 } }).then(r => r.data),
+    queryFn: () => api.get('/policies/requests', { params: { status: 'pending_internal', limit: 200 } }).then(r => extractItems(r.data)),
     refetchInterval: 5000,
   });
 
   const { data: pendingExternal = [] } = useQuery<PolicyRequest[]>({
     queryKey: ['policy-requests-approval-external', brandId],
-    queryFn: () => api.get('/policies/requests', { params: { status: 'pending_external', limit: 200 } }).then(r => r.data),
+    queryFn: () => api.get('/policies/requests', { params: { status: 'pending_external', limit: 200 } }).then(r => extractItems(r.data)),
     refetchInterval: 5000,
   });
 

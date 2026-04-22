@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Table, Tag, Typography, Button, Modal, Form, Input, InputNumber, Select, Space, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';
 
 const { Title } = Typography;
@@ -30,20 +30,24 @@ function KPIList() {
   const queryClient = useQueryClient();
 
   const { brandId, params } = useBrandFilter();
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
-  const { data, isLoading } = useQuery<KPIItem[]>({
-    queryKey: ['kpis', brandId],
-    queryFn: () => api.get('/hr/kpis', { params }).then((r) => r.data),
+  const { data: listResp, isLoading } = useQuery<{ items: KPIItem[]; total: number }>({
+    queryKey: ['kpis', brandId, page, pageSize],
+    queryFn: () => api.get('/hr/kpis', { params: { ...params, skip: (page - 1) * pageSize, limit: pageSize } }).then((r) => r.data),
   });
+  const data = listResp?.items ?? [];
+  const total = listResp?.total ?? 0;
 
   const { data: employees = [] } = useQuery<{id: string; name: string}[]>({
     queryKey: ['employees-select', brandId],
-    queryFn: () => api.get('/hr/employees', { params }).then(r => r.data),
+    queryFn: () => api.get('/hr/employees', { params }).then(r => extractItems(r.data)),
   });
 
   const { data: brands = [] } = useQuery<{ id: string; name: string }[]>({
     queryKey: ['brands-select'],
-    queryFn: () => api.get('/products/brands').then(r => r.data),
+    queryFn: () => api.get('/products/brands').then(r => extractItems(r.data)),
   });
 
   const deleteMutation = useMutation({
@@ -97,7 +101,7 @@ function KPIList() {
         <Title level={4} style={{ margin: 0 }}>KPI 考核</Title>
         <Button type="primary" onClick={() => { setEditingRecord(null); form.resetFields(); setModalOpen(true); }}>新建</Button>
       </Space>
-      <Table rowKey="id" columns={columns} dataSource={data ?? []} loading={isLoading} size="middle" pagination={{ pageSize: 20 }} />
+      <Table rowKey="id" columns={columns} dataSource={data} loading={isLoading} size="middle" pagination={{ current: page, pageSize, total, showTotal: (t) => `共 ${t} 条`, showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }} />
       <Modal title={editingRecord ? '编辑 KPI' : '新建 KPI'} open={modalOpen} onOk={handleSubmit} onCancel={() => { setModalOpen(false); setEditingRecord(null); form.resetFields(); }} confirmLoading={createMutation.isPending || editMutation.isPending}>
         <Form form={form} layout="vertical">
           <Form.Item name="employee_id" label="员工" rules={[{ required: true }]}>

@@ -28,4 +28,14 @@ api.interceptors.response.use(
   },
 );
 
+/**
+ * 兼容分页接口的数组提取。
+ * 后端列表接口统一返回 {items, total}，下拉框等需要全量数组的场景用这个。
+ */
+export function extractItems<T = any>(data: any): T[] {
+  if (Array.isArray(data)) return data;
+  if (data && Array.isArray(data.items)) return data.items;
+  return [];
+}
+
 export default api;

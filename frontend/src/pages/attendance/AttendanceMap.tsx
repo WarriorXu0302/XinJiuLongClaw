@@ -7,7 +7,7 @@ import dayjs, { type Dayjs } from 'dayjs';
 import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -59,7 +59,7 @@ function AttendanceMap() {
 
   const { data: employees = [] } = useQuery<Employee[]>({
     queryKey: ['employees-all'],
-    queryFn: () => api.get('/hr/employees').then(r => r.data),
+    queryFn: () => api.get('/hr/employees').then(r => extractItems(r.data)),
   });
 
   const sd = range[0].format('YYYY-MM-DD');
@@ -69,14 +69,14 @@ function AttendanceMap() {
     queryKey: ['visits-map', sd, ed, empFilter],
     queryFn: () => api.get('/attendance/visits', {
       params: { start_date: sd, end_date: ed, ...(empFilter ? { employee_id: empFilter } : {}) },
-    }).then(r => r.data),
+    }).then(r => extractItems(r.data)),
   });
 
   const { data: checkins = [] } = useQuery<Checkin[]>({
     queryKey: ['checkins-map', sd, ed, empFilter],
     queryFn: () => api.get('/attendance/checkin', {
       params: { start_date: sd, end_date: ed, ...(empFilter ? { employee_id: empFilter } : {}) },
-    }).then(r => r.data),
+    }).then(r => extractItems(r.data)),
   });
 
   // 详细拜访需要 enter/leave 的 GPS。API 返回结构没直接给 GPS，

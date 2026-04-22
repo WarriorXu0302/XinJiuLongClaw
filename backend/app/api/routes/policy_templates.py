@@ -6,11 +6,12 @@ from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any, Optional
 
 from app.core.database import get_db
+from app.core.permissions import require_role
 from app.core.security import CurrentUser
 from app.models.policy_template import PolicyAdjustment, PolicyTemplate
 from app.models.policy_template_benefit import PolicyTemplateBenefit
@@ -216,7 +217,7 @@ async def create_template(body: PolicyTemplateCreate, user: CurrentUser, db: Asy
     return _template_to_response(obj)
 
 
-@router.get("/templates", response_model=list[PolicyTemplateResponse])
+@router.get("/templates")
 async def list_templates(
     user: CurrentUser,
     brand_id: str | None = Query(None),
@@ -225,18 +226,18 @@ async def list_templates(
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(PolicyTemplate)
+    base = select(PolicyTemplate)
     if brand_id:
-        stmt = stmt.where(PolicyTemplate.brand_id == brand_id)
+        base = base.where(PolicyTemplate.brand_id == brand_id)
     if is_active is not None:
-        stmt = stmt.where(PolicyTemplate.is_active == is_active)
-    stmt = stmt.order_by(PolicyTemplate.code).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
+        base = base.where(PolicyTemplate.is_active == is_active)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(PolicyTemplate.code).offset(skip).limit(limit))).scalars().all()
     result = []
     for r in rows:
         d = _template_to_response(r)
         result.append(_strip_confidential(d, user))
-    return result
+    return {"items": result, "total": total}
 
 
 # ── Business: auto-match templates ───────────────────────────────────
@@ -384,6 +385,7 @@ async def update_template(
 
 @router.delete("/templates/{template_id}", status_code=204)
 async def delete_template(template_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     obj = await db.get(PolicyTemplate, template_id)
     if obj is None:
         raise HTTPException(404, "PolicyTemplate not found")
@@ -405,7 +407,7 @@ async def create_adjustment(body: PolicyAdjustmentCreate, user: CurrentUser, db:
     return obj
 
 
-@router.get("/adjustments", response_model=list[PolicyAdjustmentResponse])
+@router.get("/adjustments")
 async def list_adjustments(
     user: CurrentUser,
     policy_request_id: str | None = Query(None),
@@ -413,12 +415,12 @@ async def list_adjustments(
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(PolicyAdjustment)
+    base = select(PolicyAdjustment)
     if policy_request_id:
-        stmt = stmt.where(PolicyAdjustment.policy_request_id == policy_request_id)
-    stmt = stmt.order_by(PolicyAdjustment.created_at.desc()).offset(skip).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-    return rows
+        base = base.where(PolicyAdjustment.policy_request_id == policy_request_id)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+    rows = (await db.execute(base.order_by(PolicyAdjustment.created_at.desc()).offset(skip).limit(limit))).scalars().all()
+    return {"items": rows, "total": total}
 
 
 @router.get("/adjustments/{adj_id}", response_model=PolicyAdjustmentResponse)

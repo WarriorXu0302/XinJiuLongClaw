@@ -5,7 +5,7 @@ import { exportExcel } from '../../utils/exportExcel';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 
 const { Text } = Typography;
 
@@ -52,27 +52,31 @@ function EmployeeList() {
   const [editing, setEditing] = useState<EmployeeItem | null>(null);
   const [accountEmp, setAccountEmp] = useState<EmployeeItem | null>(null);
   const [bpEmp, setBpEmp] = useState<EmployeeItem | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
 
-  const { data: employees = [], isLoading } = useQuery<EmployeeItem[]>({
-    queryKey: ['employees'],
-    queryFn: () => api.get('/hr/employees').then(r => r.data),
+  const { data: empResp, isLoading } = useQuery<{ items: EmployeeItem[]; total: number }>({
+    queryKey: ['employees', page, pageSize],
+    queryFn: () => api.get('/hr/employees', { params: { skip: (page - 1) * pageSize, limit: pageSize } }).then(r => r.data),
   });
+  const employees = empResp?.items ?? [];
+  const empTotal = empResp?.total ?? 0;
   const { data: users = [] } = useQuery<UserAccount[]>({
     queryKey: ['users-for-emp'],
-    queryFn: () => api.get('/auth/users').then(r => r.data),
+    queryFn: () => api.get('/auth/users').then(r => extractItems<UserAccount>(r.data)),
   });
   const { data: brands = [] } = useQuery<Brand[]>({
     queryKey: ['brands-select'],
-    queryFn: () => api.get('/products/brands').then(r => r.data),
+    queryFn: () => api.get('/products/brands').then(r => extractItems<Brand>(r.data)),
   });
   const { data: positions = [] } = useQuery<Position[]>({
     queryKey: ['positions'],
-    queryFn: () => api.get('/payroll/positions').then(r => r.data),
+    queryFn: () => api.get('/payroll/positions').then(r => extractItems<Position>(r.data)),
   });
 
   const { data: empBPs = [] } = useQuery<BrandPosition[]>({
     queryKey: ['emp-bps', bpEmp?.id],
-    queryFn: () => api.get(`/payroll/employees/${bpEmp!.id}/brand-positions`).then(r => r.data),
+    queryFn: () => api.get(`/payroll/employees/${bpEmp!.id}/brand-positions`).then(r => extractItems<BrandPosition>(r.data)),
     enabled: !!bpEmp,
   });
 
@@ -257,7 +261,7 @@ function EmployeeList() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Space>
           <h2 style={{ margin: 0 }}>员工管理</h2>
-          <Text type="secondary">共 {employees.length} 人</Text>
+          <Text type="secondary">共 {empTotal} 人</Text>
         </Space>
         <Space>
           <Button icon={<DownloadOutlined />} onClick={() => {
@@ -296,7 +300,7 @@ function EmployeeList() {
         </Space>
       </div>
       <Table<EmployeeItem> columns={columns} dataSource={employees} rowKey="id" loading={isLoading}
-        pagination={{ pageSize: 30 }} scroll={{ x: 1300 }} />
+        pagination={{ current: page, pageSize, total: empTotal, showTotal: (t) => `共 ${t} 条`, showSizeChanger: true, onChange: (p, ps) => { setPage(p); setPageSize(ps); } }} scroll={{ x: 1300 }} />
 
       {/* 员工 Modal */}
       <Modal title={editing ? `编辑 ${editing.name}` : '新建员工'} open={modalOpen} width={720}

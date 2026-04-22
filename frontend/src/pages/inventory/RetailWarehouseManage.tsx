@@ -3,7 +3,7 @@ import { Button, Card, Form, Input, InputNumber, message, Modal, Select, Space, 
 import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import api from '../../api/client';
+import api, { extractItems } from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';
 
 const { Title, Text } = Typography;
@@ -25,19 +25,19 @@ function RetailWarehouseManage() {
 
   const { data: warehouses = [] } = useQuery<{ id: string; name: string; warehouse_type: string }[]>({
     queryKey: ['warehouses-all', brandId],
-    queryFn: () => api.get('/inventory/warehouses', { params }).then(r => r.data),
+    queryFn: () => api.get('/inventory/warehouses', { params }).then(r => extractItems<{ id: string; name: string; warehouse_type: string }>(r.data)),
   });
 
   const retailWarehouses = warehouses.filter(w => w.warehouse_type === 'retail');
 
   const { data: products = [] } = useQuery<{ id: string; name: string }[]>({
     queryKey: ['products-select', brandId],
-    queryFn: () => api.get('/products', { params }).then(r => r.data),
+    queryFn: () => api.get('/products', { params }).then(r => extractItems<{ id: string; name: string }>(r.data)),
   });
 
   const { data: flows = [] } = useQuery<StockFlowItem[]>({
     queryKey: ['retail-wh-flows', brandId],
-    queryFn: () => api.get('/inventory/stock-flow', { params }).then(r => r.data),
+    queryFn: () => api.get('/inventory/stock-flow', { params }).then(r => extractItems<StockFlowItem>(r.data)),
   });
 
   const retailWhIds = new Set(retailWarehouses.map(w => w.id));

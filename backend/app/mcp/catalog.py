@@ -95,7 +95,7 @@ QUERY_TOOLS: list[ToolEntry] = [
      "description": "查询仓库列表。创建采购单/订单时需要 warehouse_id。"},
 ]
 
-# ─── 写入类（23）─────────────────────────────────────────────
+# ─── 写入类（24）─────────────────────────────────────────────
 ACTION_TOOLS: list[ToolEntry] = [
     {"name": "create-order", "path": "/mcp/create-order",
      "roles": ["boss", "salesman", "sales_manager"],
@@ -166,6 +166,9 @@ ACTION_TOOLS: list[ToolEntry] = [
     {"name": "settle-commission", "path": "/mcp/settle-commission",
      "roles": ["boss", "hr", "finance"],
      "description": "结算提成。将提成状态设为 settled 并记录结算时间。"},
+    {"name": "create-policy-template", "path": "/mcp/create-policy-template",
+     "roles": ["boss", "finance"],
+     "description": "创建政策模板（编码、名称、品牌、指导价、客户到手价、最低箱数、政策总价值）。建单时需要 policy_template_id。"},
 ]
 
 # ─── 审批类（12）─────────────────────────────────────────────

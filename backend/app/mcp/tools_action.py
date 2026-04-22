@@ -1114,3 +1114,60 @@ async def mcp_settle_commission(body: MCPSettleCommissionRequest, db: AsyncSessi
     await db.flush()
     await log_audit(db, action="settle_commission", entity_type="Commission", entity_id=commission.id, user=user)
     return {"commission_id": commission.id, "status": "settled", "settled_at": str(commission.settled_at)}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 32. 创建政策模板
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPCreatePolicyTemplateRequest(BaseModel):
+    code: str
+    name: str
+    brand_id: str
+    template_type: str = "channel"  # channel / group_purchase
+    required_unit_price: float = 0  # 指导价（进货价）
+    customer_unit_price: float = 0  # 客户到手价
+    min_cases: Optional[int] = None
+    max_cases: Optional[int] = None
+    total_policy_value: float = 0  # 政策总价值
+    valid_from: Optional[str] = None  # YYYY-MM-DD
+    valid_to: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@router.post("/create-policy-template")
+async def mcp_create_policy_template(body: MCPCreatePolicyTemplateRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 创建政策模板。建单时需要 policy_template_id。"""
+    from app.models.policy_template import PolicyTemplate
+    from datetime import date
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "finance")
+
+    existing = (await db.execute(select(PolicyTemplate).where(PolicyTemplate.code == body.code))).scalar_one_or_none()
+    if existing:
+        raise HTTPException(400, f"政策模板编码 {body.code} 已存在")
+
+    tmpl = PolicyTemplate(
+        id=str(uuid.uuid4()),
+        code=body.code,
+        name=body.name,
+        brand_id=body.brand_id,
+        template_type=body.template_type,
+        required_unit_price=Decimal(str(body.required_unit_price)),
+        customer_unit_price=Decimal(str(body.customer_unit_price)),
+        min_cases=body.min_cases,
+        max_cases=body.max_cases,
+        total_policy_value=Decimal(str(body.total_policy_value)),
+        valid_from=date.fromisoformat(body.valid_from) if body.valid_from else None,
+        valid_to=date.fromisoformat(body.valid_to) if body.valid_to else None,
+        notes=body.notes,
+    )
+    db.add(tmpl)
+    await db.flush()
+    await log_audit(db, action="create_policy_template", entity_type="PolicyTemplate", entity_id=tmpl.id, user=user)
+    return {
+        "id": tmpl.id, "code": tmpl.code, "name": tmpl.name,
+        "required_unit_price": float(tmpl.required_unit_price),
+        "customer_unit_price": float(tmpl.customer_unit_price),
+        "total_policy_value": float(tmpl.total_policy_value),
+    }

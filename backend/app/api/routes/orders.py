@@ -323,7 +323,7 @@ async def confirm_delivery(order_id: str, user: CurrentUser, db: AsyncSession = 
     If the customer is a credit customer (settlement_mode='credit'),
     auto-generate a receivable record.
     """
-    require_role(user, "boss", "warehouse")
+    require_role(user, "boss", "warehouse", "salesman")
     order = await db.get(Order, order_id)
     if order is None:
         raise HTTPException(404, "Order not found")

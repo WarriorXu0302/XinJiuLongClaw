@@ -58,10 +58,10 @@ class MCPApproveLeaveRequest(BaseModel):
 
 @router.post("/approve-leave")
 async def mcp_approve_leave(body: MCPApproveLeaveRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 审批请假。admin/boss/finance。"""
+    """AI 审批请假。admin/boss/hr。"""
     from app.models.attendance import LeaveRequest
     user = db.info.get("mcp_user", {})
-    require_mcp_role(user, 'boss', 'finance')
+    require_mcp_role(user, 'boss', 'hr')
 
     req = (await db.execute(select(LeaveRequest).where(LeaveRequest.request_no == body.request_no))).scalar_one_or_none()
     if not req:
@@ -158,9 +158,9 @@ class ApproveTransferRequest(BaseModel):
 
 @router.post("/approve-fund-transfer")
 async def mcp_approve_transfer(body: ApproveTransferRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 批准资金调拨（直接执行）。admin/boss/finance。"""
+    """AI 批准资金调拨（直接执行）。admin/boss。"""
     user = db.info.get("mcp_user", {})
-    require_mcp_role(user, 'boss', 'finance')
+    require_mcp_role(user, 'boss')
     from app.api.routes.accounts import approve_fund_transfer
     return await approve_fund_transfer(transfer_id=body.transfer_id, user=user, db=db)
 

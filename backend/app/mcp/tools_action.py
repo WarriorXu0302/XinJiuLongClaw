@@ -492,7 +492,7 @@ async def mcp_create_fund_transfer(body: MCPCreateTransferRequest, db: AsyncSess
     user = db.info.get("mcp_user", {})
     require_mcp_role(user, "boss", "finance")
 
-    # 源：master 现金池
+    # 源账户：master 现金池
     master = (await db.execute(
         select(Account).where(Account.level == 'master', Account.account_type == 'cash')
     )).scalar_one_or_none()
@@ -532,3 +532,323 @@ async def mcp_create_fund_transfer(body: MCPCreateTransferRequest, db: AsyncSess
     )
     await db.flush()
     return {"transfer_id": ff.id, "from": master.name, "to": to_acc.name, "amount": float(amt), "status": "待审批"}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 22. 编辑客户信息
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPUpdateCustomerRequest(BaseModel):
+    customer_id: str
+    name: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_phone: Optional[str] = None
+    settlement_mode: Optional[str] = None
+
+
+@router.post("/update-customer")
+async def mcp_update_customer(body: MCPUpdateCustomerRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 编辑客户信息。仅更新传入的非空字段。"""
+    from app.models.customer import Customer
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "salesman", "sales_manager")
+
+    cust = await db.get(Customer, body.customer_id)
+    if not cust:
+        raise HTTPException(404, f"客户 {body.customer_id} 不存在")
+    updated_fields = []
+    if body.name is not None:
+        cust.name = body.name
+        updated_fields.append("name")
+    if body.contact_name is not None:
+        cust.contact_name = body.contact_name
+        updated_fields.append("contact_name")
+    if body.contact_phone is not None:
+        cust.contact_phone = body.contact_phone
+        updated_fields.append("contact_phone")
+    if body.settlement_mode is not None:
+        cust.settlement_mode = body.settlement_mode
+        updated_fields.append("settlement_mode")
+    if not updated_fields:
+        raise HTTPException(400, "至少提供一个待更新字段")
+    await db.flush()
+    await log_audit(db, action="update_customer", entity_type="Customer", entity_id=cust.id, user=user)
+    return {"customer_id": cust.id, "updated_fields": updated_fields}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 23. 创建采购单
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPPurchaseItem(BaseModel):
+    product_id: str
+    quantity: int
+    unit_price: float
+
+
+class MCPCreatePurchaseOrderRequest(BaseModel):
+    supplier_id: str
+    brand_id: str
+    warehouse_id: str
+    items: list[MCPPurchaseItem]
+    notes: Optional[str] = None
+
+
+@router.post("/create-purchase-order")
+async def mcp_create_purchase_order(body: MCPCreatePurchaseOrderRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 创建采购单。状态为 pending，需审批后才能执行。"""
+    from app.models.purchase import PurchaseOrder, PurchaseOrderItem
+    from datetime import datetime, timezone
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "purchase", "warehouse")
+
+    if not body.items:
+        raise HTTPException(400, "采购明细不能为空")
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    po = PurchaseOrder(
+        id=str(uuid.uuid4()),
+        po_no=f"PO-{ts}-{uuid.uuid4().hex[:6]}",
+        brand_id=body.brand_id,
+        supplier_id=body.supplier_id,
+        warehouse_id=body.warehouse_id,
+        notes=body.notes,
+        status="pending",
+    )
+    total = Decimal("0")
+    for it in body.items:
+        price = Decimal(str(it.unit_price))
+        line_total = price * it.quantity
+        total += line_total
+        po.items.append(PurchaseOrderItem(
+            id=str(uuid.uuid4()),
+            po_id=po.id,
+            product_id=it.product_id,
+            quantity=it.quantity,
+            unit_price=price,
+        ))
+    po.total_amount = total
+    db.add(po)
+    await db.flush()
+    await log_audit(db, action="create_purchase_order", entity_type="PurchaseOrder", entity_id=po.id, user=user)
+    return {"po_no": po.po_no, "total_amount": float(total), "status": po.status}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 24. 创建费用
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPCreateExpenseRequest(BaseModel):
+    brand_id: str
+    category: str  # claim_type: f_class / daily
+    amount: float
+    description: str
+    expense_date: Optional[str] = None  # YYYY-MM-DD
+
+
+@router.post("/create-expense")
+async def mcp_create_expense(body: MCPCreateExpenseRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 创建费用/报销记录。状态为 pending，需审批。"""
+    from app.models.expense_claim import ExpenseClaim
+    from datetime import datetime, timezone
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "finance")
+
+    if body.amount <= 0:
+        raise HTTPException(400, "金额必须大于 0")
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    claim = ExpenseClaim(
+        id=str(uuid.uuid4()),
+        claim_no=f"EX-{ts}-{uuid.uuid4().hex[:6]}",
+        claim_type=body.category,
+        brand_id=body.brand_id,
+        title=body.description,
+        description=body.description,
+        amount=Decimal(str(body.amount)),
+        applicant_id=user.get("employee_id"),
+        status="pending",
+    )
+    db.add(claim)
+    await db.flush()
+    await log_audit(db, action="create_expense", entity_type="ExpenseClaim", entity_id=claim.id, user=user)
+    return {"claim_no": claim.claim_no, "amount": float(claim.amount), "status": claim.status}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 25. 创建稽查案件
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPCreateInspectionCaseRequest(BaseModel):
+    brand_id: str
+    case_type: str  # inspection_violation / market_cleanup / ...
+    direction: str  # outflow / inflow
+    product_id: Optional[str] = None
+    quantity: Optional[int] = None
+    quantity_unit: Optional[str] = "瓶"
+    deal_unit_price: Optional[float] = None
+    purchase_price: Optional[float] = None
+    sale_price: Optional[float] = None
+    penalty_amount: Optional[float] = None
+    notes: Optional[str] = None
+
+
+@router.post("/create-inspection-case")
+async def mcp_create_inspection_case(body: MCPCreateInspectionCaseRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 创建稽查案件。自动计算 profit_loss。
+    A1 亏损公式：profit_loss = -(回收价 - 到手价) * 瓶数。
+    """
+    from app.models.inspection import InspectionCase
+    from datetime import datetime, timezone
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "finance")
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    qty = body.quantity or 0
+    deal_price = Decimal(str(body.deal_unit_price or 0))
+    purchase_p = Decimal(str(body.purchase_price or 0))
+    sale_p = Decimal(str(body.sale_price or 0))
+    penalty = Decimal(str(body.penalty_amount or 0))
+
+    # profit_loss 计算：
+    # outflow（窜出）：亏损 = -(回收价 - 到手价) * 数量 - 罚款
+    # inflow（窜入/回收）：盈利 = (转卖价 - 采购价) * 数量
+    if body.direction == "outflow":
+        profit_loss = -(deal_price - sale_p) * qty - penalty
+    else:
+        profit_loss = (sale_p - purchase_p) * qty
+
+    case = InspectionCase(
+        id=str(uuid.uuid4()),
+        case_no=f"IC-{ts}-{uuid.uuid4().hex[:6]}",
+        brand_id=body.brand_id,
+        case_type=body.case_type,
+        direction=body.direction,
+        product_id=body.product_id,
+        quantity=qty,
+        quantity_unit=body.quantity_unit or "瓶",
+        deal_unit_price=deal_price,
+        purchase_price=purchase_p,
+        resell_price=sale_p,
+        penalty_amount=penalty,
+        profit_loss=profit_loss,
+        notes=body.notes,
+        status="pending",
+    )
+    db.add(case)
+    await db.flush()
+    await log_audit(db, action="create_inspection_case", entity_type="InspectionCase", entity_id=case.id, user=user)
+    return {
+        "case_no": case.case_no, "direction": case.direction,
+        "profit_loss": float(profit_loss), "status": case.status,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 26. 创建销售目标
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPCreateSalesTargetRequest(BaseModel):
+    target_level: str  # company / brand / employee
+    target_year: int
+    target_month: Optional[int] = None
+    brand_id: Optional[str] = None
+    employee_id: Optional[str] = None
+    sales_target: float
+    receipt_target: float
+
+
+@router.post("/create-sales-target")
+async def mcp_create_sales_target(body: MCPCreateSalesTargetRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 创建销售目标。boss 创建直接 approved；sales_manager 创建走 pending_approval。"""
+    from app.models.sales_target import SalesTarget
+    from datetime import datetime, timezone
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "sales_manager")
+
+    # 校验 target_level 一致性
+    if body.target_level == "brand" and not body.brand_id:
+        raise HTTPException(400, "品牌级目标必须指定 brand_id")
+    if body.target_level == "employee" and not body.employee_id:
+        raise HTTPException(400, "员工级目标必须指定 employee_id")
+
+    roles = user.get("roles") or []
+    # boss 建的目标直接 approved
+    is_boss = "admin" in roles or "boss" in roles
+    now = datetime.now(timezone.utc)
+
+    target = SalesTarget(
+        id=str(uuid.uuid4()),
+        target_level=body.target_level,
+        target_year=body.target_year,
+        target_month=body.target_month,
+        brand_id=body.brand_id,
+        employee_id=body.employee_id,
+        sales_target=Decimal(str(body.sales_target)),
+        receipt_target=Decimal(str(body.receipt_target)),
+        status="approved" if is_boss else "pending_approval",
+        submitted_by=user.get("employee_id"),
+        submitted_at=now,
+        approved_by=user.get("employee_id") if is_boss else None,
+        approved_at=now if is_boss else None,
+    )
+    db.add(target)
+    await db.flush()
+    return {
+        "target_id": target.id, "level": target.target_level,
+        "sales_target": float(target.sales_target),
+        "receipt_target": float(target.receipt_target),
+        "status": target.status,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 27. 更新订单状态（发货/送达/取消）
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPUpdateOrderStatusRequest(BaseModel):
+    order_id: str
+    action: str  # ship / confirm-delivery / cancel
+
+
+@router.post("/update-order-status")
+async def mcp_update_order_status(body: MCPUpdateOrderStatusRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 更新订单状态。支持 ship（发货）、confirm-delivery（确认送达）、cancel（取消）。"""
+    from app.models.order import Order
+    from app.models.base import OrderStatus
+    from datetime import datetime, timezone
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "warehouse", "salesman")
+
+    order = await db.get(Order, body.order_id)
+    if not order:
+        raise HTTPException(404, f"订单 {body.order_id} 不存在")
+
+    now = datetime.now(timezone.utc)
+    action = body.action
+
+    if action == "ship":
+        # 发货：approved → shipped
+        if order.status != OrderStatus.APPROVED:
+            raise HTTPException(400, f"订单状态为 {order.status}，需要 approved 才能发货")
+        order.status = OrderStatus.SHIPPED
+        order.shipped_at = now
+    elif action == "confirm-delivery":
+        # 确认送达：shipped → delivered
+        if order.status != OrderStatus.SHIPPED:
+            raise HTTPException(400, f"订单状态为 {order.status}，需要 shipped 才能确认送达")
+        order.status = OrderStatus.DELIVERED
+        order.delivered_at = now
+    elif action == "cancel":
+        # 取消：pending / approved → rejected
+        if order.status not in (OrderStatus.PENDING, OrderStatus.APPROVED,
+                                 OrderStatus.POLICY_PENDING_INTERNAL, OrderStatus.POLICY_PENDING_EXTERNAL):
+            raise HTTPException(400, f"订单状态为 {order.status}，不能取消")
+        order.status = OrderStatus.REJECTED
+        order.rejection_reason = "MCP 工具取消"
+    else:
+        raise HTTPException(400, f"不支持的 action: {action}，可选: ship / confirm-delivery / cancel")
+
+    await db.flush()
+    await log_audit(db, action=f"order_{action}", entity_type="Order", entity_id=order.id, user=user)
+    return {"order_id": order.id, "order_no": order.order_no, "status": order.status}

@@ -22,7 +22,7 @@ class ToolEntry(TypedDict):
     # input_schema 先不写死 —— 从 FastAPI 的 openapi.json 动态抽，避免两处写
 
 
-# ─── 查询类（11）─────────────────────────────────────────────
+# ─── 查询类（20）─────────────────────────────────────────────
 QUERY_TOOLS: list[ToolEntry] = [
     {"name": "query-orders", "path": "/mcp/query-orders", "roles": ["*"],
      "description": "查询销售订单列表。支持按品牌/状态/付款状态/关键字过滤。"},
@@ -63,9 +63,27 @@ QUERY_TOOLS: list[ToolEntry] = [
     {"name": "query-positions", "path": "/mcp/query-positions",
      "roles": ["*"],
      "description": "查询岗位代码列表。绑定员工品牌岗位时需要 position_code。"},
+    {"name": "query-purchase-orders", "path": "/mcp/query-purchase-orders",
+     "roles": ["boss", "purchase", "warehouse", "finance"],
+     "description": "查询采购单列表。支持按品牌/状态/关键字过滤。"},
+    {"name": "query-expenses", "path": "/mcp/query-expenses",
+     "roles": ["boss", "finance"],
+     "description": "查询费用/报销列表。支持按品牌/状态过滤。"},
+    {"name": "query-products", "path": "/mcp/query-products",
+     "roles": ["*"],
+     "description": "查询商品列表。支持按品牌/关键字过滤，返回商品 ID、编码、名称、售价。"},
+    {"name": "query-suppliers", "path": "/mcp/query-suppliers",
+     "roles": ["boss", "purchase", "warehouse"],
+     "description": "查询供应商列表。创建采购单时需要 supplier_id。"},
+    {"name": "query-fund-flows", "path": "/mcp/query-fund-flows",
+     "roles": ["boss", "finance"],
+     "description": "查询资金流水记录。支持按账户/品牌/流水类型过滤。"},
+    {"name": "query-financing-orders", "path": "/mcp/query-financing-orders",
+     "roles": ["boss", "finance"],
+     "description": "查询融资单列表。含本金余额、利率、到期日等信息。"},
 ]
 
-# ─── 写入类（6）─────────────────────────────────────────────
+# ─── 写入类（17）─────────────────────────────────────────────
 ACTION_TOOLS: list[ToolEntry] = [
     {"name": "create-order", "path": "/mcp/create-order",
      "roles": ["boss", "salesman", "sales_manager"],
@@ -100,9 +118,27 @@ ACTION_TOOLS: list[ToolEntry] = [
     {"name": "create-fund-transfer", "path": "/mcp/create-fund-transfer",
      "roles": ["boss", "finance"],
      "description": "创建资金调拨申请（master→品牌现金）。可按品牌名自动查账户。需审批后才执行。"},
+    {"name": "update-customer", "path": "/mcp/update-customer",
+     "roles": ["boss", "salesman", "sales_manager"],
+     "description": "编辑客户信息（名称、联系人、联系电话、结算模式）。仅更新传入的非空字段。"},
+    {"name": "create-purchase-order", "path": "/mcp/create-purchase-order",
+     "roles": ["boss", "purchase", "warehouse"],
+     "description": "创建采购单（含明细行）。状态 pending，需审批后执行。"},
+    {"name": "create-expense", "path": "/mcp/create-expense",
+     "roles": ["boss", "finance"],
+     "description": "创建费用/报销记录。状态 pending，需审批。"},
+    {"name": "create-inspection-case", "path": "/mcp/create-inspection-case",
+     "roles": ["boss", "finance"],
+     "description": "创建稽查案件。自动计算 profit_loss（窜出亏损/窜入盈利）。"},
+    {"name": "create-sales-target", "path": "/mcp/create-sales-target",
+     "roles": ["boss", "sales_manager"],
+     "description": "创建销售目标（公司/品牌/员工级）。boss 建的直接 approved。"},
+    {"name": "update-order-status", "path": "/mcp/update-order-status",
+     "roles": ["boss", "warehouse", "salesman"],
+     "description": "更新订单状态：ship（发货）/ confirm-delivery（确认送达）/ cancel（取消）。"},
 ]
 
-# ─── 审批类（5）─────────────────────────────────────────────
+# ─── 审批类（8）─────────────────────────────────────────────
 APPROVAL_TOOLS: list[ToolEntry] = [
     {"name": "confirm-order-payment", "path": "/mcp/confirm-order-payment",
      "roles": ["boss", "finance"],
@@ -119,6 +155,15 @@ APPROVAL_TOOLS: list[ToolEntry] = [
     {"name": "approve-fund-transfer", "path": "/mcp/approve-fund-transfer",
      "roles": ["boss", "finance"],
      "description": "批准资金调拨。"},
+    {"name": "approve-purchase-order", "path": "/mcp/approve-purchase-order",
+     "roles": ["boss", "finance"],
+     "description": "审批采购单。approve → approved；reject → cancelled。"},
+    {"name": "approve-expense", "path": "/mcp/approve-expense",
+     "roles": ["boss", "finance"],
+     "description": "审批费用。approve（通过）/ reject（驳回）/ pay（标记已付）。"},
+    {"name": "approve-inspection", "path": "/mcp/approve-inspection",
+     "roles": ["boss", "finance"],
+     "description": "执行稽查案件（pending → confirmed）。只有已执行案件才进利润台账。"},
 ]
 
 # ─── Legacy（6，不含 external-approve-and-fill-scheme）──────

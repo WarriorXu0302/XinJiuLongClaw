@@ -405,3 +405,200 @@ async def query_positions(db: AsyncSession = Depends(get_mcp_db)):
     from app.models.payroll import Position
     rows = (await db.execute(select(Position).where(Position.is_active == True).order_by(Position.sort_order))).scalars().all()
     return [{"code": p.code, "name": p.name} for p in rows]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 15. 查询采购单列表
+# ═══════════════════════════════════════════════════════════════════
+
+class QueryPurchaseOrdersRequest(BaseModel):
+    brand_id: Optional[str] = None
+    status: Optional[str] = None
+    keyword: Optional[str] = None
+    limit: int = 20
+
+@router.post("/query-purchase-orders")
+async def query_purchase_orders(body: QueryPurchaseOrdersRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """查询采购单列表。支持按品牌/状态/关键字过滤。"""
+    require_mcp_role(db.info.get("mcp_user", {}), "boss", "purchase", "warehouse", "finance")
+    from app.models.purchase import PurchaseOrder
+    stmt = select(PurchaseOrder)
+    if body.brand_id:
+        stmt = stmt.where(PurchaseOrder.brand_id == body.brand_id)
+    if body.status:
+        stmt = stmt.where(PurchaseOrder.status == body.status)
+    if body.keyword:
+        stmt = stmt.where(PurchaseOrder.po_no.ilike(f"%{body.keyword}%"))
+    stmt = stmt.order_by(PurchaseOrder.created_at.desc()).limit(body.limit)
+    rows = (await db.execute(stmt)).scalars().all()
+    return [{
+        "po_no": po.po_no,
+        "supplier": po.supplier.name if po.supplier else None,
+        "brand": po.brand.name if po.brand else None,
+        "total_amount": float(po.total_amount),
+        "status": po.status,
+        "items": [{
+            "product": it.product.name if it.product else None,
+            "quantity": it.quantity, "unit": it.quantity_unit,
+            "unit_price": float(it.unit_price),
+        } for it in (po.items or [])],
+        "created_at": str(po.created_at),
+    } for po in rows]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 16. 查询费用/报销列表
+# ═══════════════════════════════════════════════════════════════════
+
+class QueryExpensesRequest(BaseModel):
+    brand_id: Optional[str] = None
+    status: Optional[str] = None
+    limit: int = 20
+
+@router.post("/query-expenses")
+async def query_expenses(body: QueryExpensesRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """查询费用/报销列表。"""
+    require_mcp_role(db.info.get("mcp_user", {}), "boss", "finance")
+    from app.models.expense_claim import ExpenseClaim
+    stmt = select(ExpenseClaim)
+    if body.brand_id:
+        stmt = stmt.where(ExpenseClaim.brand_id == body.brand_id)
+    if body.status:
+        stmt = stmt.where(ExpenseClaim.status == body.status)
+    stmt = stmt.order_by(ExpenseClaim.created_at.desc()).limit(body.limit)
+    rows = (await db.execute(stmt)).scalars().all()
+    return [{
+        "claim_no": e.claim_no, "claim_type": e.claim_type,
+        "title": e.title, "amount": float(e.amount),
+        "brand": e.brand.name if e.brand else None,
+        "applicant": e.applicant.name if e.applicant else None,
+        "status": e.status,
+        "created_at": str(e.created_at),
+    } for e in rows]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 17. 查询商品列表
+# ═══════════════════════════════════════════════════════════════════
+
+class QueryProductsRequest(BaseModel):
+    brand_id: Optional[str] = None
+    keyword: Optional[str] = None
+    limit: int = 50
+
+@router.post("/query-products")
+async def query_products(body: QueryProductsRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """查询商品列表。任何登录员工可调用。"""
+    require_mcp_employee(db.info.get("mcp_user", {}))
+    from app.models.product import Product
+    stmt = select(Product).where(Product.status == 'active')
+    if body.brand_id:
+        stmt = stmt.where(Product.brand_id == body.brand_id)
+    if body.keyword:
+        kw = f"%{body.keyword}%"
+        stmt = stmt.where(Product.name.ilike(kw) | Product.code.ilike(kw))
+    stmt = stmt.order_by(Product.code).limit(body.limit)
+    rows = (await db.execute(stmt)).scalars().all()
+    return [{
+        "id": p.id, "code": p.code, "name": p.name,
+        "brand_id": p.brand_id,
+        "brand": p.brand.name if p.brand else None,
+        "bottles_per_case": p.bottles_per_case,
+        "sale_price": float(p.sale_price) if p.sale_price else None,
+        "purchase_price": float(p.purchase_price) if p.purchase_price else None,
+    } for p in rows]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 18. 查询供应商列表
+# ═══════════════════════════════════════════════════════════════════
+
+class QuerySuppliersRequest(BaseModel):
+    keyword: Optional[str] = None
+    limit: int = 50
+
+@router.post("/query-suppliers")
+async def query_suppliers(body: QuerySuppliersRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """查询供应商列表。"""
+    require_mcp_role(db.info.get("mcp_user", {}), "boss", "purchase", "warehouse")
+    from app.models.product import Supplier
+    stmt = select(Supplier).where(Supplier.status == 'active')
+    if body.keyword:
+        kw = f"%{body.keyword}%"
+        stmt = stmt.where(Supplier.name.ilike(kw) | Supplier.code.ilike(kw))
+    stmt = stmt.order_by(Supplier.code).limit(body.limit)
+    rows = (await db.execute(stmt)).scalars().all()
+    return [{
+        "id": s.id, "code": s.code, "name": s.name,
+        "type": s.type, "contact_name": s.contact_name,
+        "contact_phone": s.contact_phone,
+        "brand": s.brand.name if s.brand else None,
+    } for s in rows]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 19. 查询资金流水
+# ═══════════════════════════════════════════════════════════════════
+
+class QueryFundFlowsRequest(BaseModel):
+    account_id: Optional[str] = None
+    brand_id: Optional[str] = None
+    flow_type: Optional[str] = None
+    limit: int = 50
+
+@router.post("/query-fund-flows")
+async def query_fund_flows(body: QueryFundFlowsRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """查询资金流水。"""
+    require_mcp_role(db.info.get("mcp_user", {}), "boss", "finance")
+    from app.models.fund_flow import FundFlow
+    stmt = select(FundFlow)
+    if body.account_id:
+        stmt = stmt.where(FundFlow.account_id == body.account_id)
+    if body.brand_id:
+        stmt = stmt.where(FundFlow.brand_id == body.brand_id)
+    if body.flow_type:
+        stmt = stmt.where(FundFlow.flow_type == body.flow_type)
+    stmt = stmt.order_by(FundFlow.created_at.desc()).limit(body.limit)
+    rows = (await db.execute(stmt)).scalars().all()
+    return [{
+        "flow_no": f.flow_no, "flow_type": f.flow_type,
+        "amount": float(f.amount), "balance_after": float(f.balance_after),
+        "account": f.account.name if f.account else None,
+        "related_type": f.related_type,
+        "notes": f.notes,
+        "created_at": str(f.created_at),
+    } for f in rows]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 20. 查询融资单列表
+# ═══════════════════════════════════════════════════════════════════
+
+class QueryFinancingOrdersRequest(BaseModel):
+    brand_id: Optional[str] = None
+    status: Optional[str] = None
+    limit: int = 20
+
+@router.post("/query-financing-orders")
+async def query_financing_orders(body: QueryFinancingOrdersRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """查询融资单列表。"""
+    require_mcp_role(db.info.get("mcp_user", {}), "boss", "finance")
+    from app.models.financing import FinancingOrder
+    stmt = select(FinancingOrder)
+    if body.brand_id:
+        stmt = stmt.where(FinancingOrder.brand_id == body.brand_id)
+    if body.status:
+        stmt = stmt.where(FinancingOrder.status == body.status)
+    stmt = stmt.order_by(FinancingOrder.created_at.desc()).limit(body.limit)
+    rows = (await db.execute(stmt)).scalars().all()
+    return [{
+        "order_no": fo.order_no,
+        "brand": fo.brand.name if fo.brand else None,
+        "amount": float(fo.amount),
+        "outstanding_balance": float(fo.outstanding_balance),
+        "interest_rate": float(fo.interest_rate) if fo.interest_rate else None,
+        "start_date": str(fo.start_date),
+        "maturity_date": str(fo.maturity_date) if fo.maturity_date else None,
+        "bank_name": fo.bank_name,
+        "status": fo.status,
+    } for fo in rows]

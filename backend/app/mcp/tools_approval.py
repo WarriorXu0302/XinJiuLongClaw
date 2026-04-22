@@ -163,3 +163,118 @@ async def mcp_approve_transfer(body: ApproveTransferRequest, db: AsyncSession = 
     require_mcp_role(user, 'boss', 'finance')
     from app.api.routes.accounts import approve_fund_transfer
     return await approve_fund_transfer(transfer_id=body.transfer_id, user=user, db=db)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 22. 审批采购单
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPApprovePurchaseOrderRequest(BaseModel):
+    po_id: str
+    action: str = "approve"  # approve / reject
+    reject_reason: Optional[str] = None
+
+
+@router.post("/approve-purchase-order")
+async def mcp_approve_purchase_order(body: MCPApprovePurchaseOrderRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 审批采购单。approve → approved；reject → cancelled。"""
+    from app.models.purchase import PurchaseOrder
+    from datetime import datetime, timezone
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, 'boss', 'finance')
+
+    po = await db.get(PurchaseOrder, body.po_id)
+    if not po:
+        raise HTTPException(404, f"采购单 {body.po_id} 不存在")
+    if po.status != "pending":
+        raise HTTPException(400, f"采购单状态为 {po.status}，只有 pending 可审批")
+
+    if body.action == "approve":
+        po.status = "approved"
+        po.approved_by = user.get("employee_id")
+    elif body.action == "reject":
+        po.status = "cancelled"
+        po.notes = (po.notes or "") + f"\n驳回原因: {body.reject_reason or '已驳回'}"
+    else:
+        raise HTTPException(400, f"不支持的 action: {body.action}，可选: approve / reject")
+    await db.flush()
+    await log_audit(db, action=f"{body.action}_purchase_order", entity_type="PurchaseOrder", entity_id=po.id, user=user)
+    return {"po_id": po.id, "po_no": po.po_no, "status": po.status}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 23. 审批费用
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPApproveExpenseRequest(BaseModel):
+    expense_id: str
+    action: str = "approve"  # approve / reject / pay
+    reject_reason: Optional[str] = None
+
+
+@router.post("/approve-expense")
+async def mcp_approve_expense(body: MCPApproveExpenseRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 审批费用。approve → approved；reject → rejected（驳回）；pay → paid（标记已付）。"""
+    from app.models.expense_claim import ExpenseClaim
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, 'boss', 'finance')
+
+    claim = await db.get(ExpenseClaim, body.expense_id)
+    if not claim:
+        raise HTTPException(404, f"费用 {body.expense_id} 不存在")
+
+    if body.action == "approve":
+        if claim.status != "pending":
+            raise HTTPException(400, f"费用状态为 {claim.status}，只有 pending 可审批通过")
+        claim.status = "approved"
+        claim.approved_by = user.get("employee_id")
+    elif body.action == "reject":
+        if claim.status != "pending":
+            raise HTTPException(400, f"费用状态为 {claim.status}，只有 pending 可驳回")
+        claim.status = "rejected"
+        claim.notes = (claim.notes or "") + f"\n驳回原因: {body.reject_reason or '已驳回'}"
+    elif body.action == "pay":
+        if claim.status != "approved":
+            raise HTTPException(400, f"费用状态为 {claim.status}，只有 approved 可标记已付")
+        claim.status = "paid"
+    else:
+        raise HTTPException(400, f"不支持的 action: {body.action}，可选: approve / reject / pay")
+    await db.flush()
+    await log_audit(db, action=f"{body.action}_expense", entity_type="ExpenseClaim", entity_id=claim.id, user=user)
+    return {"expense_id": claim.id, "claim_no": claim.claim_no, "status": claim.status}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 24. 执行稽查案件
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPApproveInspectionRequest(BaseModel):
+    case_id: str
+    action: str = "execute"  # execute
+
+
+@router.post("/approve-inspection")
+async def mcp_approve_inspection(body: MCPApproveInspectionRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 执行稽查案件（pending → confirmed）。只有已执行案件才进利润台账。"""
+    from app.models.inspection import InspectionCase
+    from datetime import datetime, timezone
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, 'boss', 'finance')
+
+    case = await db.get(InspectionCase, body.case_id)
+    if not case:
+        raise HTTPException(404, f"稽查案件 {body.case_id} 不存在")
+
+    if body.action != "execute":
+        raise HTTPException(400, f"不支持的 action: {body.action}，可选: execute")
+    if case.status != "pending":
+        raise HTTPException(400, f"案件状态为 {case.status}，只有 pending 可执行")
+
+    case.status = "confirmed"
+    case.closed_at = datetime.now(timezone.utc)
+    await db.flush()
+    await log_audit(db, action="execute_inspection", entity_type="InspectionCase", entity_id=case.id, user=user)
+    return {
+        "case_id": case.id, "case_no": case.case_no,
+        "status": case.status, "profit_loss": float(case.profit_loss),
+    }

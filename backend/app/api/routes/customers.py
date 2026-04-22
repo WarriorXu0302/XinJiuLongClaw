@@ -20,6 +20,7 @@ router = APIRouter()
 
 @router.post("", response_model=CustomerResponse, status_code=201)
 async def create_customer(body: CustomerCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "salesman", "sales_manager")
     data = body.model_dump()
     brand_id = data.pop("brand_id", None)
 
@@ -139,6 +140,7 @@ async def get_customer_orders(
 async def update_customer(
     customer_id: str, body: CustomerUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
+    require_role(user, "boss", "salesman", "sales_manager")
     obj = await db.get(Customer, customer_id)
     if obj is None:
         raise HTTPException(404, "Customer not found")
@@ -183,6 +185,7 @@ class BindBrandSalesmanBody(_PBM):
 async def bind_customer_brand_salesman(
     customer_id: str, body: BindBrandSalesmanBody, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
+    require_role(user, "boss", "salesman", "sales_manager")
     existing = (await db.execute(
         select(CustomerBrandSalesman).where(
             CustomerBrandSalesman.customer_id == customer_id,

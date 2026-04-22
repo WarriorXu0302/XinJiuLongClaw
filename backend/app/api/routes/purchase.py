@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any, Optional
 
 from app.core.database import get_db
-from app.core.permissions import apply_data_scope
+from app.core.permissions import apply_data_scope, require_role
 from app.core.security import CurrentUser
 from app.models.base import PurchaseStatus
 from app.models.inventory import Inventory, StockFlow
@@ -101,6 +101,7 @@ class POResponse(BaseModel):
 @router.post("", response_model=POResponse, status_code=201)
 async def create_purchase_order(body: POCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     """Create PO (status=pending). Does NOT deduct money yet."""
+    require_role(user, "boss", "purchase", "warehouse")
     total = Decimal("0")
     po = PurchaseOrder(
         id=str(uuid.uuid4()),
@@ -200,6 +201,7 @@ async def get_purchase_order(po_id: str, user: CurrentUser, db: AsyncSession = D
 @router.post("/{po_id}/approve")
 async def approve_purchase_order(po_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     """Approve PO → deduct from brand accounts → status=paid."""
+    require_role(user, "boss", "finance")
     po = await db.get(PurchaseOrder, po_id)
     if po is None:
         raise HTTPException(404, "PurchaseOrder not found")
@@ -285,6 +287,7 @@ async def approve_purchase_order(po_id: str, user: CurrentUser, db: AsyncSession
 
 @router.post("/{po_id}/reject")
 async def reject_purchase_order(po_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     po = await db.get(PurchaseOrder, po_id)
     if po is None:
         raise HTTPException(404, "PurchaseOrder not found")
@@ -298,6 +301,7 @@ async def reject_purchase_order(po_id: str, user: CurrentUser, db: AsyncSession 
 @router.post("/{po_id}/cancel")
 async def cancel_paid_purchase_order(po_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     """已付款但未收货的采购单撤销：反转账户变动 + 状态改为 cancelled。"""
+    require_role(user, "boss", "purchase")
     po = await db.get(PurchaseOrder, po_id)
     if po is None:
         raise HTTPException(404, "PurchaseOrder not found")
@@ -359,6 +363,7 @@ async def receive_purchase_order(
     batch_no: str = Query(..., description="入库批次号"),
     db: AsyncSession = Depends(get_db),
 ):
+    require_role(user, "boss", "warehouse", "purchase")
     po = await db.get(PurchaseOrder, po_id)
     if po is None:
         raise HTTPException(404, "PurchaseOrder not found")

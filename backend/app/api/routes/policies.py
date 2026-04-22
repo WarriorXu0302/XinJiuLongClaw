@@ -130,6 +130,7 @@ def _generate_claim_no() -> str:
 async def create_policy_request(
     body: PolicyRequestCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
+    require_role(user, "boss", "finance", "salesman", "sales_manager")
     from app.models.policy_request_item import PolicyRequestItem
 
     data = body.model_dump(exclude={"request_items"})
@@ -320,8 +321,9 @@ async def get_policy_request(request_id: str, db: AsyncSession = Depends(get_db)
 
 @router.put("/requests/{request_id}")
 async def update_policy_request(
-    request_id: str, body: PolicyRequestUpdate, db: AsyncSession = Depends(get_db)
+    request_id: str, body: PolicyRequestUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
+    require_role(user, "boss", "finance")
     pr = await db.get(PolicyRequest, request_id)
     if pr is None:
         raise HTTPException(404, "PolicyRequest not found")
@@ -352,8 +354,9 @@ async def delete_policy_request(
     "/usage-records", response_model=PolicyUsageRecordResponse, status_code=201
 )
 async def create_usage_record(
-    body: PolicyUsageRecordCreate, db: AsyncSession = Depends(get_db)
+    body: PolicyUsageRecordCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
+    require_role(user, "boss", "finance", "salesman")
     rec = PolicyUsageRecord(id=str(uuid.uuid4()), **body.model_dump())
     db.add(rec)
     await db.flush()
@@ -395,8 +398,10 @@ async def get_usage_record(record_id: str, db: AsyncSession = Depends(get_db)):
 async def update_usage_record(
     record_id: str,
     body: PolicyUsageRecordUpdate,
+    user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    require_role(user, "boss", "finance")
     rec = await db.get(PolicyUsageRecord, record_id)
     if rec is None:
         raise HTTPException(404, "PolicyUsageRecord not found")
@@ -438,6 +443,7 @@ async def fulfill_materials(
     user: CurrentUser, db: AsyncSession = Depends(get_db),
 ):
     """Fulfill material items from tasting warehouse + update request_item status."""
+    require_role(user, "boss", "finance")
     from app.models.inventory import Inventory, StockFlow
     from app.models.policy_request_item import PolicyRequestItem
     from app.models.product import Warehouse
@@ -562,6 +568,7 @@ async def update_fulfill_item_status(
     user: CurrentUser, db: AsyncSession = Depends(get_db),
 ):
     """Update a single request item's fulfill status (for non-material items like meals, travel, rebates)."""
+    require_role(user, "boss", "finance")
     from app.models.policy_request_item import PolicyRequestItem
     from app.services.audit_service import log_audit
 
@@ -672,6 +679,7 @@ async def create_item_expense(
     item_id: str, body: ExpenseItemCreate,
     user: CurrentUser, db: AsyncSession = Depends(get_db),
 ):
+    require_role(user, "boss", "finance")
     from app.models.policy_item_expense import PolicyItemExpense
     from app.models.policy_request_item import PolicyRequestItem
 
@@ -713,6 +721,7 @@ async def update_item_expense(
     expense_id: str, body: ExpenseItemCreate,
     user: CurrentUser, db: AsyncSession = Depends(get_db),
 ):
+    require_role(user, "boss", "finance")
     from app.models.policy_item_expense import PolicyItemExpense
     exp = await db.get(PolicyItemExpense, expense_id)
     if exp is None:
@@ -753,6 +762,7 @@ async def match_arrival_excel(
     db: AsyncSession = Depends(get_db),
 ):
     """Parse manufacturer arrival Excel, match rows to PolicyRequestItem.scheme_no."""
+    require_role(user, "boss", "finance")
     from app.models.policy_request_item import PolicyRequestItem
     import io
 
@@ -908,6 +918,7 @@ async def confirm_arrival(
     db: AsyncSession = Depends(get_db),
 ):
     """Batch mark items as arrived (厂家已到账)."""
+    require_role(user, "boss", "finance")
     from app.models.policy_request_item import PolicyRequestItem
 
     now = datetime.now(timezone.utc)
@@ -1002,6 +1013,7 @@ async def submit_fulfill_voucher(
     user: CurrentUser, db: AsyncSession = Depends(get_db),
 ):
     """arrived → fulfilled: upload voucher for fulfillment to advance payer."""
+    require_role(user, "boss", "finance", "salesman")
     from app.models.policy_request_item import PolicyRequestItem
 
     ri = await db.get(PolicyRequestItem, body.item_id)
@@ -1029,6 +1041,7 @@ async def confirm_fulfill(
     user: CurrentUser, db: AsyncSession = Depends(get_db),
 ):
     """fulfilled → settled: finance confirms fulfillment, archive."""
+    require_role(user, "boss", "finance")
     from app.models.policy_request_item import PolicyRequestItem
 
     ri = await db.get(PolicyRequestItem, body.item_id)
@@ -1055,6 +1068,7 @@ async def confirm_fulfill(
 async def create_policy_claim(
     body: PolicyClaimCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
+    require_role(user, "boss", "finance")
     from app.models.policy_request_item import PolicyRequestItem
 
     data = body.model_dump(exclude={"items"})
@@ -1153,8 +1167,9 @@ async def get_policy_claim(claim_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.put("/claims/{claim_id}", response_model=PolicyClaimResponse)
 async def update_policy_claim(
-    claim_id: str, body: PolicyClaimUpdate, db: AsyncSession = Depends(get_db)
+    claim_id: str, body: PolicyClaimUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
+    require_role(user, "boss", "finance")
     claim = await db.get(PolicyClaim, claim_id)
     if claim is None:
         raise HTTPException(404, "PolicyClaim not found")

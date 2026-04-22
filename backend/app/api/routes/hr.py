@@ -77,6 +77,7 @@ class EmployeeResponse(BaseModel):
 
 @router.post("/employees", response_model=EmployeeResponse, status_code=201)
 async def create_employee(body: EmployeeCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "hr")
     obj = Employee(id=str(uuid.uuid4()), **body.model_dump())
     db.add(obj)
     await db.flush()
@@ -115,6 +116,7 @@ async def get_employee(emp_id: str, user: CurrentUser, db: AsyncSession = Depend
 async def update_employee(
     emp_id: str, body: EmployeeUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
+    require_role(user, "boss", "hr")
     obj = await db.get(Employee, emp_id)
     if obj is None:
         raise HTTPException(404, "Employee not found")
@@ -217,6 +219,7 @@ class CommissionResponse(BaseModel):
 
 @router.post("/kpis", response_model=KPIResponse, status_code=201)
 async def create_kpi(body: KPICreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "hr", "sales_manager")
     obj = KPI(id=str(uuid.uuid4()), **body.model_dump())
     db.add(obj)
     await db.flush()
@@ -258,6 +261,7 @@ async def get_kpi(kpi_id: str, user: CurrentUser, db: AsyncSession = Depends(get
 async def update_kpi(
     kpi_id: str, body: KPIUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
+    require_role(user, "boss", "hr", "sales_manager")
     obj = await db.get(KPI, kpi_id)
     if obj is None:
         raise HTTPException(404, "KPI not found")
@@ -284,6 +288,7 @@ async def delete_kpi(kpi_id: str, user: CurrentUser, db: AsyncSession = Depends(
 
 @router.post("/commissions", response_model=CommissionResponse, status_code=201)
 async def create_commission(body: CommissionCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "hr", "finance")
     obj = Commission(id=str(uuid.uuid4()), **body.model_dump())
     db.add(obj)
     await db.flush()
@@ -329,6 +334,7 @@ async def get_commission(commission_id: str, user: CurrentUser, db: AsyncSession
 async def update_commission(
     commission_id: str, body: CommissionUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
+    require_role(user, "boss", "hr", "finance")
     obj = await db.get(Commission, commission_id)
     if obj is None:
         raise HTTPException(404, "Commission not found")
@@ -350,6 +356,7 @@ async def delete_commission(commission_id: str, user: CurrentUser, db: AsyncSess
 
 @router.post("/commissions/{commission_id}/settle", response_model=CommissionResponse)
 async def settle_commission(commission_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "hr", "finance")
     obj = await db.get(Commission, commission_id)
     if obj is None:
         raise HTTPException(404, "Commission not found")

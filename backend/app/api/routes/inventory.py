@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.permissions import require_role
 from app.core.security import CurrentUser
 from app.models.base import InventoryBarcodeStatus, InventoryBarcodeType
 from app.models.inventory import Inventory, InventoryBarcode, StockFlow
@@ -106,6 +107,7 @@ class StockOutAllocationItem(BaseModel):
 
 @router.post("/stock-out", response_model=list[StockOutAllocationItem], status_code=201)
 async def stock_out(body: StockOutRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "warehouse")
     try:
         allocations = await process_stock_out(
             db,
@@ -138,6 +140,7 @@ class DirectInboundRequest(BaseModel):
 @router.post("/direct-inbound", status_code=201)
 async def direct_inbound(body: DirectInboundRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     """Direct stock-in to backup/main warehouse with cost price. Inventory is stored in bottles."""
+    require_role(user, "boss", "warehouse", "purchase")
     import uuid as _uuid
     from datetime import datetime as _dt, timezone as _tz
     from decimal import Decimal as _D
@@ -213,6 +216,7 @@ class DirectOutboundRequest(BaseModel):
 @router.post("/direct-outbound", status_code=201)
 async def direct_outbound(body: DirectOutboundRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     """Direct stock-out from tasting or backup warehouse. Inventory stored in bottles."""
+    require_role(user, "boss", "warehouse")
     import uuid as _uuid
     from datetime import datetime as _dt, timezone as _tz
     from app.models.product import Product
@@ -315,9 +319,11 @@ class BindBarcodesRequest(BaseModel):
 async def bind_barcodes(
     flow_id: str,
     body: BindBarcodesRequest,
+    user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
     """Bind barcodes to a stock-in flow record's batch."""
+    require_role(user, "boss", "warehouse")
     flow = await db.get(StockFlow, flow_id)
     if flow is None:
         raise HTTPException(404, "StockFlow not found")
@@ -499,6 +505,7 @@ async def batch_import_barcodes(
     body: BatchBarcodeImport, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
     """Import barcodes in batch (from Excel/scanner). Auto-dedup."""
+    require_role(user, "boss", "warehouse")
     imported = 0
     duplicates = 0
     dup_codes: list[str] = []
@@ -593,6 +600,7 @@ async def notify_low_stock(
     db: AsyncSession = Depends(get_db),
 ):
     """扫描低库存 → 推送给所有 warehouse/admin/boss 角色用户"""
+    require_role(user, "boss", "warehouse")
     from app.services.notification_service import notify_roles
 
     low = await list_low_stock(user=user, brand_id=None, threshold_cases=threshold_cases, db=db)

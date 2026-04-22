@@ -41,6 +41,7 @@ async def create_tasting_wine_usage(
     user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    require_role(user, "boss", "warehouse")
     record = TastingWineUsage(
         id=str(uuid.uuid4()),
         **body.model_dump(),
@@ -272,6 +273,7 @@ async def update_tasting_wine_usage(
     user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    require_role(user, "boss", "warehouse")
     record = await db.get(TastingWineUsage, record_id)
     if record is None:
         raise HTTPException(404, "TastingWineUsage not found")
@@ -355,6 +357,7 @@ def _gen_bd_no() -> str:
 async def create_bottle_destruction(
     body: BottleDestructionCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
+    require_role(user, "boss", "warehouse")
     obj = BottleDestruction(
         id=str(uuid.uuid4()),
         record_no=_gen_bd_no(),

@@ -392,6 +392,7 @@ async def get_payment(payment_id: str, user: CurrentUser, db: AsyncSession = Dep
 
 @router.put("/payments/{payment_id}", response_model=PaymentResponse)
 async def update_payment(payment_id: str, body: PaymentUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     obj = await db.get(Payment, payment_id)
     if obj is None:
         raise HTTPException(404, "Payment not found")
@@ -418,6 +419,7 @@ async def delete_payment(payment_id: str, user: CurrentUser, db: AsyncSession = 
 
 @router.post("/expenses", response_model=ExpenseResponse, status_code=201)
 async def create_expense(body: ExpenseCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     obj = Expense(id=str(uuid.uuid4()), expense_no=_gen_no("EX"), **body.model_dump())
     db.add(obj)
     await db.flush()
@@ -450,6 +452,7 @@ async def get_expense(expense_id: str, user: CurrentUser, db: AsyncSession = Dep
 
 @router.put("/expenses/{expense_id}", response_model=ExpenseResponse)
 async def update_expense(expense_id: str, body: ExpenseUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     obj = await db.get(Expense, expense_id)
     if obj is None:
         raise HTTPException(404, "Expense not found")
@@ -471,6 +474,7 @@ async def delete_expense(expense_id: str, user: CurrentUser, db: AsyncSession = 
 
 @router.post("/expenses/{expense_id}/approve", response_model=ExpenseResponse)
 async def approve_expense(expense_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     obj = await db.get(Expense, expense_id)
     if obj is None:
         raise HTTPException(404, "Expense not found")
@@ -485,6 +489,7 @@ async def approve_expense(expense_id: str, user: CurrentUser, db: AsyncSession =
 
 @router.post("/expenses/{expense_id}/reject", response_model=ExpenseResponse)
 async def reject_expense(expense_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     obj = await db.get(Expense, expense_id)
     if obj is None:
         raise HTTPException(404, "Expense not found")
@@ -501,6 +506,7 @@ class ExpensePayRequest(BaseModel):
 
 @router.post("/expenses/{expense_id}/pay", response_model=ExpenseResponse)
 async def pay_expense(expense_id: str, body: ExpensePayRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     obj = await db.get(Expense, expense_id)
     if obj is None:
         raise HTTPException(404, "Expense not found")
@@ -545,6 +551,7 @@ async def pay_expense(expense_id: str, body: ExpensePayRequest, user: CurrentUse
 
 @router.post("/manufacturer-settlements", response_model=ManufacturerSettlementResponse, status_code=201)
 async def create_settlement(body: ManufacturerSettlementCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     data = body.model_dump()
     if data.get("unsettled_amount") is None:
         data["unsettled_amount"] = data["settlement_amount"]
@@ -580,6 +587,7 @@ async def get_settlement(settlement_id: str, user: CurrentUser, db: AsyncSession
 
 @router.put("/manufacturer-settlements/{settlement_id}", response_model=ManufacturerSettlementResponse)
 async def update_settlement(settlement_id: str, body: ManufacturerSettlementUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     obj = await db.get(ManufacturerSettlement, settlement_id)
     if obj is None:
         raise HTTPException(404, "ManufacturerSettlement not found")
@@ -591,6 +599,7 @@ async def update_settlement(settlement_id: str, body: ManufacturerSettlementUpda
 
 @router.post("/manufacturer-settlements/{settlement_id}/allocation-preview")
 async def allocation_preview(settlement_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     from app.mcp.tools import AllocationPreviewRequest, allocate_settlement_to_claims
     # 该 API 权威路径：HTTP 层已通过 CurrentUser 鉴权；内部调用 MCP 版本时需手动注入 mcp_user
     db.info["mcp_user"] = user
@@ -616,6 +625,7 @@ class AllocationConfirmResponse(BaseModel):
 
 @router.post("/manufacturer-settlements/{settlement_id}/allocation-confirm", response_model=AllocationConfirmResponse)
 async def allocation_confirm(settlement_id: str, body: AllocationConfirmRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     try:
         link = await confirm_settlement_allocation(
             db, settlement_id=settlement_id, claim_id=body.claim_id,
@@ -664,6 +674,7 @@ class ReconciliationResult(BaseModel):
 
 @router.post("/manufacturer-settlements/import-excel", response_model=ReconciliationResult)
 async def import_settlement_excel(user: CurrentUser, brand_id: str = Query(...), db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     import xlrd, os
     from app.models.product import Brand
     from app.models.policy import PolicyRequest
@@ -727,6 +738,7 @@ async def import_settlement_excel(user: CurrentUser, brand_id: str = Query(...),
 
 @router.post("/payment-requests", response_model=PaymentRequestResponse, status_code=201)
 async def create_payment_request(body: PaymentRequestCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     obj = FinancePaymentRequest(id=str(uuid.uuid4()), request_no=_gen_no("PR"), **body.model_dump())
     db.add(obj)
     await db.flush()
@@ -762,6 +774,7 @@ async def get_payment_request(request_id: str, user: CurrentUser, db: AsyncSessi
 
 @router.put("/payment-requests/{request_id}", response_model=PaymentRequestResponse)
 async def update_payment_request(request_id: str, body: PaymentRequestUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     obj = await db.get(FinancePaymentRequest, request_id)
     if obj is None:
         raise HTTPException(404, "PaymentRequest not found")
@@ -784,6 +797,7 @@ async def confirm_payment(
     user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    require_role(user, "boss", "finance")
     obj = await db.get(FinancePaymentRequest, request_id)
     if obj is None:
         raise HTTPException(404, "PaymentRequest not found")

@@ -431,6 +431,7 @@ async def delete_inspection_case(
 async def create_cleanup_case(
     body: MarketCleanupCaseCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
+    require_role(user, "boss", "finance")
     obj = MarketCleanupCase(
         id=str(uuid.uuid4()), case_no=_gen_no("CL"), **body.model_dump()
     )
@@ -471,6 +472,7 @@ async def get_cleanup_case(
 async def update_cleanup_case(
     case_id: str, body: MarketCleanupCaseUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
+    require_role(user, "boss", "finance")
     obj = await db.get(MarketCleanupCase, case_id)
     if obj is None:
         raise HTTPException(404, "MarketCleanupCase not found")
@@ -545,6 +547,7 @@ async def recover_to_stock(
     db: AsyncSession = Depends(get_db),
 ):
     """Recover goods from an inspection violation into backup warehouse stock."""
+    require_role(user, "boss", "finance", "warehouse")
     case = await db.get(InspectionCase, case_id)
     if case is None:
         raise HTTPException(404, "InspectionCase not found")
@@ -597,6 +600,7 @@ async def cleanup_stock_in(
     db: AsyncSession = Depends(get_db),
 ):
     """Move cleanup-case goods into the main warehouse at manufacturer price."""
+    require_role(user, "boss", "finance", "warehouse")
     case = await db.get(MarketCleanupCase, case_id)
     if case is None:
         raise HTTPException(404, "MarketCleanupCase not found")

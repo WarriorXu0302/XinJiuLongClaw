@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.permissions import require_role
 from app.core.security import CurrentUser
 from app.models.base import FinancingOrderStatus
 from app.models.financing import FinancingOrder, FinancingRepayment
@@ -143,6 +144,7 @@ async def create_financing_order(
     body: FinancingOrderCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
     """Create a financing order → increase financing account balance (liability)."""
+    require_role(user, "boss", "finance")
     amount = Decimal(str(body.amount))
     if amount <= 0:
         raise HTTPException(400, "融资金额必须大于0")
@@ -214,6 +216,7 @@ async def approve_repayment(
     repayment_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db),
 ):
     """Approve → deduct brand cash account. Auto-reject if insufficient."""
+    require_role(user, "boss")
     rep = await db.get(FinancingRepayment, repayment_id)
     if not rep:
         raise HTTPException(404, "还款申请不存在")
@@ -311,6 +314,7 @@ async def approve_repayment(
 async def reject_repayment(
     repayment_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db),
 ):
+    require_role(user, "boss")
     rep = await db.get(FinancingRepayment, repayment_id)
     if not rep:
         raise HTTPException(404, "还款申请不存在")
@@ -365,6 +369,7 @@ async def submit_repayment(
     db: AsyncSession = Depends(get_db),
 ):
     """Submit financing repayment for approval. Auto-calculates interest."""
+    require_role(user, "boss", "finance")
     order = await db.get(FinancingOrder, order_id)
     if order is None:
         raise HTTPException(404, "融资订单不存在")
@@ -435,6 +440,7 @@ async def submit_return_warehouse(
     order_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db),
 ):
     """退仓: manufacturer pays bank, company pays remaining interest only."""
+    require_role(user, "boss", "finance")
     order = await db.get(FinancingOrder, order_id)
     if order is None:
         raise HTTPException(404, "融资订单不存在")

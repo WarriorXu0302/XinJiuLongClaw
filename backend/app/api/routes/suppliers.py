@@ -70,6 +70,7 @@ class SupplierResponse(BaseModel):
 
 @router.post("", response_model=SupplierResponse, status_code=201)
 async def create_supplier(body: SupplierCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "purchase", "warehouse")
     obj = Supplier(id=str(uuid.uuid4()), **body.model_dump())
     db.add(obj)
     await db.flush()
@@ -111,6 +112,7 @@ async def get_supplier(supplier_id: str, user: CurrentUser, db: AsyncSession = D
 async def update_supplier(
     supplier_id: str, body: SupplierUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
+    require_role(user, "boss", "purchase")
     obj = await db.get(Supplier, supplier_id)
     if obj is None:
         raise HTTPException(404, "Supplier not found")

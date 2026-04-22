@@ -65,6 +65,7 @@ def _to_response(c: ExpenseClaim) -> dict:
 
 @router.post("", status_code=201)
 async def create_claim(body: ClaimCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance", "salesman")
     prefix = "FC" if body.claim_type == "f_class" else "DC"
     c = ExpenseClaim(
         id=str(uuid.uuid4()),
@@ -115,6 +116,7 @@ async def get_claim(claim_id: str, user: CurrentUser, db: AsyncSession = Depends
 
 @router.put("/{claim_id}")
 async def update_claim(claim_id: str, body: ClaimUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     c = await db.get(ExpenseClaim, claim_id)
     if not c:
         raise HTTPException(404, "不存在")
@@ -187,6 +189,7 @@ async def reject_claim(claim_id: str, user: CurrentUser, db: AsyncSession = Depe
 @router.post("/{claim_id}/apply")
 async def apply_scheme(claim_id: str, body: ClaimUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     """F类：审批后录入方案号，进入对账流程"""
+    require_role(user, "boss", "finance")
     c = await db.get(ExpenseClaim, claim_id)
     if not c:
         raise HTTPException(404, "不存在")
@@ -202,6 +205,7 @@ async def apply_scheme(claim_id: str, body: ClaimUpdate, user: CurrentUser, db: 
 @router.post("/{claim_id}/confirm-arrival")
 async def confirm_arrival(claim_id: str, user: CurrentUser, arrived_amount: float = Query(0), db: AsyncSession = Depends(get_db)):
     """F类：确认到账"""
+    require_role(user, "boss", "finance")
     c = await db.get(ExpenseClaim, claim_id)
     if not c:
         raise HTTPException(404, "不存在")

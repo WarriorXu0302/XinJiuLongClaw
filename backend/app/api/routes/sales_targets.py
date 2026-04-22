@@ -12,6 +12,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.permissions import require_role
 from app.core.security import CurrentUser
 from app.models.sales_target import SalesTarget
 from app.models.product import Brand
@@ -269,6 +270,7 @@ async def list_targets(
 
 @router.post("", response_model=TargetResponse, status_code=201)
 async def create_target(body: TargetCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "sales_manager")
     # 权限门禁
     if _is_pure_salesman(user):
         raise HTTPException(403, "业务员无权设定目标")
@@ -420,6 +422,7 @@ async def create_target(body: TargetCreate, user: CurrentUser, db: AsyncSession 
 
 @router.put("/{target_id}", response_model=TargetResponse)
 async def update_target(target_id: str, body: TargetUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "sales_manager")
     obj = await db.get(SalesTarget, target_id)
     if not obj:
         raise HTTPException(404, "目标不存在")
@@ -443,6 +446,7 @@ async def update_target(target_id: str, body: TargetUpdate, user: CurrentUser, d
 
 @router.delete("/{target_id}", status_code=204)
 async def delete_target(target_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss")
     obj = await db.get(SalesTarget, target_id)
     if not obj:
         raise HTTPException(404, "目标不存在")

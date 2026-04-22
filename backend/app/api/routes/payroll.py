@@ -107,6 +107,7 @@ async def list_schemes(user: CurrentUser, db: AsyncSession = Depends(get_db)):
 
 @router.post("/salary-schemes", response_model=BrandSalarySchemeResponse, status_code=201)
 async def create_scheme(body: BrandSalarySchemeCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "hr")
     # 幂等：同一 brand+position 已存在则更新
     existing = (await db.execute(
         select(BrandSalaryScheme).where(
@@ -147,6 +148,7 @@ async def create_scheme(body: BrandSalarySchemeCreate, user: CurrentUser, db: As
 
 @router.put("/salary-schemes/{scheme_id}", response_model=BrandSalarySchemeResponse)
 async def update_scheme(scheme_id: str, body: BrandSalarySchemeUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "hr")
     obj = await db.get(BrandSalaryScheme, scheme_id)
     if not obj:
         raise HTTPException(404, "薪酬方案不存在")
@@ -218,6 +220,7 @@ async def list_emp_brand_positions(emp_id: str, user: CurrentUser, db: AsyncSess
 
 @router.post("/employees/{emp_id}/brand-positions", response_model=EmpBrandPositionResponse, status_code=201)
 async def add_emp_brand_position(emp_id: str, body: EmpBrandPositionCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "hr")
     emp = await db.get(Employee, emp_id)
     if not emp:
         raise HTTPException(404, "员工不存在")
@@ -256,6 +259,7 @@ async def add_emp_brand_position(emp_id: str, body: EmpBrandPositionCreate, user
 
 @router.put("/brand-positions/{ebp_id}", response_model=EmpBrandPositionResponse)
 async def update_emp_brand_position(ebp_id: str, body: EmpBrandPositionUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "hr")
     obj = await db.get(EmployeeBrandPosition, ebp_id)
     if not obj:
         raise HTTPException(404, "关系不存在")
@@ -365,6 +369,7 @@ async def list_assessment(
 
 @router.post("/assessment-items", response_model=AssessmentItemResponse, status_code=201)
 async def create_assessment(body: AssessmentItemCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "hr")
     obj = AssessmentItem(
         id=str(uuid.uuid4()),
         employee_id=body.employee_id,
@@ -385,6 +390,7 @@ async def create_assessment(body: AssessmentItemCreate, user: CurrentUser, db: A
 
 @router.put("/assessment-items/{item_id}", response_model=AssessmentItemResponse)
 async def update_assessment(item_id: str, body: AssessmentItemUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "hr")
     obj = await db.get(AssessmentItem, item_id)
     if not obj:
         raise HTTPException(404, "考核项不存在")
@@ -594,6 +600,7 @@ async def update_salary(rec_id: str, body: SalaryRecordUpdate, user: CurrentUser
 @router.post("/salary-records/{rec_id}/submit")
 async def submit_salary(rec_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     """HR 提交审批（draft/rejected → pending_approval）"""
+    require_role(user, "boss", "hr")
     rec = await db.get(SalaryRecord, rec_id)
     if not rec:
         raise HTTPException(404, "工资单不存在")
@@ -622,6 +629,7 @@ class BatchSubmitRequest(BaseModel):
 @router.post("/salary-records/batch-submit")
 async def batch_submit_salary(body: BatchSubmitRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     """批量提交审批"""
+    require_role(user, "boss", "hr")
     recs = (await db.execute(
         select(SalaryRecord).where(SalaryRecord.id.in_(body.salary_record_ids))
     )).scalars().all()
@@ -652,9 +660,7 @@ class ApproveRequest(BaseModel):
 @router.post("/salary-records/{rec_id}/approve")
 async def approve_salary(rec_id: str, body: ApproveRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     """老板审批（pending_approval → approved 或 rejected）"""
-    roles = user.get("roles", [])
-    if not any(r in roles for r in ("boss", "admin")):
-        raise HTTPException(403, "仅老板/管理员可审批工资")
+    require_role(user, "boss", "finance")
     rec = await db.get(SalaryRecord, rec_id)
     if not rec:
         raise HTTPException(404, "工资单不存在")
@@ -695,6 +701,7 @@ class PaySalaryRequest(BaseModel):
 @router.post("/salary-records/{rec_id}/pay")
 async def pay_salary(rec_id: str, body: PaySalaryRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     """发放工资：扣公司账户 + 记录厂家应收 + 保存转款凭证"""
+    require_role(user, "boss", "finance")
     from app.api.routes.accounts import record_fund_flow
 
     rec = await db.get(SalaryRecord, rec_id)
@@ -896,6 +903,7 @@ class ConfirmSubsidyArrivalRequest(BaseModel):
 @router.post("/manufacturer-subsidies/confirm-arrival")
 async def confirm_subsidy_arrival(body: ConfirmSubsidyArrivalRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     """厂家工资补贴到账确认：金额必须等于该品牌该期 pending+advanced 记录合计，钱进品牌现金账户。"""
+    require_role(user, "boss", "finance")
     from app.api.routes.accounts import record_fund_flow
 
     subs = (await db.execute(
@@ -955,6 +963,7 @@ class ManualMarkRequest(BaseModel):
 @router.post("/manufacturer-subsidies/manual-mark-arrived")
 async def manual_mark_arrived(body: ManualMarkRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     """兜底：单条手工标记到账（厂家不走对账单，如现金直给）"""
+    require_role(user, "boss", "finance")
     s = await db.get(ManufacturerSalarySubsidy, body.subsidy_id)
     if not s:
         raise HTTPException(404, "补贴记录不存在")
@@ -1076,7 +1085,7 @@ async def generate_salary_records(
     body: GenerateSalaryRequest, user: CurrentUser, db: AsyncSession = Depends(get_db),
 ):
     """一键按周期为所有员工自动生成工资单（含自动算佣金、KPI系数、厂家补贴）。
-    
+
     计算规则：
       - 销售提成: 员工名下该品牌已全额回款且未结算过的订单 → Σ回款 × 品牌提成率 × KPI系数
       - 管理提成(仅 sales_manager): 同品牌下所有 salesman 的订单回款合计 × 经理的 manager_share_rate
@@ -1084,8 +1093,7 @@ async def generate_salary_records(
       - 厂家补贴: 从 EmployeeBrandPosition.manufacturer_subsidy 累加
       - 底薪 / 社保: 从 Employee 表取
     """
-    from app.core.permissions import require_can_see_salary
-    require_can_see_salary(user)
+    require_role(user, "boss", "finance")
     # 解析截止日期
     if body.pay_cutoff_date:
         cutoff = datetime.strptime(body.pay_cutoff_date, "%Y-%m-%d")
@@ -1444,6 +1452,7 @@ async def batch_pay_salary(
     body: BatchPayRequest, user: CurrentUser, db: AsyncSession = Depends(get_db),
 ):
     """批量发放：一次扣公司账户总额 + 批量生成厂家应收"""
+    require_role(user, "boss", "finance")
     from app.api.routes.accounts import record_fund_flow
 
     if not body.salary_record_ids:
@@ -1546,6 +1555,7 @@ async def batch_confirm_salary(
     body: BatchConfirmRequest, user: CurrentUser, db: AsyncSession = Depends(get_db),
 ):
     """批量确认（draft → confirmed）"""
+    require_role(user, "boss", "hr")
     recs = (await db.execute(
         select(SalaryRecord).where(SalaryRecord.id.in_(body.salary_record_ids))
     )).scalars().all()

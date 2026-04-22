@@ -79,6 +79,7 @@ async def _ensure_order_receivable(db: AsyncSession, order: Order) -> None:
 
 @router.post("", response_model=OrderResponse, status_code=201)
 async def create_order(body: OrderCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "salesman", "sales_manager")
     from app.models.product import Product
     from app.models.policy_template import PolicyTemplate
 
@@ -259,6 +260,7 @@ async def get_order(order_id: str, user: CurrentUser, db: AsyncSession = Depends
 async def update_order(
     order_id: str, body: OrderUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
+    require_role(user, "boss", "salesman", "sales_manager")
     order = await db.get(Order, order_id)
     if order is None:
         raise HTTPException(404, "Order not found")
@@ -321,6 +323,7 @@ async def confirm_delivery(order_id: str, user: CurrentUser, db: AsyncSession = 
     If the customer is a credit customer (settlement_mode='credit'),
     auto-generate a receivable record.
     """
+    require_role(user, "boss", "warehouse")
     order = await db.get(Order, order_id)
     if order is None:
         raise HTTPException(404, "Order not found")
@@ -350,6 +353,7 @@ async def ship_order(order_id: str, user: CurrentUser, db: AsyncSession = Depend
     Validates that a matching policy request exists for this order.
     No policy = cannot ship.
     """
+    require_role(user, "boss", "warehouse")
     from app.models.policy import PolicyRequest
 
     order = await db.get(Order, order_id)
@@ -391,6 +395,7 @@ async def ship_order(order_id: str, user: CurrentUser, db: AsyncSession = Depend
 @router.post("/{order_id}/complete", response_model=OrderResponse)
 async def complete_order(order_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     """delivered → completed (fulfillment archived)."""
+    require_role(user, "boss", "finance")
     order = await db.get(Order, order_id)
     if order is None:
         raise HTTPException(404, "Order not found")
@@ -411,6 +416,7 @@ class RejectPolicyBody(BaseModel):
 @router.post("/{order_id}/submit-policy", response_model=OrderResponse)
 async def submit_for_policy(order_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     """pending → policy_pending_internal"""
+    require_role(user, "boss", "salesman", "sales_manager")
     order = await db.get(Order, order_id)
     if order is None:
         raise HTTPException(404, "Order not found")
@@ -438,6 +444,7 @@ async def approve_policy(
     db: AsyncSession = Depends(get_db),
 ):
     """policy_pending_internal → approved (or → policy_pending_external)"""
+    require_role(user, "boss")
     order = await db.get(Order, order_id)
     if order is None:
         raise HTTPException(404, "Order not found")
@@ -470,6 +477,7 @@ async def approve_policy(
 @router.post("/{order_id}/confirm-external", response_model=OrderResponse)
 async def confirm_external_policy(order_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     """policy_pending_external → approved"""
+    require_role(user, "boss")
     order = await db.get(Order, order_id)
     if order is None:
         raise HTTPException(404, "Order not found")
@@ -489,6 +497,7 @@ async def reject_policy(
     order_id: str, body: RejectPolicyBody, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
     """policy_pending_* → policy_rejected"""
+    require_role(user, "boss")
     order = await db.get(Order, order_id)
     if order is None:
         raise HTTPException(404, "Order not found")
@@ -538,6 +547,7 @@ async def upload_delivery(
     order_id: str, body: DeliveryUploadBody, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
     """shipped → delivered: upload delivery photos and confirm delivery."""
+    require_role(user, "boss", "salesman", "warehouse")
     order = await db.get(Order, order_id)
     if order is None:
         raise HTTPException(404, "Order not found")
@@ -567,6 +577,7 @@ async def upload_payment_voucher(
     order_id: str, body: PaymentVoucherBody, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
     """Upload payment voucher + register a Receipt (累加式；自动更新 payment_status)。"""
+    require_role(user, "boss", "finance", "salesman")
     from app.models.finance import Receipt
     from app.models.base import OrderPaymentMethod, PaymentStatus
     from app.api.routes.accounts import record_fund_flow
@@ -647,6 +658,7 @@ async def confirm_payment(
     order_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
     """delivered → completed: boss/finance confirms payment received."""
+    require_role(user, "boss", "finance")
     order = await db.get(Order, order_id)
     if order is None:
         raise HTTPException(404, "Order not found")
@@ -677,6 +689,7 @@ async def resubmit_order(
     order_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
     """policy_rejected → pending: allow re-editing and resubmission."""
+    require_role(user, "boss", "salesman", "sales_manager")
     order = await db.get(Order, order_id)
     if order is None:
         raise HTTPException(404, "Order not found")

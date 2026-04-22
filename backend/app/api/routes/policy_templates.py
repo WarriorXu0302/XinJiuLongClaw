@@ -208,6 +208,7 @@ def _template_to_response(obj: PolicyTemplate) -> dict:
 
 @router.post("/templates", response_model=PolicyTemplateResponse, status_code=201)
 async def create_template(body: PolicyTemplateCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     data = body.model_dump(exclude={"benefits"})
     obj = PolicyTemplate(id=str(uuid.uuid4()), **data)
     db.add(obj)
@@ -351,9 +352,7 @@ async def extend_template(
     template_id: str, body: ExtendRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
     """Extend a template's validity period. Requires admin/boss role."""
-    roles = set(user.get("roles", []))
-    if not roles & {"admin", "boss"}:
-        raise HTTPException(403, "仅老板/管理员可延期政策模板")
+    require_role(user, "boss", "finance")
     obj = await db.get(PolicyTemplate, template_id)
     if obj is None:
         raise HTTPException(404, "PolicyTemplate not found")
@@ -371,6 +370,7 @@ async def extend_template(
 async def update_template(
     template_id: str, body: PolicyTemplateUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
+    require_role(user, "boss", "finance")
     obj = await db.get(PolicyTemplate, template_id)
     if obj is None:
         raise HTTPException(404, "PolicyTemplate not found")
@@ -400,6 +400,7 @@ async def delete_template(template_id: str, user: CurrentUser, db: AsyncSession 
 
 @router.post("/adjustments", response_model=PolicyAdjustmentResponse, status_code=201)
 async def create_adjustment(body: PolicyAdjustmentCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    require_role(user, "boss", "finance")
     obj = PolicyAdjustment(id=str(uuid.uuid4()), **body.model_dump())
     db.add(obj)
     await db.flush()

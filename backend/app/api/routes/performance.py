@@ -5,12 +5,13 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select, func, extract
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.permissions import require_role
 from app.core.security import CurrentUser
 from app.models.user import Employee
 from app.models.sales_target import SalesTarget
@@ -197,6 +198,7 @@ async def refresh_assessment_actual(
       - kpi_revenue: 本月回款合计
       - kpi_customers: 本月有订单的客户数
     """
+    require_role(user, "boss", "hr", "sales_manager")
     y, m = map(int, period.split("-"))
     items = (await db.execute(
         select(AssessmentItem).where(AssessmentItem.period == period)
@@ -302,6 +304,7 @@ async def init_assessment_items(
     只为已存在 EmployeeBrandPosition(salesman / sales_manager) 的员工创建，避免给财务/仓管乱挂。
     幂等：已有同 period + item_code 不重复创建。
     """
+    require_role(user, "boss", "hr")
     from app.models.payroll import EmployeeBrandPosition
 
     y, m = map(int, period.split("-"))

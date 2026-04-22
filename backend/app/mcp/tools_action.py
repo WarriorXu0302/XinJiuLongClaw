@@ -87,14 +87,19 @@ async def mcp_create_order(body: MCPCreateOrderRequest, db: AsyncSession = Depen
     order.policy_value = tmpl.total_policy_value
     order.policy_surplus = (tmpl.total_policy_value or Decimal("0")) - order.policy_gap
 
+    if body.settlement_mode not in ("customer_pay", "employee_pay", "company_pay"):
+        raise HTTPException(400, f"settlement_mode 必须为 customer_pay/employee_pay/company_pay，收到: {body.settlement_mode}")
     if body.settlement_mode in ("customer_pay", "employee_pay"):
         order.customer_paid_amount = total
-    elif body.settlement_mode == "company_pay":
+    else:
         order.customer_paid_amount = order.deal_amount
     order.policy_receivable = order.policy_gap if body.settlement_mode != "customer_pay" else Decimal("0")
 
     db.add(order)
-    await db.flush()
+    try:
+        await db.flush()
+    except Exception as e:
+        raise HTTPException(500, f"创建订单失败: {e}")
     await log_audit(db, action="create_order", entity_type="Order", entity_id=order.id, user=user)
     return {"order_no": order.order_no, "total_amount": float(total), "customer_paid_amount": float(order.customer_paid_amount)}
 
@@ -580,17 +585,11 @@ async def mcp_update_customer(body: MCPUpdateCustomerRequest, db: AsyncSession =
 # 23. 创建采购单
 # ═══════════════════════════════════════════════════════════════════
 
-class MCPPurchaseItem(BaseModel):
-    product_id: str
-    quantity: int
-    unit_price: float
-
-
 class MCPCreatePurchaseOrderRequest(BaseModel):
     supplier_id: str
     brand_id: str
     warehouse_id: str
-    items: list[MCPPurchaseItem]
+    items: list[dict]  # [{product_id, quantity, unit_price}]
     notes: Optional[str] = None
 
 
@@ -617,14 +616,14 @@ async def mcp_create_purchase_order(body: MCPCreatePurchaseOrderRequest, db: Asy
     )
     total = Decimal("0")
     for it in body.items:
-        price = Decimal(str(it.unit_price))
-        line_total = price * it.quantity
-        total += line_total
+        price = Decimal(str(it["unit_price"]))
+        qty = it["quantity"]
+        total += price * qty
         po.items.append(PurchaseOrderItem(
             id=str(uuid.uuid4()),
             po_id=po.id,
-            product_id=it.product_id,
-            quantity=it.quantity,
+            product_id=it["product_id"],
+            quantity=qty,
             unit_price=price,
         ))
     po.total_amount = total
@@ -1014,14 +1013,9 @@ async def mcp_create_supplier(body: MCPCreateSupplierRequest, db: AsyncSession =
 # 31. 采购收货
 # ═══════════════════════════════════════════════════════════════════
 
-class MCPReceivedItem(BaseModel):
-    product_id: str
-    received_quantity: int
-
-
 class MCPReceivePurchaseOrderRequest(BaseModel):
     po_id: str
-    received_items: list[MCPReceivedItem]
+    received_items: list[dict] = []  # [{product_id, received_quantity}]
 
 
 @router.post("/receive-purchase-order")

@@ -221,6 +221,8 @@ async def mcp_approve_expense(body: MCPApproveExpenseRequest, db: AsyncSession =
 
     claim = await db.get(ExpenseClaim, body.expense_id)
     if not claim:
+        claim = (await db.execute(select(ExpenseClaim).where(ExpenseClaim.claim_no == body.expense_id))).scalar_one_or_none()
+    if not claim:
         raise HTTPException(404, f"费用 {body.expense_id} 不存在")
 
     if body.action == "approve":
@@ -324,7 +326,7 @@ class MCPApproveFinancingRepaymentRequest(BaseModel):
 async def mcp_approve_financing_repayment(body: MCPApproveFinancingRepaymentRequest, db: AsyncSession = Depends(get_mcp_db)):
     """AI 审批融资还款。approve 调用内部逻辑执行扣款；reject 直接驳回。"""
     user = db.info.get("mcp_user", {})
-    require_mcp_role(user, 'boss')
+    require_mcp_role(user, 'boss', 'finance')
 
     if body.action == "approve":
         from app.api.routes.financing import approve_repayment
@@ -370,6 +372,8 @@ async def mcp_approve_expense_claim(body: MCPApproveExpenseClaimRequest, db: Asy
     require_mcp_role(user, 'boss', 'finance')
 
     claim = await db.get(ExpenseClaim, body.claim_id)
+    if not claim:
+        claim = (await db.execute(select(ExpenseClaim).where(ExpenseClaim.claim_no == body.claim_id))).scalar_one_or_none()
     if not claim:
         raise HTTPException(404, f"报销理赔 {body.claim_id} 不存在")
 

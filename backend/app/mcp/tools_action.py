@@ -159,7 +159,23 @@ async def mcp_create_order(body: MCPCreateOrderRequest, db: AsyncSession = Depen
     except Exception as e:
         raise HTTPException(500, f"创建订单失败: {e}")
     await log_audit(db, action="create_order", entity_type="Order", entity_id=order.id, user=user)
-    return {"order_no": order.order_no, "total_amount": float(total), "customer_paid_amount": float(order.customer_paid_amount)}
+    return {
+        "order_no": order.order_no,
+        "policy_template": tmpl.name,
+        "policy_template_code": tmpl.code,
+        "guide_price": float(guide_price),
+        "customer_price": float(customer_price),
+        "total_cases": total_cases,
+        "total_bottles": total_bottles,
+        "total_amount": float(total),
+        "deal_amount": float(order.deal_amount),
+        "policy_gap": float(order.policy_gap),
+        "policy_value": float(tmpl.total_policy_value or 0),
+        "policy_surplus": float(order.policy_surplus or 0),
+        "customer_paid_amount": float(order.customer_paid_amount),
+        "settlement_mode": order.settlement_mode,
+        "status": order.status,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════

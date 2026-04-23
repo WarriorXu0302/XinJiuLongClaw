@@ -411,6 +411,17 @@ async def mcp_register_payment(body: MCPUploadPaymentRequest, db: AsyncSession =
                 ))
                 await db.flush()
 
+    # 更新信用客户的 Receivable.paid_amount
+    from app.models.customer import Receivable
+    ar = (await db.execute(select(Receivable).where(Receivable.order_id == order.id))).scalar_one_or_none()
+    if ar:
+        ar.paid_amount = float(total_received)
+        if float(total_received) >= float(ar.amount):
+            ar.status = "fully_paid"
+        elif float(total_received) > 0:
+            ar.status = "partially_paid"
+        await db.flush()
+
     # refresh customer for return info
     await db.refresh(order, ["customer"])
     return {"receipt_no": receipt.receipt_no, "order_no": order.order_no,

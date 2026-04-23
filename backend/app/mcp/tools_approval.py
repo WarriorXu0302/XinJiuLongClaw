@@ -78,6 +78,10 @@ async def mcp_approve_order(body: MCPApproveOrderRequest, db: AsyncSession = Dep
                 id=str(uuid.uuid4()),
                 brand_id=order.brand_id,
                 order_id=order.id,
+                policy_template_id=order.policy_template_id,
+                settlement_mode=order.settlement_mode,
+                total_policy_value=order.policy_value,
+                total_gap=order.policy_gap,
                 request_source="order",
                 status="approved",
             )

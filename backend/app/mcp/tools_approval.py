@@ -234,6 +234,8 @@ async def mcp_approve_purchase_order(body: MCPApprovePurchaseOrderRequest, db: A
 
     po = await db.get(PurchaseOrder, body.po_id)
     if not po:
+        po = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.po_no == body.po_id))).scalar_one_or_none()
+    if not po:
         raise HTTPException(404, f"采购单 {body.po_id} 不存在")
     if po.status != "pending":
         raise HTTPException(400, f"采购单状态为 {po.status}，只有 pending 可审批")

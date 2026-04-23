@@ -680,22 +680,28 @@ async def mcp_create_expense(body: MCPCreateExpenseRequest, db: AsyncSession = D
 
 class MCPCreateInspectionCaseRequest(BaseModel):
     brand_id: str
-    case_type: str  # inspection_violation / market_cleanup / ...
+    case_type: str  # outflow_malicious / outflow_nonmalicious / outflow_transfer / inflow_resell / inflow_transfer
     direction: str  # outflow / inflow
     product_id: Optional[str] = None
     quantity: Optional[int] = None
     quantity_unit: Optional[str] = "瓶"
-    deal_unit_price: Optional[float] = None
-    purchase_price: Optional[float] = None
-    sale_price: Optional[float] = None
+    deal_unit_price: Optional[float] = None  # 到手价（A1用）
+    purchase_price: Optional[float] = None   # 回收价/买入价
+    sale_price: Optional[float] = None       # 指导价
+    resell_price: Optional[float] = None     # 回售价（B1用）
     penalty_amount: Optional[float] = None
+    reward_amount: Optional[float] = None    # 奖励（B类用）
     notes: Optional[str] = None
 
 
 @router.post("/create-inspection-case")
 async def mcp_create_inspection_case(body: MCPCreateInspectionCaseRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 创建稽查案件。自动计算 profit_loss。
-    A1 亏损公式：profit_loss = -(回收价 - 到手价) * 瓶数。
+    """AI 创建稽查案件。按 case_type 自动计算 profit_loss：
+    A1 outflow_malicious: -(回收价-到手价)×瓶-罚款
+    A2 outflow_nonmalicious: (指导价-回收价)×瓶-罚款
+    A3 outflow_transfer: -罚款
+    B1 inflow_resell: (回售价-买入价)×瓶+奖励
+    B2 inflow_transfer: (指导价-买入价)×瓶+奖励
     """
     from app.models.inspection import InspectionCase
     from datetime import datetime, timezone
@@ -704,18 +710,34 @@ async def mcp_create_inspection_case(body: MCPCreateInspectionCaseRequest, db: A
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     qty = body.quantity or 0
-    deal_price = Decimal(str(body.deal_unit_price or 0))
-    purchase_p = Decimal(str(body.purchase_price or 0))
-    sale_p = Decimal(str(body.sale_price or 0))
-    penalty = Decimal(str(body.penalty_amount or 0))
+    bottles = qty
+    if body.quantity_unit == "箱" and body.product_id:
+        from app.models.product import Product
+        prod = await db.get(Product, body.product_id)
+        bpc = prod.bottles_per_case if prod and prod.bottles_per_case else 1
+        bottles = qty * bpc
 
-    # profit_loss 计算：
-    # outflow（窜出）：亏损 = -(回收价 - 到手价) * 数量 - 罚款
-    # inflow（窜入/回收）：盈利 = (转卖价 - 采购价) * 数量
-    if body.direction == "outflow":
-        profit_loss = -(deal_price - sale_p) * qty - penalty
+    sale_p = Decimal(str(body.sale_price or 0))
+    deal_p = Decimal(str(body.deal_unit_price or 0)) or sale_p
+    purchase_p = Decimal(str(body.purchase_price or 0))
+    resell_p = Decimal(str(body.resell_price or 0))
+    penalty = Decimal(str(body.penalty_amount or 0))
+    reward = Decimal(str(body.reward_amount or 0))
+    b = Decimal(bottles)
+
+    t = body.case_type
+    if t == "outflow_malicious":
+        profit_loss = -(purchase_p - deal_p) * b - penalty
+    elif t == "outflow_nonmalicious":
+        profit_loss = (sale_p - purchase_p) * b - penalty
+    elif t == "outflow_transfer":
+        profit_loss = -penalty
+    elif t == "inflow_resell":
+        profit_loss = (resell_p - purchase_p) * b + reward
+    elif t == "inflow_transfer":
+        profit_loss = (sale_p - purchase_p) * b + reward
     else:
-        profit_loss = (sale_p - purchase_p) * qty
+        profit_loss = Decimal("0")
 
     case = InspectionCase(
         id=str(uuid.uuid4()),
@@ -726,10 +748,12 @@ async def mcp_create_inspection_case(body: MCPCreateInspectionCaseRequest, db: A
         product_id=body.product_id,
         quantity=qty,
         quantity_unit=body.quantity_unit or "瓶",
-        deal_unit_price=deal_price,
+        deal_unit_price=deal_p,
         purchase_price=purchase_p,
-        resell_price=sale_p,
+        original_sale_price=sale_p,
+        resell_price=resell_p,
         penalty_amount=penalty,
+        reward_amount=reward,
         profit_loss=profit_loss,
         notes=body.notes,
         status="pending",
@@ -1027,6 +1051,8 @@ async def mcp_receive_purchase_order(body: MCPReceivePurchaseOrderRequest, db: A
     require_mcp_role(user, "boss", "warehouse", "purchase")
 
     po = await db.get(PurchaseOrder, body.po_id)
+    if not po:
+        po = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.po_no == body.po_id))).scalar_one_or_none()
     if not po:
         raise HTTPException(404, f"采购单 {body.po_id} 不存在")
     if po.status not in ("approved", "shipped"):

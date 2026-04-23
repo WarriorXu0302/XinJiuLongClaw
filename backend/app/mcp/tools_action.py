@@ -19,6 +19,131 @@ router = APIRouter()
 
 
 # ═══════════════════════════════════════════════════════════════════
+# 10.5 预览订单（不创建，只匹配政策+算价格）
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPPreviewOrderRequest(BaseModel):
+    customer_id: str
+    salesman_id: str
+    settlement_mode: str = "customer_pay"
+    items: list[dict]  # [{product_id, quantity, quantity_unit}]
+    policy_template_id: Optional[str] = None
+
+
+@router.post("/preview-order")
+async def mcp_preview_order(body: MCPPreviewOrderRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """预览订单：匹配政策模板 + 计算价格，不真正创建。用于建单前确认。"""
+    from app.models.policy_template import PolicyTemplate
+    from app.models.product import Product
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_employee(user)
+
+    # 解析商品，确定品牌+箱数
+    products = []
+    brand_id = None
+    total_cases = 0
+    for it in body.items:
+        pid = it["product_id"]
+        prod = await db.get(Product, pid)
+        if not prod:
+            prod = (await db.execute(select(Product).where(Product.code == pid))).scalar_one_or_none()
+        if not prod:
+            prod = (await db.execute(select(Product).where(Product.name == pid))).scalar_one_or_none()
+        if not prod:
+            raise HTTPException(404, f"商品 {pid} 不存在")
+        if brand_id and prod.brand_id != brand_id:
+            raise HTTPException(400, "所有商品必须属于同一品牌")
+        brand_id = prod.brand_id
+        products.append((prod, it))
+        if it.get("quantity_unit", "箱") == "箱":
+            total_cases += it["quantity"]
+
+    # 匹配政策模板
+    if body.policy_template_id:
+        tmpl = await db.get(PolicyTemplate, body.policy_template_id)
+        if not tmpl:
+            tmpl = (await db.execute(select(PolicyTemplate).where(PolicyTemplate.code == body.policy_template_id))).scalar_one_or_none()
+        if not tmpl or not tmpl.is_active:
+            return {"matched": False, "error": "指定的政策模板不存在或已停用"}
+        if tmpl.min_cases and total_cases != tmpl.min_cases:
+            return {"matched": False, "error": f"政策模板要求 {tmpl.min_cases} 箱，当前 {total_cases} 箱"}
+    else:
+        tmpl = (await db.execute(
+            select(PolicyTemplate).where(
+                PolicyTemplate.brand_id == brand_id,
+                PolicyTemplate.is_active == True,
+                PolicyTemplate.min_cases == total_cases,
+            )
+        )).scalar_one_or_none()
+        if not tmpl:
+            return {"matched": False, "error": f"没有匹配的政策模板（品牌箱数={total_cases}）。请先创建对应箱数的政策模板"}
+
+    guide_price = Decimal(str(tmpl.required_unit_price or 0))
+    customer_price = Decimal(str(tmpl.customer_unit_price or guide_price))
+
+    total_bottles = 0
+    item_details = []
+    for prod, it in products:
+        bpc = prod.bottles_per_case or 6
+        qty = it["quantity"]
+        unit = it.get("quantity_unit", "箱")
+        bottles = qty * bpc if unit == "箱" else qty
+        total_bottles += bottles
+        item_details.append({
+            "product": prod.name, "quantity": qty, "unit": unit,
+            "bottles": bottles, "bottles_per_case": bpc,
+        })
+
+    total_amount = guide_price * total_bottles
+    deal_amount = customer_price * total_bottles
+    policy_gap = total_amount - deal_amount
+
+    sm = body.settlement_mode
+    if sm in ("customer_pay", "employee_pay"):
+        customer_paid = float(total_amount)
+    elif sm == "company_pay":
+        customer_paid = float(deal_amount)
+    else:
+        customer_paid = float(total_amount)
+
+    # 政策福利明细
+    benefits = tmpl.benefit_rules or []
+    benefit_summary = []
+    for b in benefits:
+        benefit_summary.append({
+            "type": b.get("benefit_type", ""),
+            "name": b.get("name", ""),
+            "quantity": b.get("quantity", 0),
+            "unit_value": b.get("unit_value", 0),
+            "is_material": b.get("is_material", False),
+        })
+
+    return {
+        "matched": True,
+        "policy_template": tmpl.name,
+        "policy_template_code": tmpl.code,
+        "policy_template_id": tmpl.id,
+        "guide_price_per_bottle": float(guide_price),
+        "customer_price_per_bottle": float(customer_price),
+        "total_cases": total_cases,
+        "total_bottles": total_bottles,
+        "items": item_details,
+        "total_amount": float(total_amount),
+        "deal_amount": float(deal_amount),
+        "policy_gap": float(policy_gap),
+        "policy_value": float(tmpl.total_policy_value or 0),
+        "policy_surplus": float((tmpl.total_policy_value or 0) - policy_gap),
+        "customer_paid_amount": customer_paid,
+        "settlement_mode": sm,
+        "benefits": benefit_summary,
+        "valid_from": str(tmpl.valid_from) if tmpl.valid_from else None,
+        "valid_to": str(tmpl.valid_to) if tmpl.valid_to else None,
+        "hint": "确认无误后调用 create-order 创建订单（参数一致即可）",
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
 # 11. 创建订单
 # ═══════════════════════════════════════════════════════════════════
 

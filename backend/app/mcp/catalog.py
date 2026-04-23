@@ -95,11 +95,14 @@ QUERY_TOOLS: list[ToolEntry] = [
      "description": "查询仓库列表。创建采购单/订单时需要 warehouse_id。"},
 ]
 
-# ─── 写入类（39）─────────────────────────────────────────────
+# ─── 写入类（40）─────────────────────────────────────────────
 ACTION_TOOLS: list[ToolEntry] = [
+    {"name": "preview-order", "path": "/mcp/preview-order",
+     "roles": ["*"],
+     "description": "预览订单：自动匹配政策模板+计算价格+展示政策福利，不真正创建。建单前必须先调用让用户确认。"},
     {"name": "create-order", "path": "/mcp/create-order",
      "roles": ["boss", "salesman", "sales_manager"],
-     "description": "创建销售订单。salesman 调用时 salesman_id 强制=本人。"},
+     "description": "创建销售订单。建单前应先调用 preview-order 让用户确认政策和价格。"},
     {"name": "register-payment", "path": "/mcp/register-payment",
      "roles": ["boss", "finance", "salesman"],
      "description": "登记订单收款（上传凭证等价动作）。建 Receipt+更新 payment_status。"},

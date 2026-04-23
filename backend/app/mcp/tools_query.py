@@ -218,7 +218,7 @@ async def query_salary_records(body: QuerySalaryRequest, db: AsyncSession = Depe
     stmt = stmt.order_by(SalaryRecord.period.desc()).limit(50)
     rows = (await db.execute(stmt)).scalars().all()
     return [{
-        "employee": r.employee.name if r.employee else None, "period": r.period,
+        "id": r.id, "employee": r.employee.name if r.employee else None, "period": r.period,
         "total_pay": float(r.total_pay), "actual_pay": float(r.actual_pay),
         "commission": float(r.commission_total), "status": r.status,
     } for r in rows]
@@ -246,10 +246,11 @@ async def query_sales_targets(body: QueryTargetsRequest, db: AsyncSession = Depe
     stmt = stmt.options(selectinload(SalesTarget.brand), selectinload(SalesTarget.employee))
     rows = (await db.execute(stmt)).scalars().all()
     return [{
-        "level": t.target_level, "month": t.target_month,
+        "id": t.id, "level": t.target_level, "year": t.target_year, "month": t.target_month,
         "brand": t.brand.name if t.brand else None,
         "employee": t.employee.name if t.employee else None,
         "sales_target": float(t.sales_target), "receipt_target": float(t.receipt_target),
+        "status": t.status,
     } for t in rows]
 
 
@@ -308,7 +309,7 @@ async def query_manufacturer_subsidies(body: QuerySubsidiesRequest, db: AsyncSes
     stmt = stmt.order_by(ManufacturerSalarySubsidy.created_at.desc()).limit(50)
     rows = (await db.execute(stmt)).scalars().all()
     return [{
-        "employee": s.employee.name if s.employee else None,
+        "id": s.id, "employee": s.employee.name if s.employee else None,
         "brand": s.brand.name if s.brand else None,
         "period": s.period, "amount": float(s.subsidy_amount), "status": s.status,
     } for s in rows]
@@ -592,7 +593,7 @@ async def query_financing_orders(body: QueryFinancingOrdersRequest, db: AsyncSes
     stmt = stmt.order_by(FinancingOrder.created_at.desc()).limit(body.limit)
     rows = (await db.execute(stmt)).scalars().all()
     return [{
-        "order_no": fo.order_no,
+        "id": fo.id, "order_no": fo.order_no,
         "brand": fo.brand.name if fo.brand else None,
         "amount": float(fo.amount),
         "outstanding_balance": float(fo.outstanding_balance),

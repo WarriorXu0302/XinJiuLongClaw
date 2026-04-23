@@ -442,11 +442,30 @@ async def mcp_bind_brand(body: MCPBindBrandPositionRequest, db: AsyncSession = D
     """AI 绑定员工到品牌×岗位。"""
     from app.models.payroll import EmployeeBrandPosition
     from app.models.user import Employee
+    from app.models.product import Brand
     user = db.info.get("mcp_user", {})
     require_mcp_role(user, "boss", "hr")
+
+    # employee_id fallback: UUID → employee_no → name
     emp = await db.get(Employee, body.employee_id)
     if not emp:
+        emp = (await db.execute(select(Employee).where(Employee.employee_no == body.employee_id))).scalar_one_or_none()
+    if not emp:
+        emp = (await db.execute(select(Employee).where(Employee.name == body.employee_id))).scalar_one_or_none()
+    if not emp:
         raise HTTPException(404, f"员工 {body.employee_id} 不存在")
+    body.employee_id = emp.id
+
+    # brand_id fallback: UUID → code → name
+    brand = await db.get(Brand, body.brand_id)
+    if not brand:
+        brand = (await db.execute(select(Brand).where(Brand.code == body.brand_id))).scalar_one_or_none()
+    if not brand:
+        brand = (await db.execute(select(Brand).where(Brand.name == body.brand_id))).scalar_one_or_none()
+    if not brand:
+        raise HTTPException(404, f"品牌 {body.brand_id} 不存在")
+    body.brand_id = brand.id
+
     existing = (await db.execute(
         select(EmployeeBrandPosition).where(
             EmployeeBrandPosition.employee_id == body.employee_id,
@@ -594,7 +613,12 @@ async def mcp_update_customer(body: MCPUpdateCustomerRequest, db: AsyncSession =
 
     cust = await db.get(Customer, body.customer_id)
     if not cust:
+        cust = (await db.execute(select(Customer).where(Customer.code == body.customer_id))).scalar_one_or_none()
+    if not cust:
+        cust = (await db.execute(select(Customer).where(Customer.name == body.customer_id))).scalar_one_or_none()
+    if not cust:
         raise HTTPException(404, f"客户 {body.customer_id} 不存在")
+    body.customer_id = cust.id
     updated_fields = []
     if body.name is not None:
         cust.name = body.name
@@ -631,12 +655,43 @@ class MCPCreatePurchaseOrderRequest(BaseModel):
 async def mcp_create_purchase_order(body: MCPCreatePurchaseOrderRequest, db: AsyncSession = Depends(get_mcp_db)):
     """AI 创建采购单。状态为 pending，需审批后才能执行。"""
     from app.models.purchase import PurchaseOrder, PurchaseOrderItem
+    from app.models.product import Supplier, Brand, Warehouse
     from datetime import datetime, timezone
     user = db.info.get("mcp_user", {})
     require_mcp_role(user, "boss", "purchase", "warehouse")
 
     if not body.items:
         raise HTTPException(400, "采购明细不能为空")
+
+    # supplier_id fallback: UUID → code → name
+    supplier = await db.get(Supplier, body.supplier_id)
+    if not supplier:
+        supplier = (await db.execute(select(Supplier).where(Supplier.code == body.supplier_id))).scalar_one_or_none()
+    if not supplier:
+        supplier = (await db.execute(select(Supplier).where(Supplier.name == body.supplier_id))).scalar_one_or_none()
+    if not supplier:
+        raise HTTPException(404, f"供应商 {body.supplier_id} 不存在")
+    body.supplier_id = supplier.id
+
+    # brand_id fallback: UUID → code → name
+    brand = await db.get(Brand, body.brand_id)
+    if not brand:
+        brand = (await db.execute(select(Brand).where(Brand.code == body.brand_id))).scalar_one_or_none()
+    if not brand:
+        brand = (await db.execute(select(Brand).where(Brand.name == body.brand_id))).scalar_one_or_none()
+    if not brand:
+        raise HTTPException(404, f"品牌 {body.brand_id} 不存在")
+    body.brand_id = brand.id
+
+    # warehouse_id fallback: UUID → code → name
+    wh = await db.get(Warehouse, body.warehouse_id)
+    if not wh:
+        wh = (await db.execute(select(Warehouse).where(Warehouse.code == body.warehouse_id))).scalar_one_or_none()
+    if not wh:
+        wh = (await db.execute(select(Warehouse).where(Warehouse.name == body.warehouse_id))).scalar_one_or_none()
+    if not wh:
+        raise HTTPException(404, f"仓库 {body.warehouse_id} 不存在")
+    body.warehouse_id = wh.id
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     po = PurchaseOrder(
@@ -688,12 +743,23 @@ class MCPCreateExpenseRequest(BaseModel):
 async def mcp_create_expense(body: MCPCreateExpenseRequest, db: AsyncSession = Depends(get_mcp_db)):
     """AI 创建费用/报销记录。状态为 pending，需审批。"""
     from app.models.expense_claim import ExpenseClaim
+    from app.models.product import Brand
     from datetime import datetime, timezone
     user = db.info.get("mcp_user", {})
     require_mcp_role(user, "boss", "finance")
 
     if body.amount <= 0:
         raise HTTPException(400, "金额必须大于 0")
+
+    # brand_id fallback: UUID → code → name
+    brand = await db.get(Brand, body.brand_id)
+    if not brand:
+        brand = (await db.execute(select(Brand).where(Brand.code == body.brand_id))).scalar_one_or_none()
+    if not brand:
+        brand = (await db.execute(select(Brand).where(Brand.name == body.brand_id))).scalar_one_or_none()
+    if not brand:
+        raise HTTPException(404, f"品牌 {body.brand_id} 不存在")
+    body.brand_id = brand.id
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     claim = ExpenseClaim(
@@ -743,15 +809,36 @@ async def mcp_create_inspection_case(body: MCPCreateInspectionCaseRequest, db: A
     B2 inflow_transfer: (指导价-买入价)×瓶+奖励
     """
     from app.models.inspection import InspectionCase
+    from app.models.product import Brand, Product
     from datetime import datetime, timezone
     user = db.info.get("mcp_user", {})
     require_mcp_role(user, "boss", "finance")
+
+    # brand_id fallback: UUID → code → name
+    brand = await db.get(Brand, body.brand_id)
+    if not brand:
+        brand = (await db.execute(select(Brand).where(Brand.code == body.brand_id))).scalar_one_or_none()
+    if not brand:
+        brand = (await db.execute(select(Brand).where(Brand.name == body.brand_id))).scalar_one_or_none()
+    if not brand:
+        raise HTTPException(404, f"品牌 {body.brand_id} 不存在")
+    body.brand_id = brand.id
+
+    # product_id fallback: UUID → code → name (if provided)
+    if body.product_id:
+        prod = await db.get(Product, body.product_id)
+        if not prod:
+            prod = (await db.execute(select(Product).where(Product.code == body.product_id))).scalar_one_or_none()
+        if not prod:
+            prod = (await db.execute(select(Product).where(Product.name == body.product_id))).scalar_one_or_none()
+        if not prod:
+            raise HTTPException(404, f"商品 {body.product_id} 不存在")
+        body.product_id = prod.id
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     qty = body.quantity or 0
     bottles = qty
     if body.quantity_unit == "箱" and body.product_id:
-        from app.models.product import Product
         prod = await db.get(Product, body.product_id)
         bpc = prod.bottles_per_case if prod and prod.bottles_per_case else 1
         bottles = qty * bpc
@@ -833,6 +920,30 @@ async def mcp_create_sales_target(body: MCPCreateSalesTargetRequest, db: AsyncSe
         raise HTTPException(400, "品牌级目标必须指定 brand_id")
     if body.target_level == "employee" and not body.employee_id:
         raise HTTPException(400, "员工级目标必须指定 employee_id")
+
+    # brand_id fallback: UUID → code → name (if provided)
+    if body.brand_id:
+        from app.models.product import Brand
+        brand = await db.get(Brand, body.brand_id)
+        if not brand:
+            brand = (await db.execute(select(Brand).where(Brand.code == body.brand_id))).scalar_one_or_none()
+        if not brand:
+            brand = (await db.execute(select(Brand).where(Brand.name == body.brand_id))).scalar_one_or_none()
+        if not brand:
+            raise HTTPException(404, f"品牌 {body.brand_id} 不存在")
+        body.brand_id = brand.id
+
+    # employee_id fallback: UUID → employee_no → name (if provided)
+    if body.employee_id:
+        from app.models.user import Employee
+        emp = await db.get(Employee, body.employee_id)
+        if not emp:
+            emp = (await db.execute(select(Employee).where(Employee.employee_no == body.employee_id))).scalar_one_or_none()
+        if not emp:
+            emp = (await db.execute(select(Employee).where(Employee.name == body.employee_id))).scalar_one_or_none()
+        if not emp:
+            raise HTTPException(404, f"员工 {body.employee_id} 不存在")
+        body.employee_id = emp.id
 
     roles = user.get("roles") or []
     # boss 建的目标直接 approved
@@ -936,7 +1047,7 @@ class MCPCreateFinancingOrderRequest(BaseModel):
 async def mcp_create_financing_order(body: MCPCreateFinancingOrderRequest, db: AsyncSession = Depends(get_mcp_db)):
     """AI 创建融资单。自动查找品牌融资账户，增加账户余额，记录资金流水。"""
     from app.models.financing import FinancingOrder
-    from app.models.product import Account
+    from app.models.product import Account, Brand
     from app.api.routes.accounts import record_fund_flow
     from datetime import date
 
@@ -945,6 +1056,16 @@ async def mcp_create_financing_order(body: MCPCreateFinancingOrderRequest, db: A
 
     if body.amount <= 0:
         raise HTTPException(400, "融资金额必须大于 0")
+
+    # brand_id fallback: UUID → code → name
+    brand = await db.get(Brand, body.brand_id)
+    if not brand:
+        brand = (await db.execute(select(Brand).where(Brand.code == body.brand_id))).scalar_one_or_none()
+    if not brand:
+        brand = (await db.execute(select(Brand).where(Brand.name == body.brand_id))).scalar_one_or_none()
+    if not brand:
+        raise HTTPException(404, f"品牌 {body.brand_id} 不存在")
+    body.brand_id = brand.id
 
     # 查找品牌的融资账户
     fin_acc = (await db.execute(
@@ -1126,9 +1247,15 @@ async def mcp_update_employee(body: MCPUpdateEmployeeRequest, db: AsyncSession =
     user = db.info.get("mcp_user", {})
     require_mcp_role(user, "boss", "hr")
 
+    # employee_id fallback: UUID → employee_no → name
     emp = await db.get(Employee, body.employee_id)
     if not emp:
+        emp = (await db.execute(select(Employee).where(Employee.employee_no == body.employee_id))).scalar_one_or_none()
+    if not emp:
+        emp = (await db.execute(select(Employee).where(Employee.name == body.employee_id))).scalar_one_or_none()
+    if not emp:
         raise HTTPException(404, f"员工 {body.employee_id} 不存在")
+    body.employee_id = emp.id
 
     updated_fields = []
     if body.name is not None:
@@ -1772,10 +1899,42 @@ class MCPBindCustomerBrandSalesmanRequest(BaseModel):
 @router.post("/bind-customer-brand-salesman")
 async def mcp_bind_customer_brand_salesman(body: MCPBindCustomerBrandSalesmanRequest, db: AsyncSession = Depends(get_mcp_db)):
     """AI 绑定/更新客户×品牌×业务员关系。已存在则更新 salesman，否则新建。"""
-    from app.models.customer import CustomerBrandSalesman
+    from app.models.customer import Customer, CustomerBrandSalesman
+    from app.models.product import Brand
+    from app.models.user import Employee
 
     user = db.info.get("mcp_user", {})
     require_mcp_role(user, "boss", "salesman", "sales_manager")
+
+    # customer_id fallback: UUID → code → name
+    cust = await db.get(Customer, body.customer_id)
+    if not cust:
+        cust = (await db.execute(select(Customer).where(Customer.code == body.customer_id))).scalar_one_or_none()
+    if not cust:
+        cust = (await db.execute(select(Customer).where(Customer.name == body.customer_id))).scalar_one_or_none()
+    if not cust:
+        raise HTTPException(404, f"客户 {body.customer_id} 不存在")
+    body.customer_id = cust.id
+
+    # brand_id fallback: UUID → code → name
+    brand = await db.get(Brand, body.brand_id)
+    if not brand:
+        brand = (await db.execute(select(Brand).where(Brand.code == body.brand_id))).scalar_one_or_none()
+    if not brand:
+        brand = (await db.execute(select(Brand).where(Brand.name == body.brand_id))).scalar_one_or_none()
+    if not brand:
+        raise HTTPException(404, f"品牌 {body.brand_id} 不存在")
+    body.brand_id = brand.id
+
+    # salesman_id fallback: UUID → employee_no → name
+    emp = await db.get(Employee, body.salesman_id)
+    if not emp:
+        emp = (await db.execute(select(Employee).where(Employee.employee_no == body.salesman_id))).scalar_one_or_none()
+    if not emp:
+        emp = (await db.execute(select(Employee).where(Employee.name == body.salesman_id))).scalar_one_or_none()
+    if not emp:
+        raise HTTPException(404, f"业务员 {body.salesman_id} 不存在")
+    body.salesman_id = emp.id
 
     existing = (await db.execute(
         select(CustomerBrandSalesman).where(

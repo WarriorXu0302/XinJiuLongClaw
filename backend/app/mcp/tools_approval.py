@@ -42,7 +42,7 @@ async def mcp_approve_order(body: MCPApproveOrderRequest, db: AsyncSession = Dep
         if order.status not in (OrderStatus.PENDING, OrderStatus.POLICY_PENDING_INTERNAL, OrderStatus.POLICY_PENDING_EXTERNAL):
             raise HTTPException(400, f"订单状态为 {order.status}，无法驳回")
         order.status = OrderStatus.REJECTED
-        order.notes = (order.notes or "") + f"\n驳回: {body.reject_reason or '已驳回'}"
+        order.rejection_reason = body.reject_reason or "已驳回"
         await db.flush()
         await log_audit(db, action="reject_order", entity_type="Order", entity_id=order.id, user=user)
         return {"order_no": order.order_no, "status": order.status}
@@ -316,6 +316,8 @@ async def mcp_approve_inspection(body: MCPApproveInspectionRequest, db: AsyncSes
 
     case = await db.get(InspectionCase, body.case_id)
     if not case:
+        case = (await db.execute(select(InspectionCase).where(InspectionCase.case_no == body.case_id))).scalar_one_or_none()
+    if not case:
         raise HTTPException(404, f"稽查案件 {body.case_id} 不存在")
 
     if body.action != "execute":
@@ -558,7 +560,7 @@ async def mcp_reject_order_policy(body: MCPRejectOrderPolicyRequest, db: AsyncSe
 
     order.status = OrderStatus.REJECTED
     reason = body.reject_reason or "政策审批驳回"
-    order.notes = (order.notes or "") + f"\n政策驳回: {reason}"
+    order.rejection_reason = reason
     await db.flush()
     await log_audit(db, action="reject_order_policy", entity_type="Order", entity_id=order.id, user=user)
     return {"order_no": order.order_no, "status": order.status}
@@ -632,5 +634,25 @@ async def mcp_create_policy_claim(body: MCPCreatePolicyClaimRequest, db: AsyncSe
     )
     db.add(claim)
     await db.flush()
+
+    # 自动从政策申请的 items 创建理赔明细行，链接回 request_item
+    from app.models.policy import PolicyClaimItem
+    from app.models.policy_request_item import PolicyRequestItem
+    request_items = (await db.execute(
+        select(PolicyRequestItem).where(PolicyRequestItem.policy_request_id == pr.id)
+    )).scalars().all()
+    item_count = 0
+    for ri in request_items:
+        db.add(PolicyClaimItem(
+            id=str(uuid.uuid4()),
+            claim_id=claim.id,
+            source_request_item_id=ri.id,
+            declared_amount=ri.total_value,
+        ))
+        item_count += 1
+    if item_count > 0:
+        await db.flush()
+
     await log_audit(db, action="create_policy_claim", entity_type="PolicyClaim", entity_id=claim.id, user=user)
-    return {"claim_id": claim.id, "claim_no": claim.claim_no, "status": claim.status}
+    return {"claim_id": claim.id, "claim_no": claim.claim_no, "status": claim.status,
+            "policy_request_id": pr.id, "items_count": item_count}

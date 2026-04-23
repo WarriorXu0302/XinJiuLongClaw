@@ -63,6 +63,7 @@ async def mcp_create_order(body: MCPCreateOrderRequest, db: AsyncSession = Depen
         id=str(uuid.uuid4()), order_no=f"SO-{ts}-{uuid.uuid4().hex[:6]}",
         customer_id=body.customer_id, salesman_id=body.salesman_id,
         brand_id=brand_id, settlement_mode=body.settlement_mode,
+        settlement_mode_snapshot=body.settlement_mode,
         advance_payer_id=body.advance_payer_id, warehouse_id=body.warehouse_id,
         policy_template_id=tmpl.id, notes=body.notes,
     )
@@ -254,7 +255,7 @@ async def mcp_create_leave(body: MCPCreateLeaveRequest, db: AsyncSession = Depen
         id=str(uuid.uuid4()), request_no=f"LV-{ts}-{uuid.uuid4().hex[:6]}",
         employee_id=body.employee_id, leave_type=body.leave_type,
         start_date=start, end_date=end,
-        total_days=Decimal(str(body.total_days)), reason=body.reason, status="pending",
+        total_days=Decimal(str(body.total_days)), reason=body.reason or "", status="pending",
     )
     db.add(obj)
     await db.flush()
@@ -349,6 +350,7 @@ async def mcp_create_employee(body: MCPCreateEmployeeRequest, db: AsyncSession =
         social_security=Decimal(str(body.social_security)),
         company_social_security=Decimal(str(body.company_social_security)),
         expected_manufacturer_subsidy=Decimal(str(body.expected_manufacturer_subsidy)),
+        status="active",
     )
     db.add(emp)
     await db.flush()
@@ -615,15 +617,20 @@ async def mcp_create_purchase_order(body: MCPCreatePurchaseOrderRequest, db: Asy
         status="pending",
     )
     total = Decimal("0")
-    for it in body.items:
+    for idx, it in enumerate(body.items):
         price = Decimal(str(it["unit_price"]))
         qty = it["quantity"]
+        if qty <= 0:
+            raise HTTPException(400, f"第 {idx+1} 项数量必须大于 0")
+        if price <= 0:
+            raise HTTPException(400, f"第 {idx+1} 项单价必须大于 0")
         total += price * qty
         po.items.append(PurchaseOrderItem(
             id=str(uuid.uuid4()),
             po_id=po.id,
             product_id=it["product_id"],
             quantity=qty,
+            quantity_unit=it.get("quantity_unit", "箱"),
             unit_price=price,
         ))
     po.total_amount = total
@@ -844,6 +851,8 @@ async def mcp_update_order_status(body: MCPUpdateOrderStatusRequest, db: AsyncSe
     require_mcp_role(user, "boss", "warehouse", "salesman")
 
     order = await db.get(Order, body.order_id)
+    if not order:
+        order = (await db.execute(select(Order).where(Order.order_no == body.order_id))).scalar_one_or_none()
     if not order:
         raise HTTPException(404, f"订单 {body.order_id} 不存在")
 
@@ -1455,6 +1464,12 @@ async def mcp_fulfill_policy_materials(body: MCPFulfillPolicyMaterialsRequest, d
     )).scalars().all()
     all_fulfilled = all(i.fulfilled_qty >= i.quantity for i in all_items)
 
+    # 如果所有 item 都已兑付，更新父 PolicyRequest 状态
+    if all_fulfilled:
+        from app.models.base import PolicyRequestStatus
+        if pr.status not in (PolicyRequestStatus.APPROVED, "completed"):
+            pr.status = PolicyRequestStatus.APPROVED
+
     await db.flush()
     await log_audit(db, action="fulfill_policy_materials", entity_type="PolicyRequest",
                     entity_id=body.request_id, user=user)
@@ -1676,6 +1691,9 @@ async def mcp_create_policy_request(body: MCPCreatePolicyRequestRequest, db: Asy
 
     user = db.info.get("mcp_user", {})
     require_mcp_role(user, "boss", "finance", "salesman", "sales_manager")
+
+    if not body.items:
+        raise HTTPException(400, "政策申请明细 items 不能为空，至少需要 1 项")
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     request_no = f"PR-{ts}-{uuid.uuid4().hex[:6]}"

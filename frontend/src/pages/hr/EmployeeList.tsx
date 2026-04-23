@@ -321,9 +321,9 @@ function EmployeeList() {
             <Text type="secondary">固定底薪 / 浮动底薪 / 全勤奖全额由"主属品牌 × 岗位"的薪酬方案决定，请到"薪酬方案"页配置。</Text>
           </div>
           <Row gutter={12}>
-            <Col span={8}><Form.Item name="social_security" label="社保代扣（个人）" tooltip="每月从工资中扣"><InputNumber min={0} style={{ width: '100%' }} addonBefore="¥" /></Form.Item></Col>
-            <Col span={8}><Form.Item name="company_social_security" label="公司代缴社保" tooltip="不扣本人，计入公司成本"><InputNumber min={0} style={{ width: '100%' }} addonBefore="¥" /></Form.Item></Col>
-            <Col span={8}><Form.Item name="expected_manufacturer_subsidy" label="厂家补贴应得（月）" tooltip="每月预期应收厂家补贴总额，用于对账"><InputNumber min={0} style={{ width: '100%' }} addonBefore="¥" /></Form.Item></Col>
+            <Col span={8}><Form.Item name="social_security" label="社保代扣（个人）" tooltip="每月从工资中扣"><InputNumber min={0} style={{ width: '100%' }} prefix="¥" /></Form.Item></Col>
+            <Col span={8}><Form.Item name="company_social_security" label="公司代缴社保" tooltip="不扣本人，计入公司成本"><InputNumber min={0} style={{ width: '100%' }} prefix="¥" /></Form.Item></Col>
+            <Col span={8}><Form.Item name="expected_manufacturer_subsidy" label="厂家补贴应得（月）" tooltip="每月预期应收厂家补贴总额，用于对账"><InputNumber min={0} style={{ width: '100%' }} prefix="¥" /></Form.Item></Col>
           </Row>
           <Form.Item name="status" label="状态" rules={[{ required: true }]}>
             <Select options={[{ value: 'active', label: '在职' }, { value: 'on_leave', label: '休假' }, { value: 'left', label: '离职' }]} />
@@ -335,7 +335,7 @@ function EmployeeList() {
               <Row gutter={12} style={{ marginTop: 8 }}>
                 <Col span={8}><Form.Item name="first_brand" label="品牌"><Select allowClear placeholder="归属品牌" options={brands.map(b => ({ value: b.id, label: b.name }))} /></Form.Item></Col>
                 <Col span={8}><Form.Item name="first_position" label="岗位"><Select allowClear placeholder="岗位" options={positions.map(p => ({ value: p.code, label: p.name }))} /></Form.Item></Col>
-                <Col span={8}><Form.Item name="first_subsidy" label="厂家补贴月额" tooltip="每月厂家补贴固定金额"><InputNumber min={0} style={{ width: '100%' }} addonBefore="¥" /></Form.Item></Col>
+                <Col span={8}><Form.Item name="first_subsidy" label="厂家补贴月额" tooltip="每月厂家补贴固定金额"><InputNumber min={0} style={{ width: '100%' }} prefix="¥" /></Form.Item></Col>
               </Row>
             </div>
           )}
@@ -414,7 +414,7 @@ function EmployeeList() {
                 options={positions.map(p => ({ value: p.code, label: p.name }))} />
             </Form.Item>
             <Form.Item name="manufacturer_subsidy" initialValue={0}>
-              <InputNumber min={0} addonBefore="补贴¥" style={{ width: 140 }} />
+              <InputNumber min={0} prefix="补贴¥" style={{ width: 140 }} />
             </Form.Item>
             <Form.Item name="is_primary" valuePropName="checked">
               <Checkbox disabled={empBPs.length === 0}>设为主</Checkbox>

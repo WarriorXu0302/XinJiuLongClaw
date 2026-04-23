@@ -155,23 +155,23 @@ function SalarySchemeList() {
             <Text strong>底薪模板（主属该品牌×该岗位的员工按此模板发）</Text>
           </div>
           <Form.Item name="fixed_salary" label="固定底薪">
-            <InputNumber style={{ width: '100%' }} min={0} step={100} addonBefore="¥" />
+            <InputNumber style={{ width: '100%' }} min={0} step={100} prefix="¥" />
           </Form.Item>
           <Form.Item name="variable_salary_max" label="浮动底薪上限" tooltip="考核满分时发多少，实发=上限×考核完成率">
-            <InputNumber style={{ width: '100%' }} min={0} step={100} addonBefore="¥" />
+            <InputNumber style={{ width: '100%' }} min={0} step={100} prefix="¥" />
           </Form.Item>
           <Form.Item name="attendance_bonus_full" label="全勤奖全额" tooltip="无迟到/旷工且无请假时发全额；按请假天数 0/1/2/3/4/≥5 梯度扣减">
-            <InputNumber style={{ width: '100%' }} min={0} step={50} addonBefore="¥" />
+            <InputNumber style={{ width: '100%' }} min={0} step={50} prefix="¥" />
           </Form.Item>
           <div style={{ padding: 8, background: '#f0f9ff', borderRadius: 4, margin: '12px 0', fontSize: 12 }}>
             <Text strong>提成率（按销售品牌结算，不分主属兼职）</Text>
           </div>
           <Form.Item name="commission_rate" label="销售提成率（%）" tooltip="按回款金额计算，0 代表该岗位无提成（如财务）">
-            <InputNumber style={{ width: '100%' }} min={0} max={100} step={0.1} addonAfter="%" precision={2} />
+            <InputNumber style={{ width: '100%' }} min={0} max={100} step={0.1} suffix="%" precision={2} />
           </Form.Item>
           {isManager && (
             <Form.Item name="manager_share_rate" label="管理提成率（%）" tooltip="业务经理拿下属业务员回款的提成比例，一般 0.3%">
-              <InputNumber style={{ width: '100%' }} min={0} max={100} step={0.1} addonAfter="%" precision={2} />
+              <InputNumber style={{ width: '100%' }} min={0} max={100} step={0.1} suffix="%" precision={2} />
             </Form.Item>
           )}
         </Form>

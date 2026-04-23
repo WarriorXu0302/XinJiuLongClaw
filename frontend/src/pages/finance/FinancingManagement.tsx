@@ -169,7 +169,7 @@ function FinancingManagement() {
             </Col>
             <Col span={12}>
               <Form.Item name="interest_rate" label="年利率(%)">
-                <InputNumber style={{ width: '100%' }} min={0} max={100} precision={2} addonAfter="%" placeholder="5.50" />
+                <InputNumber style={{ width: '100%' }} min={0} max={100} precision={2} suffix="%" placeholder="5.50" />
               </Form.Item>
             </Col>
           </Row>

@@ -450,10 +450,10 @@ function SalaryRecordList() {
         </div>
         <Form form={form} layout="vertical">
           <Row gutter={12}>
-            <Col span={12}><Form.Item name="fine_deduction" label="罚款"><InputNumber style={{ width: '100%' }} addonBefore="¥" /></Form.Item></Col>
-            <Col span={12}><Form.Item name="bonus_other" label="其他奖金"><InputNumber style={{ width: '100%' }} addonBefore="¥" /></Form.Item></Col>
+            <Col span={12}><Form.Item name="fine_deduction" label="罚款"><InputNumber style={{ width: '100%' }} prefix="¥" /></Form.Item></Col>
+            <Col span={12}><Form.Item name="bonus_other" label="其他奖金"><InputNumber style={{ width: '100%' }} prefix="¥" /></Form.Item></Col>
           </Row>
-          <Form.Item name="actual_pay" label="实发金额（可手工覆盖）" tooltip="留空则按系统计算"><InputNumber style={{ width: '100%' }} addonBefore="¥" /></Form.Item>
+          <Form.Item name="actual_pay" label="实发金额（可手工覆盖）" tooltip="留空则按系统计算"><InputNumber style={{ width: '100%' }} prefix="¥" /></Form.Item>
           <Form.Item name="notes" label="备注"><Input.TextArea rows={2} /></Form.Item>
         </Form>
       </Modal>

@@ -232,13 +232,66 @@ async def mcp_register_payment(body: MCPUploadPaymentRequest, db: AsyncSession =
         select(func.coalesce(func.sum(Receipt.amount), 0)).where(Receipt.order_id == order.id)
     )).scalar_one()
     target = order.customer_paid_amount or order.total_amount
+    # 保存更新前的 payment_status，用于判断是否首次到达 FULLY_PAID
+    prev_status = order.payment_status
     if Decimal(str(total_received)) >= target:
         order.payment_status = PaymentStatus.FULLY_PAID
     elif total_received > 0:
         order.payment_status = PaymentStatus.PARTIALLY_PAID
     await db.flush()
 
-    return {"receipt_no": receipt.receipt_no, "total_received": float(total_received),
+    # ── 订单首次全额回款 → 自动生成 Commission（与 finance.py create_receipt 逻辑一致）──
+    if (prev_status != PaymentStatus.FULLY_PAID
+        and order.payment_status == PaymentStatus.FULLY_PAID
+        and order.salesman_id and order.brand_id):
+        from app.models.user import Commission
+        from app.models.payroll import EmployeeBrandPosition, BrandSalaryScheme
+        # 幂等：同一订单不重复挂
+        existed = (await db.execute(
+            select(Commission).where(Commission.order_id == order.id)
+        )).scalar_one_or_none()
+        if not existed:
+            # 取员工在该品牌的个性化提成率；没有就取品牌+岗位默认
+            ebp = (await db.execute(
+                select(EmployeeBrandPosition).where(
+                    EmployeeBrandPosition.employee_id == order.salesman_id,
+                    EmployeeBrandPosition.brand_id == order.brand_id,
+                )
+            )).scalar_one_or_none()
+            rate = None
+            if ebp and ebp.commission_rate is not None:
+                rate = Decimal(str(ebp.commission_rate))
+            else:
+                scheme = (await db.execute(
+                    select(BrandSalaryScheme).where(
+                        BrandSalaryScheme.brand_id == order.brand_id,
+                        BrandSalaryScheme.position_code == (ebp.position_code if ebp else 'salesman'),
+                    )
+                )).scalar_one_or_none()
+                if scheme:
+                    rate = Decimal(str(scheme.commission_rate))
+            if rate and rate > 0:
+                # 提成基数 = 订单应收（公司实际拿到的钱）
+                # customer_pay/employee_pay → total_amount；company_pay → deal_amount
+                comm_base = order.customer_paid_amount or order.total_amount
+                comm_amount = (Decimal(str(comm_base)) * rate).quantize(Decimal("0.01"))
+                db.add(Commission(
+                    id=str(uuid.uuid4()),
+                    employee_id=order.salesman_id,
+                    brand_id=order.brand_id,
+                    order_id=order.id,
+                    commission_amount=comm_amount,
+                    status='pending',
+                    notes=f"订单{order.order_no} 基数¥{comm_base} × {rate*100}%（{order.settlement_mode}）",
+                ))
+                await db.flush()
+
+    # refresh customer for return info
+    await db.refresh(order, ["customer"])
+    return {"receipt_no": receipt.receipt_no, "order_no": order.order_no,
+            "amount": float(amt),
+            "customer": order.customer.name if order.customer else None,
+            "total_received": float(total_received),
             "target": float(target), "payment_status": order.payment_status}
 
 
@@ -281,7 +334,10 @@ async def mcp_create_customer(body: MCPCreateCustomerRequest, db: AsyncSession =
         db.add(CustomerBrandSalesman(id=str(uuid.uuid4()), customer_id=obj.id,
                                      brand_id=body.brand_id, salesman_id=body.salesman_id))
         await db.flush()
-    return {"customer_id": obj.id, "code": obj.code, "name": obj.name}
+    return {"id": obj.id, "code": obj.code, "name": obj.name,
+            "customer_type": obj.customer_type,
+            "contact_name": obj.contact_name, "contact_phone": obj.contact_phone,
+            "settlement_mode": obj.settlement_mode}
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -428,7 +484,8 @@ async def mcp_create_employee(body: MCPCreateEmployeeRequest, db: AsyncSession =
     db.add(emp)
     await db.flush()
     await log_audit(db, action="create_employee", entity_type="Employee", entity_id=emp.id, user=user)
-    return {"employee_id": emp.id, "employee_no": emp.employee_no, "name": emp.name}
+    return {"id": emp.id, "employee_no": emp.employee_no, "name": emp.name,
+            "position": emp.position, "phone": emp.phone, "status": emp.status}
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -765,7 +822,8 @@ async def mcp_create_purchase_order(body: MCPCreatePurchaseOrderRequest, db: Asy
     db.add(po)
     await db.flush()
     await log_audit(db, action="create_purchase_order", entity_type="PurchaseOrder", entity_id=po.id, user=user)
-    return {"po_no": po.po_no, "total_amount": float(total), "status": po.status}
+    return {"po_no": po.po_no, "supplier": supplier.name, "warehouse": wh.name,
+            "total_amount": float(total), "items_count": len(body.items), "status": po.status}
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -817,7 +875,8 @@ async def mcp_create_expense(body: MCPCreateExpenseRequest, db: AsyncSession = D
     db.add(claim)
     await db.flush()
     await log_audit(db, action="create_expense", entity_type="ExpenseClaim", entity_id=claim.id, user=user)
-    return {"claim_no": claim.claim_no, "amount": float(claim.amount), "status": claim.status}
+    return {"claim_no": claim.claim_no, "amount": float(claim.amount), "status": claim.status,
+            "brand": brand.name, "category": body.category, "description": body.description}
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -930,6 +989,8 @@ async def mcp_create_inspection_case(body: MCPCreateInspectionCaseRequest, db: A
     await log_audit(db, action="create_inspection_case", entity_type="InspectionCase", entity_id=case.id, user=user)
     return {
         "case_no": case.case_no, "direction": case.direction,
+        "case_type": case.case_type, "quantity": qty,
+        "quantity_unit": body.quantity_unit or "瓶",
         "profit_loss": float(profit_loss), "status": case.status,
     }
 
@@ -1008,8 +1069,13 @@ async def mcp_create_sales_target(body: MCPCreateSalesTargetRequest, db: AsyncSe
     )
     db.add(target)
     await db.flush()
+    # Resolve human-readable names for return
+    brand_name = brand.name if body.brand_id and brand else None
+    emp_name = emp.name if body.employee_id and emp else None
     return {
         "target_id": target.id, "level": target.target_level,
+        "target_year": target.target_year, "target_month": target.target_month,
+        "brand": brand_name, "employee": emp_name,
         "sales_target": float(target.sales_target),
         "receipt_target": float(target.receipt_target),
         "status": target.status,
@@ -1044,17 +1110,50 @@ async def mcp_update_order_status(body: MCPUpdateOrderStatusRequest, db: AsyncSe
     action = body.action
 
     if action == "ship":
-        # 发货：approved → shipped
+        # 发货：approved → shipped（与 orders.py ship_order 逻辑一致）
         if order.status != OrderStatus.APPROVED:
             raise HTTPException(400, f"订单状态为 {order.status}，需要 approved 才能发货")
+        # ── 政策审批校验：必须有已审批的政策申请才能出库 ──
+        from app.models.policy import PolicyRequest
+        policy_req = (await db.execute(
+            select(PolicyRequest).where(
+                PolicyRequest.order_id == order.id,
+                PolicyRequest.status == "approved",
+            )
+        )).scalar_one_or_none()
+        if not policy_req:
+            raise HTTPException(400, f"无法出库：订单 {order.order_no} 没有已审批的政策申请，请先提交政策审批")
         order.status = OrderStatus.SHIPPED
         order.shipped_at = now
     elif action == "confirm-delivery":
-        # 确认送达：shipped → delivered
+        # 确认送达：shipped → delivered（与 orders.py confirm_delivery 逻辑一致）
         if order.status != OrderStatus.SHIPPED:
             raise HTTPException(400, f"订单状态为 {order.status}，需要 shipped 才能确认送达")
         order.status = OrderStatus.DELIVERED
         order.delivered_at = now
+        # ── 为信用客户自动生成应收（与 orders.py _ensure_order_receivable 逻辑一致）──
+        from app.models.customer import Customer, Receivable
+        from app.models.base import CustomerSettlementMode
+        from datetime import date, timedelta
+        customer = await db.get(Customer, order.customer_id) if order.customer_id else None
+        if customer and customer.settlement_mode == CustomerSettlementMode.CREDIT:
+            existing_ar = (await db.execute(
+                select(Receivable).where(Receivable.order_id == order.id)
+            )).scalar_one_or_none()
+            if not existing_ar:
+                due = date.today() + timedelta(days=int(customer.credit_days or 0))
+                ar_amount = order.customer_paid_amount if order.customer_paid_amount else order.total_amount
+                if ar_amount and ar_amount > 0:
+                    ar_ts = now.strftime("%Y%m%d%H%M%S")
+                    db.add(Receivable(
+                        id=str(uuid.uuid4()),
+                        receivable_no=f"AR-{ar_ts}-{uuid.uuid4().hex[:6]}",
+                        customer_id=customer.id,
+                        order_id=order.id,
+                        brand_id=order.brand_id,
+                        amount=float(ar_amount),
+                        due_date=due,
+                    ))
     elif action == "cancel":
         # 取消：pending / approved → rejected
         if order.status not in (OrderStatus.PENDING, OrderStatus.APPROVED,
@@ -1067,7 +1166,10 @@ async def mcp_update_order_status(body: MCPUpdateOrderStatusRequest, db: AsyncSe
 
     await db.flush()
     await log_audit(db, action=f"order_{action}", entity_type="Order", entity_id=order.id, user=user)
-    return {"order_id": order.id, "order_no": order.order_no, "status": order.status}
+    await db.refresh(order, ["customer"])
+    return {"order_id": order.id, "order_no": order.order_no, "status": order.status,
+            "customer": order.customer.name if order.customer else None,
+            "total_amount": float(order.total_amount) if order.total_amount else 0}
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1402,6 +1504,7 @@ async def mcp_create_policy_template(body: MCPCreatePolicyTemplateRequest, db: A
     await log_audit(db, action="create_policy_template", entity_type="PolicyTemplate", entity_id=tmpl.id, user=user)
     return {
         "id": tmpl.id, "code": tmpl.code, "name": tmpl.name,
+        "brand_id": tmpl.brand_id, "min_cases": tmpl.min_cases,
         "required_unit_price": float(tmpl.required_unit_price),
         "customer_unit_price": float(tmpl.customer_unit_price),
         "total_policy_value": float(tmpl.total_policy_value),
@@ -1420,8 +1523,15 @@ class MCPPaySalaryRequest(BaseModel):
 
 @router.post("/pay-salary")
 async def mcp_pay_salary(body: MCPPaySalaryRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 发放工资。单条或批量（按月份批量发放所有已审批工资单）。"""
-    from app.models.payroll import SalaryRecord
+    """AI 发放工资。单条或批量（按月份批量发放所有已审批工资单）。
+    完整执行（与 payroll.py pay_salary / batch_pay_salary 一致）：
+    1. 从员工主属品牌现金账户扣款
+    2. 记录资金流水
+    3. 升级/补建厂家补贴应收为 advanced
+    """
+    from app.models.payroll import SalaryRecord, EmployeeBrandPosition, ManufacturerSalarySubsidy
+    from app.models.product import Account
+    from app.api.routes.accounts import record_fund_flow
     from datetime import datetime, timezone
 
     user = db.info.get("mcp_user", {})
@@ -1429,6 +1539,86 @@ async def mcp_pay_salary(body: MCPPaySalaryRequest, db: AsyncSession = Depends(g
 
     now = datetime.now(timezone.utc)
     paid_count = 0
+    total_paid = Decimal("0")
+
+    async def _pay_single_record(rec: SalaryRecord) -> None:
+        """执行单条工资发放的完整逻辑"""
+        nonlocal paid_count, total_paid
+        if rec.actual_pay is None or rec.actual_pay <= 0:
+            rec.status = "paid"
+            rec.paid_at = now
+            rec.paid_by = user.get("employee_id")
+            paid_count += 1
+            return
+
+        # 找员工主属品牌现金账户进行扣款
+        primary_ebp = (await db.execute(
+            select(EmployeeBrandPosition).where(
+                EmployeeBrandPosition.employee_id == rec.employee_id,
+                EmployeeBrandPosition.is_primary == True,
+            )
+        )).scalar_one_or_none()
+        if primary_ebp:
+            cash_acc = (await db.execute(
+                select(Account).where(
+                    Account.brand_id == primary_ebp.brand_id,
+                    Account.account_type == 'cash',
+                    Account.level == 'project',
+                )
+            )).scalar_one_or_none()
+            if cash_acc:
+                if cash_acc.balance < rec.actual_pay:
+                    raise HTTPException(400,
+                        f"品牌现金账户余额不足：{cash_acc.name} 余额 ¥{cash_acc.balance}，需付 ¥{rec.actual_pay}")
+                cash_acc.balance -= rec.actual_pay
+                emp_name = rec.employee.name if rec.employee else rec.employee_id[:8]
+                await record_fund_flow(
+                    db, account_id=cash_acc.id, flow_type='debit',
+                    amount=rec.actual_pay, balance_after=cash_acc.balance,
+                    related_type='salary_payment', related_id=rec.id,
+                    notes=f"工资发放 {emp_name} {rec.period}",
+                    created_by=user.get("employee_id"),
+                    brand_id=primary_ebp.brand_id,
+                )
+
+        # 升级/补建厂家补贴应收
+        ebps_with_subsidy = (await db.execute(
+            select(EmployeeBrandPosition).where(
+                EmployeeBrandPosition.employee_id == rec.employee_id,
+                EmployeeBrandPosition.manufacturer_subsidy > 0,
+            )
+        )).scalars().all()
+        for ebp in ebps_with_subsidy:
+            existing = (await db.execute(
+                select(ManufacturerSalarySubsidy).where(
+                    ManufacturerSalarySubsidy.employee_id == rec.employee_id,
+                    ManufacturerSalarySubsidy.brand_id == ebp.brand_id,
+                    ManufacturerSalarySubsidy.period == rec.period,
+                )
+            )).scalar_one_or_none()
+            if existing:
+                if existing.status == 'pending':
+                    existing.status = 'advanced'
+                    existing.advanced_at = now
+                    existing.salary_record_id = rec.id
+                    existing.subsidy_amount = ebp.manufacturer_subsidy
+            else:
+                db.add(ManufacturerSalarySubsidy(
+                    id=str(uuid.uuid4()),
+                    employee_id=rec.employee_id,
+                    brand_id=ebp.brand_id,
+                    salary_record_id=rec.id,
+                    period=rec.period,
+                    subsidy_amount=ebp.manufacturer_subsidy,
+                    status='advanced',
+                    advanced_at=now,
+                ))
+
+        rec.status = "paid"
+        rec.paid_at = now
+        rec.paid_by = user.get("employee_id")
+        paid_count += 1
+        total_paid += Decimal(str(rec.actual_pay))
 
     if body.batch_mode:
         # 批量模式：按月份发放所有 approved 的工资单
@@ -1443,10 +1633,7 @@ async def mcp_pay_salary(body: MCPPaySalaryRequest, db: AsyncSession = Depends(g
         if not records:
             raise HTTPException(400, f"{body.period} 没有待发放（approved）的工资单")
         for rec in records:
-            rec.status = "paid"
-            rec.paid_at = now
-            rec.paid_by = user.get("employee_id")
-            paid_count += 1
+            await _pay_single_record(rec)
     else:
         # 单条模式
         if not body.salary_record_id:
@@ -1456,15 +1643,17 @@ async def mcp_pay_salary(body: MCPPaySalaryRequest, db: AsyncSession = Depends(g
             raise HTTPException(404, f"工资单 {body.salary_record_id} 不存在")
         if rec.status != "approved":
             raise HTTPException(400, f"工资单状态为 {rec.status}，需要 approved 才能发放")
-        rec.status = "paid"
-        rec.paid_at = now
-        rec.paid_by = user.get("employee_id")
-        paid_count = 1
+        await _pay_single_record(rec)
 
     await db.flush()
     await log_audit(db, action="pay_salary", entity_type="SalaryRecord",
                     entity_id=body.salary_record_id or f"batch:{body.period}", user=user)
-    return {"paid_count": paid_count, "period": body.period}
+    result = {"paid_count": paid_count, "period": body.period, "total_paid": float(total_paid)}
+    if not body.batch_mode and rec:
+        await db.refresh(rec, ["employee"])
+        result["employee_name"] = rec.employee.name if rec.employee else None
+        result["actual_pay"] = float(rec.actual_pay) if rec.actual_pay else 0
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════════

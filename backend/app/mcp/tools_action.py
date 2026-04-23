@@ -734,7 +734,9 @@ async def mcp_update_customer(body: MCPUpdateCustomerRequest, db: AsyncSession =
         raise HTTPException(400, "至少提供一个待更新字段")
     await db.flush()
     await log_audit(db, action="update_customer", entity_type="Customer", entity_id=cust.id, user=user)
-    return {"customer_id": cust.id, "updated_fields": updated_fields}
+    return {"customer_id": cust.id, "name": cust.name, "contact_name": cust.contact_name,
+            "contact_phone": cust.contact_phone, "settlement_mode": cust.settlement_mode,
+            "updated_fields": updated_fields}
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -753,7 +755,7 @@ class MCPCreatePurchaseOrderRequest(BaseModel):
 async def mcp_create_purchase_order(body: MCPCreatePurchaseOrderRequest, db: AsyncSession = Depends(get_mcp_db)):
     """AI 创建采购单。状态为 pending，需审批后才能执行。"""
     from app.models.purchase import PurchaseOrder, PurchaseOrderItem
-    from app.models.product import Supplier, Brand, Warehouse
+    from app.models.product import Product, Supplier, Brand, Warehouse
     from datetime import datetime, timezone
     user = db.info.get("mcp_user", {})
     require_mcp_role(user, "boss", "purchase", "warehouse")
@@ -809,11 +811,20 @@ async def mcp_create_purchase_order(body: MCPCreatePurchaseOrderRequest, db: Asy
             raise HTTPException(400, f"第 {idx+1} 项数量必须大于 0")
         if price <= 0:
             raise HTTPException(400, f"第 {idx+1} 项单价必须大于 0")
+        # product_id fallback: UUID → code → name
+        pid = it["product_id"]
+        prod = await db.get(Product, pid)
+        if not prod:
+            prod = (await db.execute(select(Product).where(Product.code == pid))).scalar_one_or_none()
+        if not prod:
+            prod = (await db.execute(select(Product).where(Product.name == pid))).scalar_one_or_none()
+        if not prod:
+            raise HTTPException(404, f"商品 {pid} 不存在（第 {idx+1} 项）")
         total += price * qty
         po.items.append(PurchaseOrderItem(
             id=str(uuid.uuid4()),
             po_id=po.id,
-            product_id=it["product_id"],
+            product_id=prod.id,
             quantity=qty,
             quantity_unit=it.get("quantity_unit", "箱"),
             unit_price=price,

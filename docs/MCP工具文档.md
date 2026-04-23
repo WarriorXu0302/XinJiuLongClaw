@@ -12,10 +12,10 @@ MCP（Model Context Protocol）是系统暴露给 AI Agent 的工具集，让 AI
 
 | 指标 | 数量 |
 |---|---|
-| 总工具数 | 64 |
+| 总工具数 | 86 |
 | 查询工具 | 24 |
-| 操作工具 | 23 |
-| 审批工具 | 11 |
+| 操作工具 | 39 |
+| 审批工具 | 17 |
 | 飞书旧版（legacy） | 6 |
 
 ### 1.2 调用方
@@ -415,9 +415,11 @@ POST /mcp/query-warehouses
 
 ---
 
-## 4. 操作工具（23 个）
+## 4. 操作工具（39 个）
 
 写入数据，受 RLS + 角色约束。
+
+> **ID 回退查找**：所有操作工具的 ID 参数（customer_id / brand_id / product_id / salesman_id 等）支持三种查找方式：UUID、业务编码、名称。系统按 UUID → code → name 顺序自动匹配。
 
 ### 4.1 create-order — 创建订单
 
@@ -822,9 +824,257 @@ POST /mcp/settle-commission
 
 将提成状态设为 `settled`，记录结算时间。
 
+### 4.24 create-policy-template — 创建政策模板
+
+角色：`boss / finance`
+
+```json
+POST /mcp/create-policy-template
+{
+  "code": "QHL-2026-A1",
+  "name": "青花郎53度渠道政策",
+  "brand_id": "品牌 ID",
+  "required_unit_price": 885,
+  "customer_unit_price": 650,
+  "min_cases": 10,
+  "total_policy_value": 8500
+}
+```
+
+编码全局唯一。建单时需要 `policy_template_id`。
+
+### 4.25 pay-salary — 发放工资
+
+角色：`boss / finance`
+
+```json
+POST /mcp/pay-salary
+{
+  "salary_record_id": "可选，单条发放",
+  "batch_mode": false,
+  "period": "可选，批量发放月份（如 2026-04）"
+}
+```
+
+支持单条（`salary_record_id`）或按月批量（`batch_mode=true` + `period`）发放所有已审批工资单。从品牌现金账户扣款。
+
+### 4.26 batch-submit-salary — 批量提交工资审批
+
+角色：`boss / hr`
+
+```json
+POST /mcp/batch-submit-salary
+{
+  "period": "2026-04"
+}
+```
+
+将指定月份所有 `draft` 工资单批量提交为 `pending_approval`。
+
+### 4.27 create-salary-scheme — 创建/更新薪酬方案
+
+角色：`boss / hr`
+
+```json
+POST /mcp/create-salary-scheme
+{
+  "brand_id": "品牌 ID",
+  "position_code": "salesman",
+  "fixed_salary": 3000,
+  "variable_salary_max": 1500,
+  "attendance_bonus_full": 200,
+  "commission_rate": 0.01,
+  "manager_share_rate": 0.003
+}
+```
+
+Upsert 模式：同品牌+岗位已存在则更新，否则新建。
+
+### 4.28 confirm-subsidy-arrival — 确认厂家工资补贴到账
+
+角色：`boss / finance`
+
+```json
+POST /mcp/confirm-subsidy-arrival
+{
+  "subsidy_ids": ["补贴记录ID1", "补贴记录ID2"]
+}
+```
+
+批量设置补贴状态为 `reimbursed` 并记录到账时间。
+
+### 4.29 fulfill-policy-materials — 更新政策物料兑付
+
+角色：`boss / finance`
+
+```json
+POST /mcp/fulfill-policy-materials
+{
+  "items": [
+    {"item_id": "政策明细项 ID", "fulfilled_qty": 10}
+  ]
+}
+```
+
+逐条更新 PolicyRequestItem 的 `fulfilled_qty`。
+
+### 4.30 confirm-policy-arrival — 确认政策到账
+
+角色：`boss / finance`
+
+```json
+POST /mcp/confirm-policy-arrival
+{
+  "policy_request_id": "政策申请 ID"
+}
+```
+
+将政策申请状态设为 approved。
+
+### 4.31 confirm-policy-fulfill — 确认政策兑付完成
+
+角色：`boss / finance`
+
+```json
+POST /mcp/confirm-policy-fulfill
+{
+  "policy_request_id": "政策申请 ID"
+}
+```
+
+标记政策申请及所有未兑付项为 fulfilled。
+
+### 4.32 update-order — 编辑订单
+
+角色：`boss / salesman / sales_manager`
+
+```json
+POST /mcp/update-order
+{
+  "order_no": "SO-20260419-xxxxxx",
+  "customer_id": "可选",
+  "salesman_id": "可选",
+  "notes": "可选",
+  "warehouse_id": "可选"
+}
+```
+
+仅 `pending` 状态可编辑。只更新传入的非空字段。
+
+### 4.33 submit-order-policy — 提交订单政策审批
+
+角色：`boss / salesman / sales_manager`
+
+```json
+POST /mcp/submit-order-policy
+{
+  "order_no": "SO-20260419-xxxxxx"
+}
+```
+
+`pending` → `policy_pending_internal`。
+
+### 4.34 resubmit-order — 重新提交被驳回的订单
+
+角色：`boss / salesman / sales_manager`
+
+```json
+POST /mcp/resubmit-order
+{
+  "order_no": "SO-20260419-xxxxxx"
+}
+```
+
+`policy_rejected` → `pending`。
+
+### 4.35 create-policy-request — 创建政策申请
+
+角色：`boss / finance / salesman / sales_manager`
+
+```json
+POST /mcp/create-policy-request
+{
+  "brand_id": "品牌 ID",
+  "order_id": "可选，关联订单",
+  "policy_template_id": "可选，关联政策模板",
+  "scheme_no": "可选，方案编号",
+  "items": [
+    {"product_id": "商品 ID", "quantity": 5, "quantity_unit": "箱"}
+  ]
+}
+```
+
+创建 PolicyRequest + PolicyRequestItem，状态 `draft`。
+
+### 4.36 bind-customer-brand-salesman — 绑定客户品牌业务员
+
+角色：`boss / salesman / sales_manager`
+
+```json
+POST /mcp/bind-customer-brand-salesman
+{
+  "customer_id": "客户 ID/编码/名称",
+  "brand_id": "品牌 ID/编码/名称",
+  "salesman_id": "业务员 ID/工号/姓名"
+}
+```
+
+已存在（同客户+品牌）则更新业务员，否则新建。支持 ID 回退查找。
+
+### 4.37 create-manufacturer-settlement — 创建厂家结算记录
+
+角色：`boss / finance`
+
+```json
+POST /mcp/create-manufacturer-settlement
+{
+  "brand_id": "品牌 ID",
+  "settlement_date": "2026-04-20",
+  "amount": 50000,
+  "notes": "可选"
+}
+```
+
+记录厂家打款，状态 `pending`。后续通过 `confirm-settlement-allocation` 分配到理赔单。
+
+### 4.38 submit-financing-repayment — 提交融资还款申请
+
+角色：`boss / finance`
+
+```json
+POST /mcp/submit-financing-repayment
+{
+  "financing_order_id": "融资单 ID",
+  "principal_amount": 100000,
+  "payment_account_id": "品牌现金账户 ID",
+  "f_class_amount": 0,
+  "notes": "可选"
+}
+```
+
+自动计算利息（`principal × rate / 100 × days / 365`），创建 `pending` 状态还款单。
+
+### 4.39 create-market-cleanup-case — 创建市场清理案件
+
+角色：`boss / finance`
+
+```json
+POST /mcp/create-market-cleanup-case
+{
+  "brand_id": "品牌 ID",
+  "case_type": "market_cleanup",
+  "product_id": "可选",
+  "quantity": "可选，瓶数",
+  "quantity_unit": "瓶",
+  "notes": "可选"
+}
+```
+
+状态 `pending`，需审批后执行。
+
 ---
 
-## 5. 审批工具（11 个）
+## 5. 审批工具（17 个）
 
 审批类工具，按各自角色要求控制访问。
 
@@ -985,6 +1235,96 @@ POST /mcp/approve-expense-claim
 
 approve（通过）/ reject（驳回）/ pay（标记已付）。
 
+### 5.12 approve-order — 审批订单
+
+角色：`boss`
+
+```json
+POST /mcp/approve-order
+{
+  "order_no": "SO-20260419-xxxxxx",
+  "action": "approve",
+  "need_external": false,
+  "reject_reason": "可选，驳回时填"
+}
+```
+
+- `action=approve`：pending 自动先提交再审批（一步到位 → approved）
+- `action=reject`：驳回 → policy_rejected
+- `need_external=true`：经内部审批后还需厂家审批（→ policy_pending_external）
+
+### 5.13 reject-order-policy — 驳回订单政策
+
+角色：`boss`
+
+```json
+POST /mcp/reject-order-policy
+{
+  "order_no": "SO-20260419-xxxxxx",
+  "reject_reason": "可选"
+}
+```
+
+`policy_pending_internal` / `policy_pending_external` → `policy_rejected`。boss 专属。
+
+### 5.14 confirm-settlement-allocation — 确认厂家结算分配
+
+角色：`boss / finance`
+
+```json
+POST /mcp/confirm-settlement-allocation
+{
+  "settlement_id": "厂家结算单 ID",
+  "claim_id": "政策理赔单 ID",
+  "allocated_amount": 15000
+}
+```
+
+将厂家到账金额分配到指定政策理赔单。
+
+### 5.15 create-policy-claim — 创建政策理赔单
+
+角色：`boss / finance`
+
+```json
+POST /mcp/create-policy-claim
+{
+  "policy_request_id": "政策申请 ID",
+  "claim_type": "standard",
+  "notes": "可选"
+}
+```
+
+自动生成 `claim_no`，从关联的政策申请明细创建理赔行项目。状态 `draft`。
+
+### 5.16 approve-policy-claim — 审批政策理赔
+
+角色：`boss / finance`
+
+```json
+POST /mcp/approve-policy-claim
+{
+  "claim_id": "理赔单 ID 或 claim_no",
+  "action": "approve / reject",
+  "reject_reason": "可选，驳回时填"
+}
+```
+
+审批政策理赔单（PolicyClaim）。注意与 approve-expense-claim（费用报销）不同。
+
+### 5.17 complete-order — 完成订单
+
+角色：`boss / finance`
+
+```json
+POST /mcp/complete-order
+{
+  "order_no": "SO-20260419-xxxxxx"
+}
+```
+
+`delivered` → `completed`。与 `confirm-order-payment` 的区别：**不要求 fully_paid 前置条件**。
+
 ---
 
 ## 6. 飞书专用工具（6 个，legacy 保留）
@@ -1076,7 +1416,21 @@ AI 解析自然语言，匹配客户/商品/政策，创建订单。
 
 ---
 
-## 7. 错误码
+## 7. ID 回退查找（Fallback Lookup）
+
+所有操作工具的 ID 参数（customer_id / brand_id / product_id / salesman_id 等）支持三种查找方式：
+
+| 查找顺序 | 方式 | 示例 |
+|---|---|---|
+| 1 | UUID 精确匹配 | `"a1b2c3d4-..."` |
+| 2 | 业务编码匹配 | `"C-001"`（客户编码）、`"QHL"`（品牌编码）、`"E-001"`（工号） |
+| 3 | 名称匹配 | `"张三烟酒"`（客户名）、`"青花郎"`（品牌名）、`"李四"`（员工名） |
+
+涉及 13 个工具、22 个参数。Agent 无需先查 UUID 再操作，可直接传名称或编码。
+
+---
+
+## 8. 错误码
 
 | HTTP 状态 | 说明 |
 |---|---|
@@ -1094,7 +1448,7 @@ AI 解析自然语言，匹配客户/商品/政策，创建订单。
 
 ---
 
-## 8. Bridge 超时与错误处理
+## 9. Bridge 超时与错误处理
 
 MCP Streamable-HTTP bridge（`/mcp/stream`）通过 loopback HTTP 调用转发到内部 REST 端点。`call_tool` 执行时用 `httpx.AsyncClient(timeout=30.0)` 发起请求，外层 try-except 捕获两种异常：
 
@@ -1107,7 +1461,7 @@ Agent 收到上述友好错误文本后可自行决定是否重试。
 
 ---
 
-## 9. 安全设计
+## 10. 安全设计
 
 | 层面 | 机制 |
 |---|---|
@@ -1119,7 +1473,7 @@ Agent 收到上述友好错误文本后可自行决定是否重试。
 
 ---
 
-## 10. Agent 调用示例
+## 11. Agent 调用示例
 
 ### Claude Code 查库存
 
@@ -1156,7 +1510,7 @@ curl -X POST http://localhost:8001/mcp/query-barcode-tracing \
 
 ---
 
-## 11. 模块结构
+## 12. 模块结构
 
 ```
 backend/app/mcp/
@@ -1164,10 +1518,10 @@ backend/app/mcp/
 ├── auth.py              # 双认证（JWT / Feishu Open ID）
 ├── deps.py              # MCP 专用 DB 依赖（RLS 上下文注入）
 ├── bridge.py            # Streamable-HTTP bridge（loopback 转发 + 超时处理）
-├── catalog.py           # 工具目录（64 个工具，供 bridge 列出 + 路由）
+├── catalog.py           # 工具目录（86 个工具，供 bridge 列出 + 路由）
 ├── tools_query.py       # 24 个查询工具
-├── tools_action.py      # 23 个操作工具
-├── tools_approval.py    # 11 个审批工具
+├── tools_action.py      # 39 个操作工具
+├── tools_approval.py    # 17 个审批工具
 └── tools.py             # 6 个飞书专用工具（legacy 保留）
 ```
 

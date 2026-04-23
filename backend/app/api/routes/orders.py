@@ -144,6 +144,17 @@ async def create_order(body: OrderCreate, user: CurrentUser, db: AsyncSession = 
         order.items.append(oi)
         total += guide_price * bottles
         total_bottles += bottles
+
+    # 政策模板箱数校验：min_cases = 严格最低箱数（白酒政策按件匹配）
+    total_cases = sum(
+        it.quantity if it.quantity_unit == "箱" else 0
+        for it in body.items
+    )
+    if tmpl.min_cases and total_cases < tmpl.min_cases:
+        raise HTTPException(400, f"政策模板要求最低 {tmpl.min_cases} 箱，当前 {total_cases} 箱")
+    if tmpl.max_cases and total_cases > tmpl.max_cases:
+        raise HTTPException(400, f"政策模板最高 {tmpl.max_cases} 箱，当前 {total_cases} 箱")
+
     order.total_amount = total
 
     # 客户到手价与政策差
@@ -353,7 +364,7 @@ async def ship_order(order_id: str, user: CurrentUser, db: AsyncSession = Depend
     Validates that a matching policy request exists for this order.
     No policy = cannot ship.
     """
-    require_role(user, "boss", "warehouse")
+    require_role(user, "boss", "warehouse", "salesman")
     from app.models.policy import PolicyRequest
 
     order = await db.get(Order, order_id)

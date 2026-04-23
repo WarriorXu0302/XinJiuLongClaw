@@ -1,6 +1,9 @@
 """
 MCP 审批类工具 — 仅 boss/admin 可操作。
 """
+import uuid
+from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -63,6 +66,23 @@ async def mcp_approve_order(body: MCPApproveOrderRequest, db: AsyncSession = Dep
         await db.flush()
     else:
         raise HTTPException(400, f"订单状态为 {order.status}，无法审批（需要 pending/policy_pending_internal/policy_pending_external）")
+
+    # 审批通过后自动创建+审批政策申请（发货前必须有 approved 的 PolicyRequest）
+    if order.status == OrderStatus.APPROVED:
+        from app.models.policy import PolicyRequest
+        existing_pr = (await db.execute(
+            select(PolicyRequest).where(PolicyRequest.order_id == order.id)
+        )).scalar_one_or_none()
+        if not existing_pr:
+            pr = PolicyRequest(
+                id=str(uuid.uuid4()),
+                brand_id=order.brand_id,
+                order_id=order.id,
+                request_source="order",
+                status="approved",
+            )
+            db.add(pr)
+            await db.flush()
 
     await log_audit(db, action="approve_order", entity_type="Order", entity_id=order.id, user=user)
     await db.refresh(order, ["customer"])

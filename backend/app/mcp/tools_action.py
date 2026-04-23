@@ -50,8 +50,33 @@ async def mcp_create_order(body: MCPCreateOrderRequest, db: AsyncSession = Depen
         if not emp_id:
             raise HTTPException(400, "当前用户未绑定员工档案，无法建单")
         body.salesman_id = emp_id
+    else:
+        # boss/manager 指定业务员：支持 UUID、工号、姓名查找
+        from app.models.user import Employee
+        emp = await db.get(Employee, body.salesman_id)
+        if not emp:
+            emp = (await db.execute(select(Employee).where(Employee.employee_no == body.salesman_id))).scalar_one_or_none()
+        if not emp:
+            emp = (await db.execute(select(Employee).where(Employee.name == body.salesman_id))).scalar_one_or_none()
+        if not emp:
+            raise HTTPException(404, f"业务员 {body.salesman_id} 不存在")
+        body.salesman_id = emp.id
+
+    # customer_id 支持 UUID 或 code 查找
+    from app.models.customer import Customer
+    cust = await db.get(Customer, body.customer_id)
+    if not cust:
+        cust = (await db.execute(select(Customer).where(Customer.code == body.customer_id))).scalar_one_or_none()
+    if not cust:
+        cust = (await db.execute(select(Customer).where(Customer.name == body.customer_id))).scalar_one_or_none()
+    if not cust:
+        raise HTTPException(404, f"客户 {body.customer_id} 不存在（支持 UUID/编码/名称查找）")
+    body.customer_id = cust.id
 
     tmpl = await db.get(PolicyTemplate, body.policy_template_id)
+    if not tmpl:
+        from app.models.policy_template import PolicyTemplate as PT2
+        tmpl = (await db.execute(select(PT2).where(PT2.code == body.policy_template_id))).scalar_one_or_none()
     if not tmpl or not tmpl.is_active:
         raise HTTPException(400, "政策模板不存在或已停用")
     guide_price = Decimal(str(tmpl.required_unit_price or 0))
@@ -70,12 +95,19 @@ async def mcp_create_order(body: MCPCreateOrderRequest, db: AsyncSession = Depen
     total = Decimal("0")
     total_bottles = 0
     for it in body.items:
-        prod = await db.get(Product, it["product_id"])
-        bpc = prod.bottles_per_case if prod else 6
+        pid = it["product_id"]
+        prod = await db.get(Product, pid)
+        if not prod:
+            prod = (await db.execute(select(Product).where(Product.code == pid))).scalar_one_or_none()
+        if not prod:
+            prod = (await db.execute(select(Product).where(Product.name == pid))).scalar_one_or_none()
+        if not prod:
+            raise HTTPException(404, f"商品 {pid} 不存在（支持 UUID/编码/名称）")
+        bpc = prod.bottles_per_case or 6
         bottles = it["quantity"] * bpc if it.get("quantity_unit", "箱") == "箱" else it["quantity"]
         order.items.append(OrderItem(
             id=str(uuid.uuid4()), order_id=order.id,
-            product_id=it["product_id"], quantity=it["quantity"],
+            product_id=prod.id, quantity=it["quantity"],
             quantity_unit=it.get("quantity_unit", "箱"), unit_price=guide_price,
         ))
         total += guide_price * bottles

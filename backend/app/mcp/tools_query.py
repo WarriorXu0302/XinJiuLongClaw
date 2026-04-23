@@ -112,7 +112,7 @@ async def query_customers(body: QueryCustomersRequest, db: AsyncSession = Depend
         stmt = stmt.where(Customer.name.ilike(kw) | Customer.contact_name.ilike(kw))
     stmt = stmt.order_by(Customer.created_at.desc()).limit(limit)
     rows = (await db.execute(stmt)).scalars().all()
-    return [{"code": c.code, "name": c.name, "contact": c.contact_name, "phone": getattr(c, 'contact_phone', None), "settlement": c.settlement_mode} for c in rows]
+    return [{"id": c.id, "code": c.code, "name": c.name, "customer_type": c.customer_type, "contact": c.contact_name, "phone": getattr(c, 'contact_phone', None), "settlement": c.settlement_mode} for c in rows]
 
 
 # ═══════════════════════════════════════════════════════════════════

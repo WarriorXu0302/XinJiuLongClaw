@@ -368,11 +368,16 @@ async def mcp_create_leave(body: MCPCreateLeaveRequest, db: AsyncSession = Depen
         if not emp_id:
             raise HTTPException(400, "当前用户未绑定员工档案")
         body.employee_id = emp_id
-    # 校验员工存在
+    # 校验员工存在（支持 UUID/工号/姓名）
     from app.models.user import Employee
     emp = await db.get(Employee, body.employee_id)
     if not emp:
+        emp = (await db.execute(select(Employee).where(Employee.employee_no == body.employee_id))).scalar_one_or_none()
+    if not emp:
+        emp = (await db.execute(select(Employee).where(Employee.name == body.employee_id))).scalar_one_or_none()
+    if not emp:
         raise HTTPException(400, f"员工 {body.employee_id} 不存在")
+    body.employee_id = emp.id
     # 日期解析
     try:
         start = date.fromisoformat(body.start_date)

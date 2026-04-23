@@ -25,7 +25,7 @@ router = APIRouter()
 class MCPCreateOrderRequest(BaseModel):
     customer_id: str
     salesman_id: str
-    policy_template_id: str
+    policy_template_id: Optional[str] = None  # 可选：不传则按品牌+箱数自动匹配
     settlement_mode: str  # customer_pay / employee_pay / company_pay
     items: list[dict]  # [{product_id, quantity, quantity_unit}]
     deal_unit_price: Optional[float] = None
@@ -73,15 +73,48 @@ async def mcp_create_order(body: MCPCreateOrderRequest, db: AsyncSession = Depen
         raise HTTPException(404, f"客户 {body.customer_id} 不存在（支持 UUID/编码/名称查找）")
     body.customer_id = cust.id
 
-    tmpl = await db.get(PolicyTemplate, body.policy_template_id)
-    if not tmpl:
-        from app.models.policy_template import PolicyTemplate as PT2
-        tmpl = (await db.execute(select(PT2).where(PT2.code == body.policy_template_id))).scalar_one_or_none()
-    if not tmpl or not tmpl.is_active:
-        raise HTTPException(400, "政策模板不存在或已停用")
+    # 先解析商品，确定品牌和总箱数
+    products = []
+    brand_id = None
+    total_cases = 0
+    for it in body.items:
+        pid = it["product_id"]
+        prod = await db.get(Product, pid)
+        if not prod:
+            prod = (await db.execute(select(Product).where(Product.code == pid))).scalar_one_or_none()
+        if not prod:
+            prod = (await db.execute(select(Product).where(Product.name == pid))).scalar_one_or_none()
+        if not prod:
+            raise HTTPException(404, f"商品 {pid} 不存在（支持 UUID/编码/名称）")
+        if brand_id and prod.brand_id != brand_id:
+            raise HTTPException(400, "所有商品必须属于同一品牌")
+        brand_id = prod.brand_id
+        products.append((prod, it))
+        if it.get("quantity_unit", "箱") == "箱":
+            total_cases += it["quantity"]
+
+    # 政策模板：手动指定或按品牌+箱数自动匹配
+    if body.policy_template_id:
+        tmpl = await db.get(PolicyTemplate, body.policy_template_id)
+        if not tmpl:
+            tmpl = (await db.execute(select(PolicyTemplate).where(PolicyTemplate.code == body.policy_template_id))).scalar_one_or_none()
+        if not tmpl or not tmpl.is_active:
+            raise HTTPException(400, "政策模板不存在或已停用")
+        if tmpl.min_cases and total_cases != tmpl.min_cases:
+            raise HTTPException(400, f"政策模板要求 {tmpl.min_cases} 箱，当前 {total_cases} 箱")
+    else:
+        tmpl = (await db.execute(
+            select(PolicyTemplate).where(
+                PolicyTemplate.brand_id == brand_id,
+                PolicyTemplate.is_active == True,
+                PolicyTemplate.min_cases == total_cases,
+            )
+        )).scalar_one_or_none()
+        if not tmpl:
+            raise HTTPException(400, f"没有匹配的政策模板（品牌={brand_id}，箱数={total_cases}）。请先创建对应箱数的政策模板")
+
     guide_price = Decimal(str(tmpl.required_unit_price or 0))
     customer_price = Decimal(str(body.deal_unit_price or tmpl.customer_unit_price or guide_price))
-    brand_id = tmpl.brand_id
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     order = Order(
@@ -94,15 +127,7 @@ async def mcp_create_order(body: MCPCreateOrderRequest, db: AsyncSession = Depen
     )
     total = Decimal("0")
     total_bottles = 0
-    for it in body.items:
-        pid = it["product_id"]
-        prod = await db.get(Product, pid)
-        if not prod:
-            prod = (await db.execute(select(Product).where(Product.code == pid))).scalar_one_or_none()
-        if not prod:
-            prod = (await db.execute(select(Product).where(Product.name == pid))).scalar_one_or_none()
-        if not prod:
-            raise HTTPException(404, f"商品 {pid} 不存在（支持 UUID/编码/名称）")
+    for prod, it in products:
         bpc = prod.bottles_per_case or 6
         bottles = it["quantity"] * bpc if it.get("quantity_unit", "箱") == "箱" else it["quantity"]
         order.items.append(OrderItem(
@@ -112,11 +137,6 @@ async def mcp_create_order(body: MCPCreateOrderRequest, db: AsyncSession = Depen
         ))
         total += guide_price * bottles
         total_bottles += bottles
-
-    # 政策模板箱数校验：严格匹配（白酒行业政策按件精确匹配）
-    total_cases = sum(it["quantity"] for it in body.items if it.get("quantity_unit", "箱") == "箱")
-    if tmpl.min_cases and total_cases != tmpl.min_cases:
-        raise HTTPException(400, f"政策模板要求严格 {tmpl.min_cases} 箱，当前 {total_cases} 箱")
 
     order.total_amount = total
     order.deal_unit_price = customer_price

@@ -60,7 +60,7 @@ class OrderBase(BaseModel):
 
 class OrderCreate(OrderBase):
     items: list[OrderItemCreate] = []
-    policy_template_id: str  # 必选：指导价与客户价来自模板
+    policy_template_id: Optional[str] = None  # 可选：不传则按品牌+箱数自动匹配
     settlement_mode: str  # customer_pay / employee_pay / company_pay
     advance_payer_id: Optional[str] = None
     warehouse_id: Optional[str] = None

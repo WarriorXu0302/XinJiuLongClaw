@@ -83,25 +83,43 @@ async def create_order(body: OrderCreate, user: CurrentUser, db: AsyncSession = 
     from app.models.product import Product
     from app.models.policy_template import PolicyTemplate
 
-    # 必选政策模板，提供指导价（required_unit_price）和客户到手价（customer_unit_price）
-    tmpl = await db.get(PolicyTemplate, body.policy_template_id)
-    if not tmpl:
-        raise HTTPException(400, "政策模板不存在")
-    if not tmpl.is_active:
-        raise HTTPException(400, "政策模板已停用")
-    if tmpl.required_unit_price is None:
-        raise HTTPException(400, "政策模板未配置指导价（required_unit_price）")
-
-    # 商品必须属于模板同一品牌
-    brand_id = tmpl.brand_id
+    # 确定品牌（从商品推断）
+    brand_id = None
     for it in body.items:
         product = await db.get(Product, it.product_id)
         if not product:
             raise HTTPException(400, f"商品 {it.product_id} 不存在")
         if brand_id and product.brand_id != brand_id:
-            raise HTTPException(400, "商品品牌与政策模板不符")
+            raise HTTPException(400, "所有商品必须属于同一品牌")
         if brand_id is None:
             brand_id = product.brand_id
+
+    # 计算订单总箱数（用于政策匹配）
+    total_cases = sum(it.quantity if it.quantity_unit == "箱" else 0 for it in body.items)
+
+    # 政策模板：手动指定或按品牌+箱数自动匹配
+    if body.policy_template_id:
+        tmpl = await db.get(PolicyTemplate, body.policy_template_id)
+        if not tmpl or not tmpl.is_active:
+            raise HTTPException(400, "政策模板不存在或已停用")
+        if tmpl.min_cases and total_cases != tmpl.min_cases:
+            raise HTTPException(400, f"政策模板要求 {tmpl.min_cases} 箱，当前 {total_cases} 箱")
+    else:
+        # 自动匹配：同品牌 + min_cases 精确等于订单箱数
+        tmpl = (await db.execute(
+            select(PolicyTemplate).where(
+                PolicyTemplate.brand_id == brand_id,
+                PolicyTemplate.is_active == True,
+                PolicyTemplate.min_cases == total_cases,
+            )
+        )).scalar_one_or_none()
+        if not tmpl:
+            raise HTTPException(400, f"没有匹配的政策模板（品牌={brand_id}，箱数={total_cases}）。请先创建对应箱数的政策模板，或手动指定 policy_template_id")
+
+    if tmpl.required_unit_price is None:
+        raise HTTPException(400, "政策模板未配置指导价（required_unit_price）")
+    if tmpl.brand_id and tmpl.brand_id != brand_id:
+        raise HTTPException(400, "政策模板品牌与商品品牌不符")
 
     guide_price = Decimal(str(tmpl.required_unit_price))
     customer_price = Decimal(str(tmpl.customer_unit_price or tmpl.required_unit_price))
@@ -144,14 +162,6 @@ async def create_order(body: OrderCreate, user: CurrentUser, db: AsyncSession = 
         order.items.append(oi)
         total += guide_price * bottles
         total_bottles += bottles
-
-    # 政策模板箱数校验：min_cases = 严格匹配箱数（白酒行业政策按件精确匹配）
-    total_cases = sum(
-        it.quantity if it.quantity_unit == "箱" else 0
-        for it in body.items
-    )
-    if tmpl.min_cases and total_cases != tmpl.min_cases:
-        raise HTTPException(400, f"政策模板要求严格 {tmpl.min_cases} 箱，当前 {total_cases} 箱")
 
     order.total_amount = total
 

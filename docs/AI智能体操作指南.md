@@ -875,7 +875,7 @@ submit-financing-repayment(
 
 ## 18. 重要注意事项
 
-1. **建单必须选政策模板**：`policy_template_id` 必填，指导价和到手价从模板取，你传的单价会被忽略
+1. **政策模板自动匹配**：`policy_template_id` 可以不传，系统根据品牌+箱数自动匹配。5箱的订单自动匹配 min_cases=5 的模板。没有匹配模板则拒绝建单
 2. **金额系统自动算**：total_amount、deal_amount、policy_gap、customer_paid_amount 全部自动计算
 3. **收款全进 master**：register-payment 自动把钱存入总资金池，不会进品牌账户
 4. **salesman 身份锁定**：业务员建单/建客户时 salesman_id 被强制设为本人
@@ -890,5 +890,5 @@ submit-financing-repayment(
 13. **融资是负债**：融资账户余额增加代表欠银行更多钱
 14. **政策兑付完成后自动生成退款申请**：如果有垫付人
 15. **每个操作都有审计日志**：所有写入操作自动记录 who/when/what
-16. **政策模板箱数是精确匹配**：`min_cases=5` 表示**只能买 5 箱**，不是"≥5箱"。"5件政策模板"就是5箱的政策，买10箱不能用这个模板，必须选对应的模板
+16. **政策模板按箱数精确匹配**：`min_cases=5` 的模板只能用于 5 箱订单。10 箱订单会自动匹配 min_cases=10 的模板，没有就拒绝建单
 17. **所有 ID 参数支持名称查找**：customer_id、salesman_id、product_id、brand_id 等都支持传 UUID、业务编码或名称，系统自动匹配

@@ -209,8 +209,8 @@ function PurchaseOrderList() {
               <Card size="small" style={{ marginTop: 16, background: '#f0f5ff' }}>
                 <Row gutter={16}>
                   <Col span={isManufacturer ? 8 : 12}><Statistic title="商品总额" value={itemTotal} precision={2} prefix="¥" /></Col>
-                  <Col span={isManufacturer ? 8 : 12}><Statistic title="现金付" value={cashAmount} precision={2} prefix="¥" valueStyle={{ color: '#52c41a' }} /></Col>
-                  {isManufacturer && <Col span={8}><Statistic title="F类付" value={fClassAmount} precision={2} prefix="¥" valueStyle={{ color: '#1890ff' }} /></Col>}
+                  <Col span={isManufacturer ? 8 : 12}><Statistic title="现金付" value={cashAmount} precision={2} prefix="¥" styles={{ content: { color: '#52c41a' } }} /></Col>
+                  {isManufacturer && <Col span={8}><Statistic title="F类付" value={fClassAmount} precision={2} prefix="¥" styles={{ content: { color: '#1890ff' } }} /></Col>}
                 </Row>
               </Card>
 

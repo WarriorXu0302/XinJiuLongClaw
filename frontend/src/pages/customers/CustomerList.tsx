@@ -218,7 +218,7 @@ function CustomerList() {
         title={drawerCustomer ? `${drawerCustomer.name} — 历史订单` : ''}
         open={!!drawerCustomer}
         onClose={() => setDrawerCustomer(null)}
-        width={700}
+        size={700}
       >
         {drawerCustomer && (
           <>

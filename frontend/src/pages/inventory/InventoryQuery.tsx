@@ -171,7 +171,7 @@ function InventoryQuery() {
       </Space>
 
       <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={8}><Card size="small"><Statistic title="库存总价值" value={grandTotal} precision={2} prefix="¥" valueStyle={{ color: '#1890ff' }} /></Card></Col>
+        <Col span={8}><Card size="small"><Statistic title="库存总价值" value={grandTotal} precision={2} prefix="¥" styles={{ content: { color: '#1890ff' } }} /></Card></Col>
         <Col span={8}><Card size="small"><Statistic title="总库存量" value={grandCases} precision={1} suffix="箱" /></Card></Col>
         <Col span={8}><Card size="small"><Statistic title="仓库数" value={allWarehouses.length} suffix="个" /></Card></Col>
       </Row>

@@ -53,9 +53,9 @@ function Dashboard() {
       {/* 顶部 KPI */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={6}><Card><Statistic title="今日订单" value={data?.today_order_count ?? 0} /></Card></Col>
-        <Col span={6}><Card><Statistic title="待审政策" value={data?.pending_policy_count ?? 0} valueStyle={{ color: '#faad14' }} /></Card></Col>
-        <Col span={6}><Card><Statistic title="库存总价值" value={data?.total_inventory_value ?? 0} precision={0} prefix="¥" valueStyle={{ color: '#1890ff' }} /></Card></Col>
-        <Col span={6}><Card><Statistic title="未核销金额" value={data?.unsettled_claim_amount ?? 0} precision={0} prefix="¥" valueStyle={{ color: '#ff4d4f' }} /></Card></Col>
+        <Col span={6}><Card><Statistic title="待审政策" value={data?.pending_policy_count ?? 0} styles={{ content: { color: '#faad14' } }} /></Card></Col>
+        <Col span={6}><Card><Statistic title="库存总价值" value={data?.total_inventory_value ?? 0} precision={0} prefix="¥" styles={{ content: { color: '#1890ff' } }} /></Card></Col>
+        <Col span={6}><Card><Statistic title="未核销金额" value={data?.unsettled_claim_amount ?? 0} precision={0} prefix="¥" styles={{ content: { color: '#ff4d4f' } }} /></Card></Col>
       </Row>
 
       {/* 趋势图 */}
@@ -125,12 +125,12 @@ function Dashboard() {
                 <Col span={12} key={b.brand_id} style={{ marginBottom: 8 }}>
                   <Card size="small" title={<Tag color="blue">{b.brand_name}</Tag>} bodyStyle={{ padding: 12 }}>
                     <Row gutter={8}>
-                      <Col span={12}><Statistic title="今日订单" value={b.today_order_count} valueStyle={{ fontSize: 16 }} /></Col>
-                      <Col span={12}><Statistic title="待审政策" value={b.pending_policy_count} valueStyle={{ fontSize: 16, color: '#faad14' }} /></Col>
+                      <Col span={12}><Statistic title="今日订单" value={b.today_order_count} styles={{ content: { fontSize: 16 } }} /></Col>
+                      <Col span={12}><Statistic title="待审政策" value={b.pending_policy_count} styles={{ content: { fontSize: 16, color: '#faad14' } }} /></Col>
                     </Row>
                     <Row gutter={8} style={{ marginTop: 8 }}>
-                      <Col span={12}><Statistic title="库存价值" value={b.inventory_value} precision={0} prefix="¥" valueStyle={{ fontSize: 14, color: '#1890ff' }} /></Col>
-                      <Col span={12}><Statistic title="账户" value={b.account_balance} precision={0} prefix="¥" valueStyle={{ fontSize: 14, color: '#52c41a' }} /></Col>
+                      <Col span={12}><Statistic title="库存价值" value={b.inventory_value} precision={0} prefix="¥" styles={{ content: { fontSize: 14, color: '#1890ff' } }} /></Col>
+                      <Col span={12}><Statistic title="账户" value={b.account_balance} precision={0} prefix="¥" styles={{ content: { fontSize: 14, color: '#52c41a' } }} /></Col>
                     </Row>
                     {b.unsettled_claim_amount > 0 && (
                       <div style={{ marginTop: 6, fontSize: 12 }}>

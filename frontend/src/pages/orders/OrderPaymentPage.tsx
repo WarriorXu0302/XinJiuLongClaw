@@ -91,13 +91,13 @@ function OrderPaymentPage() {
   if (isLoading || !order) return <div style={{ padding: 24 }}>加载中...</div>;
   if (order.status === 'completed') return (
     <div style={{ padding: 24 }}>
-      <Alert type="success" message={`订单 ${order.order_no} 已确认收款、流转完成`} showIcon />
+      <Alert type="success" title={`订单 ${order.order_no} 已确认收款、流转完成`} showIcon />
       <Button style={{ marginTop: 16 }} onClick={() => navigate('/orders')}>返回订单列表</Button>
     </div>
   );
   if (order.status !== 'delivered') return (
     <div style={{ padding: 24 }}>
-      <Alert type="warning" message={`订单状态为 "${order.status}"，只有已送达的订单才能上传收款凭证`} showIcon />
+      <Alert type="warning" title={`订单状态为 "${order.status}"，只有已送达的订单才能上传收款凭证`} showIcon />
       <Button style={{ marginTop: 16 }} onClick={() => navigate('/orders')}>返回订单列表</Button>
     </div>
   );
@@ -179,7 +179,7 @@ function OrderPaymentPage() {
 
         {isEmployeePay && (
           <Alert type="info" showIcon style={{ marginTop: 12 }}
-            message="业务员垫付模式"
+            title="业务员垫付模式"
             description={
               <div style={{ fontSize: 13 }}>
                 <div>客户应付：¥{customerShare.toLocaleString()}（已收 ¥{customerReceived.toLocaleString()}，待收 ¥{customerRemaining.toLocaleString()}）</div>
@@ -192,7 +192,7 @@ function OrderPaymentPage() {
 
         {order.settlement_mode === 'company_pay' && (
           <Alert type="info" showIcon style={{ marginTop: 12 }}
-            message="公司垫付模式"
+            title="公司垫付模式"
             description={`客户只付到手价 ¥${customerShare.toLocaleString()}，政策差 ¥${employeeShare.toLocaleString()} 由公司让利（不入收款），等厂家兑付后进 F 类账户。`}
           />
         )}
@@ -202,7 +202,7 @@ function OrderPaymentPage() {
         <Alert
           type="success" showIcon icon={<LockOutlined />}
           style={{ marginBottom: 16 }}
-          message="已收齐全款"
+          title="已收齐全款"
           description={
             <>
               <div>订单应收 ¥{totalDue.toLocaleString()} 已收齐，正在等待财务在<strong>审批中心</strong>确认收款。</div>

@@ -136,9 +136,9 @@ function Customer360() {
 
       <Row gutter={12} style={{ marginBottom: 16 }}>
         <Col span={4}><Card><Statistic title={<><ShoppingOutlined /> 订单</>} value={s.total_orders} suffix="单" /></Card></Col>
-        <Col span={5}><Card><Statistic title="销售总额" value={s.total_sales} precision={0} prefix="¥" valueStyle={{ color: '#1890ff' }} /></Card></Col>
-        <Col span={5}><Card><Statistic title="累计回款" value={s.total_received} precision={0} prefix="¥" valueStyle={{ color: '#52c41a' }} /></Card></Col>
-        <Col span={5}><Card><Statistic title={<><BankOutlined /> 未收款</>} value={s.total_outstanding} precision={0} prefix="¥" valueStyle={{ color: '#ff4d4f' }} /></Card></Col>
+        <Col span={5}><Card><Statistic title="销售总额" value={s.total_sales} precision={0} prefix="¥" styles={{ content: { color: '#1890ff' } }} /></Card></Col>
+        <Col span={5}><Card><Statistic title="累计回款" value={s.total_received} precision={0} prefix="¥" styles={{ content: { color: '#52c41a' } }} /></Card></Col>
+        <Col span={5}><Card><Statistic title={<><BankOutlined /> 未收款</>} value={s.total_outstanding} precision={0} prefix="¥" styles={{ content: { color: '#ff4d4f' } }} /></Card></Col>
         <Col span={5}><Card><Statistic title={<><CalendarOutlined /> 拜访</>} value={s.visits_count} suffix="次" /></Card></Col>
       </Row>
 

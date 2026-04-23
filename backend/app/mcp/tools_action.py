@@ -1515,10 +1515,62 @@ async def mcp_receive_purchase_order(body: MCPReceivePurchaseOrderRequest, db: A
     if po.status not in ("approved", "shipped"):
         raise HTTPException(400, f"采购单状态为 {po.status}，只有 approved/shipped 可收货")
 
+    # 入库：为每个采购项创建 StockFlow + Inventory 记录（与 API 一致）
+    from app.models.product import Product, Warehouse
+    from app.models.inventory import Inventory, StockFlow
+    from sqlalchemy.orm import selectinload
+
+    wh_id = po.warehouse_id
+    if not wh_id:
+        raise HTTPException(400, "采购单没有设置目标仓库")
+
+    batch_no = f"PO-{datetime.now(timezone.utc).strftime('%Y%m%d')}"
+    po_items = (await db.execute(
+        select(PurchaseOrderItem).where(PurchaseOrderItem.po_id == po.id)
+    )).scalars().all() if not hasattr(po, 'items') or not po.items else po.items
+    from app.models.purchase import PurchaseOrderItem
+
+    inbound_count = 0
+    for item in po_items:
+        bpc = 1
+        if item.quantity_unit == "箱":
+            prod = await db.get(Product, item.product_id)
+            bpc = prod.bottles_per_case if prod and prod.bottles_per_case else 1
+        bottles = item.quantity * bpc
+        per_bottle_cost = Decimal(str(item.unit_price)) / bpc if bpc > 1 else Decimal(str(item.unit_price))
+
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        db.add(StockFlow(
+            id=str(uuid.uuid4()), flow_no=f"SF-{ts}-{uuid.uuid4().hex[:6]}",
+            flow_type="inbound", product_id=item.product_id,
+            warehouse_id=wh_id, batch_no=batch_no,
+            cost_price=per_bottle_cost, quantity=bottles,
+            reference_no=po.po_no,
+            notes=f"采购入库 {po.po_no} ({item.quantity}{item.quantity_unit}={bottles}瓶)",
+        ))
+
+        inv = (await db.execute(
+            select(Inventory).where(
+                Inventory.product_id == item.product_id,
+                Inventory.warehouse_id == wh_id,
+                Inventory.batch_no == batch_no,
+            )
+        )).scalar_one_or_none()
+        if inv:
+            inv.quantity += bottles
+        else:
+            db.add(Inventory(
+                product_id=item.product_id, warehouse_id=wh_id,
+                batch_no=batch_no, quantity=bottles,
+                cost_price=per_bottle_cost,
+                source_purchase_order_id=po.id,
+            ))
+        inbound_count += bottles
+
     po.status = "received"
     await db.flush()
     await log_audit(db, action="receive_purchase_order", entity_type="PurchaseOrder", entity_id=po.id, user=user)
-    return {"po_id": po.id, "po_no": po.po_no, "status": po.status}
+    return {"po_id": po.id, "po_no": po.po_no, "status": po.status, "inbound_bottles": inbound_count}
 
 
 # ═══════════════════════════════════════════════════════════════════

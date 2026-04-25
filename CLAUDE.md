@@ -190,3 +190,8 @@ Plan 拆得再细也不是偷懒的理由。拆开是为了有序推进，不是
 
 ### 15. 踩过的坑立刻写成硬规矩
 每次犯错后必须在本文件里加一条对应的规矩。不靠记忆——下次对话上下文清空了，只有写在这里的规矩才能活下来。同一个错犯两次是不可接受的。
+
+### 16. 每次改动必须更新 CHANGELOG.md
+每合并一次改动（push 到 main 或合 PR 后），**立刻**在 `CHANGELOG.md` 的 `[Unreleased]` 节加一行。
+格式：`- [#PR号 或 commit 短 hash] 一句话描述（动词开头）` 放在对应分类下（Security / Added / Changed / Fixed / Deprecated / Removed）。
+不记 = 下次对话上下文清空就没人知道改了啥。CHANGELOG 是项目记忆，不是可选文档。

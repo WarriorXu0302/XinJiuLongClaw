@@ -11,6 +11,8 @@
     验证 FEISHU_AGENT_SERVICE_KEY，不验 JWT（因为就是来签 JWT 的）。
     Token 字段和 /api/auth/login 完全一致，复用 build_jwt_payload。
 """
+import hashlib
+import hmac
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
@@ -49,7 +51,7 @@ def require_service_key(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "FEISHU_AGENT_SERVICE_KEY 未配置",
         )
-    if x_agent_service_key != expected:
+    if not hmac.compare_digest(x_agent_service_key, expected):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid service key")
 
 
@@ -154,7 +156,7 @@ async def feishu_bind(body: BindRequest, db: AsyncSession = Depends(get_db_anon)
         entity_type="FeishuBinding",
         entity_id=binding.id,
         user={"sub": user.id, "username": user.username},
-        changes={"open_id_prefix": body.open_id[:8]},
+        changes={"open_id_hash": hashlib.sha256(body.open_id.encode()).hexdigest()[:16]},
     )
 
     return BindResponse(

@@ -26,7 +26,7 @@ from starlette.types import Receive, Scope, Send
 
 from app.core.config import settings
 from app.core.security import decode_token
-from app.mcp.catalog import ALL_TOOLS, get_tool, tools_for_user
+from app.mcp.catalog import ALL_TOOLS, WRITE_TOOL_NAMES, get_tool, tools_for_user
 
 log = logging.getLogger(__name__)
 
@@ -76,7 +76,27 @@ async def _get_user_jwt(open_id: str, loopback: str) -> tuple[str, list[str]]:
 # MCP Handlers
 # ─────────────────────────────────────────────────────────────────────
 
-mcp_server = Server("xjl-erp-mcp")
+_MCP_INSTRUCTIONS = """\
+⚠️ 重要告警：本 MCP 工具集当前**与前端业务逻辑不对齐**，尚未验证通过。
+
+请按以下策略使用：
+
+1. 查询类工具（query-*）：可用于读取数据，但返回字段口径可能与前端显示不一致。
+   建议交叉核对，不要作为最终决策依据。
+
+2. 操作类工具（action-* / register-* / create-*）：不建议用于生产动作。
+   已知问题：
+   - customer_paid_amount 在三种结算模式下的计算与前端可能不一致
+   - 金额预览（preview-order）对非标准 settlement_mode 的默认返回值不正确
+   - 部分工具的副作用链（建 Receipt → 更新 payment_status → 推提成）可能不完整
+
+3. 审批类工具（approve-*）：同上，涉及资金/状态流转，出错不可逆。
+   建议改为到 ERP 前端审批中心人工操作。
+
+前端 /api/* 仍是业务逻辑的唯一真相源。本工具集正在重写中，不要依赖它做严肃业务。
+"""
+
+mcp_server = Server("xjl-erp-mcp", instructions=_MCP_INSTRUCTIONS)
 
 
 @mcp_server.list_tools()
@@ -146,9 +166,12 @@ async def _list_tools() -> list[types.Tool]:
             "properties": props,
             "required": required,
         }
+        desc = t["description"]
+        if t["name"] in WRITE_TOOL_NAMES:
+            desc = "⚠️ [业务不对齐，建议走前端] " + desc
         tools.append(types.Tool(
             name=t["name"],
-            description=t["description"],
+            description=desc,
             inputSchema=schema,
         ))
     return tools

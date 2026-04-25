@@ -121,13 +121,13 @@ function SalaryDetail() {
             </Text>
           </Col>
           <Col span={6}>
-            <Statistic title="应发合计" value={data.total_pay} precision={2} prefix="¥" valueStyle={{ color: '#1890ff' }} />
+            <Statistic title="应发合计" value={data.total_pay} precision={2} prefix="¥" styles={{ content: { color: '#1890ff' } }} />
           </Col>
           <Col span={6}>
-            <Statistic title="扣款合计" value={deductSum} precision={2} prefix="-¥" valueStyle={{ color: '#faad14' }} />
+            <Statistic title="扣款合计" value={deductSum} precision={2} prefix="-¥" styles={{ content: { color: '#faad14' } }} />
           </Col>
           <Col span={6}>
-            <Statistic title="实发到手" value={data.actual_pay} precision={2} prefix="¥" valueStyle={{ color: '#ff4d4f', fontSize: 24 }} />
+            <Statistic title="实发到手" value={data.actual_pay} precision={2} prefix="¥" styles={{ content: { color: '#ff4d4f', fontSize: 24 } }} />
           </Col>
         </Row>
       </Card>

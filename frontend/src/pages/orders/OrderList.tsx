@@ -643,7 +643,7 @@ function OrderList() {
               <Alert
                 type="info"
                 showIcon
-                message={`当前选用：${selectedPolicy.name}，如需微调请直接编辑下方内容`}
+                title={`当前选用：${selectedPolicy.name}，如需微调请直接编辑下方内容`}
                 style={{ marginBottom: 8 }}
               />
               <Input.TextArea

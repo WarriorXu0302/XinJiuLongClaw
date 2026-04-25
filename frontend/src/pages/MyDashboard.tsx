@@ -98,7 +98,7 @@ function MyDashboard() {
           <Card>
             <Statistic title={<><ShoppingCartOutlined /> 本月销售</>}
               value={data.actual_sales} prefix="¥" precision={0}
-              valueStyle={{ color: '#1890ff' }} />
+              styles={{ content: { color: '#1890ff' } }} />
             {data.sales_target_month > 0 && (
               <Progress percent={Math.round(data.sales_completion * 100)} size="small"
                 status={data.sales_completion >= 1 ? 'success' : data.sales_completion >= 0.5 ? 'active' : 'exception'} />
@@ -112,7 +112,7 @@ function MyDashboard() {
           <Card>
             <Statistic title={<><BankOutlined /> 本月回款</>}
               value={data.actual_receipt} prefix="¥" precision={0}
-              valueStyle={{ color: '#52c41a' }} />
+              styles={{ content: { color: '#52c41a' } }} />
             {data.receipt_target_month > 0 && (
               <Progress percent={Math.round(data.receipt_completion * 100)} size="small"
                 status={data.receipt_completion >= 1 ? 'success' : data.receipt_completion >= 0.5 ? 'active' : 'exception'} />
@@ -126,7 +126,7 @@ function MyDashboard() {
           <Card>
             <Statistic title={<><TrophyOutlined /> 本月提成</>}
               value={data.commission_total + data.manager_share_total}
-              prefix="¥" precision={2} valueStyle={{ color: '#fa8c16' }} />
+              prefix="¥" precision={2} styles={{ content: { color: '#fa8c16' } }} />
             <Text type="secondary" style={{ fontSize: 12 }}>
               销售 ¥{data.commission_total.toFixed(0)}
               {data.manager_share_total > 0 && ` + 管理 ¥${data.manager_share_total.toFixed(0)}`}
@@ -138,7 +138,7 @@ function MyDashboard() {
           <Card>
             <Statistic title={<><DollarOutlined /> 本月工资</>}
               value={data.salary_actual_pay} prefix="¥" precision={0}
-              valueStyle={{ color: '#ff4d4f' }} />
+              styles={{ content: { color: '#ff4d4f' } }} />
             <Text type="secondary" style={{ fontSize: 12 }}>
               {data.salary_status === 'paid' ? <Tag color="green">已发放</Tag>
                 : data.salary_status === 'confirmed' ? <Tag color="blue">已确认</Tag>
@@ -158,11 +158,11 @@ function MyDashboard() {
               </Col>
               <Col span={8}>
                 <Statistic title="迟到" value={data.late_times + data.late_over30_times} suffix="次"
-                  valueStyle={{ color: data.late_times > 0 || data.late_over30_times > 0 ? '#ff4d4f' : undefined }} />
+                  styles={{ content: { color: data.late_times > 0 || data.late_over30_times > 0 ? '#ff4d4f' : undefined } }} />
               </Col>
               <Col span={8}>
                 <Statistic title="请假天数" value={data.leave_days} suffix="天"
-                  valueStyle={{ color: data.leave_days > 0 ? '#fa8c16' : undefined }} />
+                  styles={{ content: { color: data.leave_days > 0 ? '#fa8c16' : undefined } }} />
               </Col>
             </Row>
             <div style={{ marginTop: 12 }}>

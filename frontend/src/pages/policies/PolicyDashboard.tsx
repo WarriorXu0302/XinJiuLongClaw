@@ -78,12 +78,12 @@ function PolicyDashboard() {
       <Title level={4} style={{ marginBottom: 16 }}>政策应收对账</Title>
 
       <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={4}><Card size="small"><Statistic title="政策总价值" value={totalPolicyValue} precision={0} prefix="¥" valueStyle={{ color: '#1890ff' }} /></Card></Col>
-        <Col span={4}><Card size="small"><Statistic title="待兑付" value={totalPending} precision={0} prefix="¥" valueStyle={{ color: '#fa8c16' }} /></Card></Col>
-        <Col span={4}><Card size="small"><Statistic title="已申请" value={totalApplied} precision={0} prefix="¥" valueStyle={{ color: '#1890ff' }} /></Card></Col>
-        <Col span={4}><Card size="small"><Statistic title="已兑付" value={totalFulfilled} precision={0} prefix="¥" valueStyle={{ color: '#52c41a' }} /></Card></Col>
-        <Col span={4}><Card size="small"><Statistic title="已到账" value={totalSettled} precision={0} prefix="¥" valueStyle={{ color: '#722ed1' }} /></Card></Col>
-        <Col span={4}><Card size="small" style={{ background: policyReceivable > 0 ? '#fff7e6' : '#f6ffed' }}><Statistic title="政策应收" value={policyReceivable} precision={0} prefix="¥" valueStyle={{ color: policyReceivable > 0 ? '#ff4d4f' : '#52c41a', fontWeight: 600 }} /></Card></Col>
+        <Col span={4}><Card size="small"><Statistic title="政策总价值" value={totalPolicyValue} precision={0} prefix="¥" styles={{ content: { color: '#1890ff' } }} /></Card></Col>
+        <Col span={4}><Card size="small"><Statistic title="待兑付" value={totalPending} precision={0} prefix="¥" styles={{ content: { color: '#fa8c16' } }} /></Card></Col>
+        <Col span={4}><Card size="small"><Statistic title="已申请" value={totalApplied} precision={0} prefix="¥" styles={{ content: { color: '#1890ff' } }} /></Card></Col>
+        <Col span={4}><Card size="small"><Statistic title="已兑付" value={totalFulfilled} precision={0} prefix="¥" styles={{ content: { color: '#52c41a' } }} /></Card></Col>
+        <Col span={4}><Card size="small"><Statistic title="已到账" value={totalSettled} precision={0} prefix="¥" styles={{ content: { color: '#722ed1' } }} /></Card></Col>
+        <Col span={4}><Card size="small" style={{ background: policyReceivable > 0 ? '#fff7e6' : '#f6ffed' }}><Statistic title="政策应收" value={policyReceivable} precision={0} prefix="¥" styles={{ content: { color: policyReceivable > 0 ? '#ff4d4f' : '#52c41a', fontWeight: 600 } }} /></Card></Col>
       </Row>
 
       {/* By payer type */}
@@ -92,8 +92,8 @@ function PolicyDashboard() {
           <Col span={6} key={pt}>
             <Card size="small" title={PAYER_LABEL[pt] ?? pt}>
               <Row gutter={16}>
-                <Col span={12}><Statistic title="政策价值" value={stats.value} precision={0} prefix="¥" valueStyle={{ fontSize: 16 }} /></Col>
-                <Col span={12}><Statistic title="已到账" value={stats.settled} precision={0} prefix="¥" valueStyle={{ fontSize: 16, color: '#52c41a' }} /></Col>
+                <Col span={12}><Statistic title="政策价值" value={stats.value} precision={0} prefix="¥" styles={{ content: { fontSize: 16 } }} /></Col>
+                <Col span={12}><Statistic title="已到账" value={stats.settled} precision={0} prefix="¥" styles={{ content: { fontSize: 16, color: '#52c41a' } }} /></Col>
               </Row>
             </Card>
           </Col>

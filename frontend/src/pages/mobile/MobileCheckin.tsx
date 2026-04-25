@@ -213,7 +213,7 @@ function MobileCheckin() {
         {workIn ? (
           <Alert
             type={workIn.status === 'normal' ? 'success' : 'warning'}
-            message={`上班 ${new Date(workIn.checkin_time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`}
+            title={`上班 ${new Date(workIn.checkin_time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`}
             description={workIn.status === 'late' ? `迟到 ${workIn.late_minutes} 分钟`
               : workIn.status === 'late_over30' ? '迟到 >30 分钟，算旷工半天' : '准时'}
             style={{ marginBottom: 8 }}
@@ -225,7 +225,7 @@ function MobileCheckin() {
           </Button>
         )}
         {workIn && (workOut ? (
-          <Alert type="success" message={`下班 ${new Date(workOut.checkin_time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`} />
+          <Alert type="success" title={`下班 ${new Date(workOut.checkin_time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`} />
         ) : (
           <Button size="large" block icon={<LogoutOutlined />} style={{ height: 60, fontSize: 18 }}
             onClick={() => openCamera(photo => doCheckin.mutate({ type: 'work_out', photo }))}>
@@ -239,7 +239,7 @@ function MobileCheckin() {
         {ongoing ? (
           <Alert
             type="warning"
-            message={`正在拜访: ${ongoing.customer_name || '-'}`}
+            title={`正在拜访: ${ongoing.customer_name || '-'}`}
             description={ongoing.enter_time ? `进店于 ${new Date(ongoing.enter_time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}` : ''}
             style={{ marginBottom: 8 }}
           />
@@ -312,7 +312,7 @@ function MobileCheckin() {
       <Modal title={`出店打卡 - ${leaveVisit?.customer_name}`} open={!!leaveVisit}
         onCancel={() => setLeaveVisit(null)} footer={null} width="95%" style={{ top: 20 }} destroyOnHidden>
         <Alert type="info" style={{ marginBottom: 12 }}
-          message={`进店 ${leaveVisit?.enter_time ? new Date(leaveVisit.enter_time).toLocaleTimeString('zh-CN') : ''}`}
+          title={`进店 ${leaveVisit?.enter_time ? new Date(leaveVisit.enter_time).toLocaleTimeString('zh-CN') : ''}`}
           description="需满 30 分钟才算有效拜访" />
         <Button type="primary" size="large" block icon={<CameraOutlined />} loading={doLeave.isPending}
           onClick={() => openCamera(photo => doLeave.mutate({ visit_id: leaveVisit!.id, photo }))}>拍照打卡</Button>

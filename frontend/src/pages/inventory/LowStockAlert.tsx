@@ -67,11 +67,11 @@ function LowStockAlert() {
       </Space>
 
       {data.length === 0 ? (
-        <Alert type="success" message="所有库存充足，无低库存 SKU" />
+        <Alert type="success" title="所有库存充足，无低库存 SKU" />
       ) : (
         <>
           <Alert type="warning" style={{ marginBottom: 12 }}
-            message={`发现 ${data.length} 个 SKU 低于 ${threshold} 箱`} />
+            title={`发现 ${data.length} 个 SKU 低于 ${threshold} 箱`} />
           <Table<LowStockRow> columns={cols} dataSource={data}
             rowKey={r => `${r.warehouse_id}-${r.product_id}-${r.batch_no}`}
             loading={isLoading} size="small" pagination={{ pageSize: 30 }} />

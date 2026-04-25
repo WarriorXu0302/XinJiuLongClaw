@@ -138,7 +138,7 @@ function WorkCheckinPanel() {
               <Title level={5}><LoginOutlined /> 上班打卡</Title>
               {myTodayIn ? (
                 <Alert type={myTodayIn.status === 'normal' ? 'success' : 'warning'}
-                  message={`已打卡 · ${new Date(myTodayIn.checkin_time).toLocaleTimeString('zh-CN')}`}
+                  title={`已打卡 · ${new Date(myTodayIn.checkin_time).toLocaleTimeString('zh-CN')}`}
                   description={myTodayIn.status === 'late' ? `迟到 ${myTodayIn.late_minutes} 分钟`
                     : myTodayIn.status === 'late_over30' ? `迟到超30分钟（算旷工半天）` : '准时'} />
               ) : (
@@ -153,7 +153,7 @@ function WorkCheckinPanel() {
             <Space direction="vertical" style={{ width: '100%' }}>
               <Title level={5}><LogoutOutlined /> 下班打卡</Title>
               {myTodayOut ? (
-                <Alert type="success" message={`已打卡 · ${new Date(myTodayOut.checkin_time).toLocaleTimeString('zh-CN')}`} />
+                <Alert type="success" title={`已打卡 · ${new Date(myTodayOut.checkin_time).toLocaleTimeString('zh-CN')}`} />
               ) : (
                 <Button size="large" block icon={<LogoutOutlined />}
                   disabled={!myTodayIn}
@@ -306,7 +306,7 @@ function VisitPanel() {
         okButtonProps={{ disabled: !photo }}
         onCancel={() => { setLeaveVisit(null); setPhoto(''); }}
         confirmLoading={leaveMut.isPending} destroyOnHidden>
-        <Alert type="info" message={`出店 - ${leaveVisit?.customer_name}（进店 ${leaveVisit?.enter_time ? new Date(leaveVisit.enter_time).toLocaleTimeString('zh-CN') : ''}）`} style={{ marginBottom: 12 }} />
+        <Alert type="info" title={`出店 - ${leaveVisit?.customer_name}（进店 ${leaveVisit?.enter_time ? new Date(leaveVisit.enter_time).toLocaleTimeString('zh-CN') : ''}）`} style={{ marginBottom: 12 }} />
         <Text type="secondary">再拍一次（需满 30 分钟才算有效）</Text>
         {photo ? (
           <div>

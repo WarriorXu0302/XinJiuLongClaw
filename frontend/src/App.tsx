@@ -4,7 +4,11 @@ import routes from './router';
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { refetchOnWindowFocus: false, retry: 1 },
+    queries: {
+      refetchOnWindowFocus: false,
+      retry: 1,
+      staleTime: 60_000,
+    },
   },
 });
 

@@ -301,6 +301,11 @@ LEGACY_TOOLS: list[ToolEntry] = [
 
 ALL_TOOLS: list[ToolEntry] = QUERY_TOOLS + ACTION_TOOLS + APPROVAL_TOOLS + LEGACY_TOOLS
 
+# 写入/审批类工具名 —— bridge 在 list_tools 时给这些工具的 description
+# 加上 ⚠️ 前缀，明确告知 Agent 这些工具与前端业务可能不对齐。
+# 查询类只读工具相对安全，不加前缀。
+WRITE_TOOL_NAMES: set[str] = {t["name"] for t in ACTION_TOOLS + APPROVAL_TOOLS}
+
 
 def tools_for_user(user: dict[str, Any]) -> list[ToolEntry]:
     """根据 JWT 的 roles 过滤可见工具。admin 看全部；其他按交集。"""

@@ -1,5 +1,15 @@
 """
 MCP 操作类工具 — 写入数据（受 RLS + 角色约束）。
+
+⚠️ 本模块与前端业务逻辑不对齐，正在重写中。
+
+已知差异（不完整）：
+- customer_paid_amount 的三种结算模式计算与 api/routes/orders.py 不完全一致
+- preview-order 对非标准 settlement_mode 有 silent fallback，返回错误金额
+- 部分工具的副作用链不完整（未做 Receipt / payment_status / commission 全链路）
+
+新改动别加到这里：业务逻辑只应存在于 app/api/routes/* 和 app/services/*。
+MCP 应该改为薄壳子调那些 endpoint，不再复刻一份业务计算。
 """
 import uuid
 from datetime import datetime, timezone

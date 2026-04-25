@@ -1,5 +1,13 @@
 """
 MCP 审批类工具 — 仅 boss/admin 可操作。
+
+⚠️ 本模块与前端业务逻辑不对齐，正在重写中。
+
+审批类工具涉及资金和状态流转，出错不可逆。在重写完成前，
+建议用户改到 ERP 前端审批中心人工审批。
+
+新改动别加到这里：业务逻辑只应存在于 app/api/routes/* 和 app/services/*。
+MCP 应该改为薄壳子调那些 endpoint，不再复刻一份业务计算。
 """
 import uuid
 from datetime import datetime, timezone

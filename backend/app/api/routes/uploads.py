@@ -32,9 +32,11 @@ async def upload_file(file: UploadFile, user: CurrentUser):
     if len(content) > MAX_SIZE_BYTES:
         raise HTTPException(400, f"文件过大，最大 {settings.UPLOAD_MAX_SIZE_MB}MB")
 
-    # Build path: uploads/YYYY-MM/{uuid}_{filename}
+    # Build path: uploads/YYYY-MM/{full-uuid}{ext}
+    # 用完整 UUID (2^128) 替代 8-hex 前缀，枚举空间从 4.3 亿提升到不可爆破。
+    # 原文件名不再拼进来 —— 业务名（凭证.jpg 等）会让路径可预测。
     month_dir = datetime.now(timezone.utc).strftime("%Y-%m")
-    safe_name = f"{uuid.uuid4().hex[:8]}_{file.filename}"
+    safe_name = f"{uuid.uuid4().hex}{ext}"
     rel_path = os.path.join(month_dir, safe_name)
 
     abs_dir = Path(settings.UPLOAD_DIR) / month_dir

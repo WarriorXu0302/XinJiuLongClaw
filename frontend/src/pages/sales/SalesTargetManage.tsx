@@ -267,12 +267,12 @@ function SalesTargetManage() {
           <Row gutter={12}>
             <Col span={12}>
               <Form.Item name="sales_target" label="销售目标金额" rules={[{ required: true }]}>
-                <InputNumber style={{ width: '100%' }} min={0} step={10000} addonBefore="¥" />
+                <InputNumber style={{ width: '100%' }} min={0} step={10000} prefix="¥" />
               </Form.Item>
             </Col>
             <Col span={12}>
               <Form.Item name="receipt_target" label="回款目标金额" rules={[{ required: true }]}>
-                <InputNumber style={{ width: '100%' }} min={0} step={10000} addonBefore="¥" />
+                <InputNumber style={{ width: '100%' }} min={0} step={10000} prefix="¥" />
               </Form.Item>
             </Col>
           </Row>
@@ -290,12 +290,12 @@ function SalesTargetManage() {
               </Col>
               <Col span={8}>
                 <Form.Item name="bonus_at_100" label="完成 100% 奖" initialValue={0}>
-                  <InputNumber style={{ width: '100%' }} min={0} step={100} addonBefore="¥" />
+                  <InputNumber style={{ width: '100%' }} min={0} step={100} prefix="¥" />
                 </Form.Item>
               </Col>
               <Col span={8}>
                 <Form.Item name="bonus_at_120" label="完成 120% 奖" initialValue={0}>
-                  <InputNumber style={{ width: '100%' }} min={0} step={100} addonBefore="¥" />
+                  <InputNumber style={{ width: '100%' }} min={0} step={100} prefix="¥" />
                 </Form.Item>
               </Col>
             </Row>

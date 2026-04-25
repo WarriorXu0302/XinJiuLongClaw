@@ -57,7 +57,7 @@ function LowStockAlert() {
         <Title level={4} style={{ margin: 0 }}><WarningOutlined /> 低库存预警</Title>
         <Space>
           <Text>预警阈值</Text>
-          <InputNumber min={1} max={100} value={threshold} onChange={v => setThreshold(v ?? 5)} addonAfter="箱" style={{ width: 120 }} />
+          <InputNumber min={1} max={100} value={threshold} onChange={v => setThreshold(v ?? 5)} suffix="箱" style={{ width: 120 }} />
           <Button onClick={() => refetch()}>刷新</Button>
           <Button type="primary" danger icon={<BellOutlined />} loading={notifyMut.isPending}
             disabled={data.length === 0} onClick={() => notifyMut.mutate()}>

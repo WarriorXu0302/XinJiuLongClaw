@@ -96,17 +96,17 @@ pip install -r requirements.txt
 cp .env.example .env
 alembic upgrade head
 python -m app.scripts.seed
-uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload
 ```
 
-API 文档：http://localhost:8001/docs
+API 文档：http://localhost:8002/docs
 
 ### 前端
 
 ```bash
 cd frontend
 npm install
-npm run dev    # http://localhost:5173（代理 /api → localhost:8001）
+npm run dev    # http://localhost:5173（代理 /api → localhost:8002）
 ```
 
 ### 默认账号

@@ -51,12 +51,13 @@ alembic revision --autogenerate -m "description"         # Generate new migratio
 ### Frontend (from `frontend/`)
 ```bash
 npm install        # Install dependencies
-npm run dev        # Dev server (port 5173, proxies /api and /mcp to localhost:8001)
+npm run dev        # Dev server (port 5173, proxies /api and /mcp to localhost:8002)
 npm run build      # Type-check then build (tsc -b && vite build)
 npm run lint       # ESLint
 ```
 
-**Note:** The Vite proxy targets port 8001, not 8000. When running both together, start the backend on port 8001 or update `vite.config.ts`.
+**Note:** 后端默认跑在 **8002**（`uvicorn app.main:app --port 8002 --reload`）。Vite 代理也默认指向 8002。
+不用 8001 是因为常被 SSH 端口转发 / VS Code Plugin Host 占用，会导致前端请求 502 且难以排查。
 
 ## Architecture
 

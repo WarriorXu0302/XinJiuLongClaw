@@ -20,6 +20,7 @@ redis>=5.0.0
 # Authentication
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
+bcrypt==4.3.0  # passlib 1.7 不兼容 bcrypt 5.x（触发 72-byte 自检 ValueError）
 python-multipart>=0.0.12
 
 # HTTP Client
@@ -30,3 +31,9 @@ python-dateutil>=2.9.0
 
 # Environment
 python-dotenv>=1.0.0
+
+# MCP protocol bridge (Streamable-HTTP for Claude Code / Bisheng)
+mcp>=1.0.0
+
+# Policy Excel 两轮对账
+openpyxl>=3.1.0

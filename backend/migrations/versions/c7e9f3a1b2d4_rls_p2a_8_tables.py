@@ -130,8 +130,9 @@ def _ensure_rls_prerequisites(conn) -> None:
         "END IF; "
         "END $$"
     )
-    # 2. GRANT（CURRENT_DATABASE 避免写死 newerp）
-    conn.exec_driver_sql("GRANT CONNECT ON DATABASE newerp TO erp_app")
+    # 2. GRANT（读 current_database() 避免写死 DB 名）
+    db_name = conn.exec_driver_sql("SELECT current_database()").scalar()
+    conn.exec_driver_sql(f'GRANT CONNECT ON DATABASE "{db_name}" TO erp_app')
     conn.exec_driver_sql("GRANT USAGE ON SCHEMA public TO erp_app")
     conn.exec_driver_sql("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO erp_app")
     conn.exec_driver_sql("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO erp_app")

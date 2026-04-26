@@ -46,6 +46,8 @@
 - [007b14a] `customers` 列表多品牌客户 JOIN CBS 重复显示，加 `distinct()`
 - [007b14a] `seed.py` 补业务员品牌绑定 + 客户 CBS + master 账户 + Position，RLS 启用后本地环境才能跑完整业务流
 - [007b14a] `FinanceApproval` 审批中心查询条件适配 P2c-1 新流程（`pending_receipt_count > 0`）
+- [651a55c] **review 发现严重 bug**：`POST /api/receipts` 和 MCP register-payment 立即动账但 Receipt.status 默认 `pending_confirmation`，会被 confirm_payment 当"待审"二次处理导致**重复加余额**。两路径显式设 `status=confirmed` 修复
+- [651a55c] RLS 补齐后业务员看不到 master 账户 → `upload_payment_voucher` 400。改成 account_id 暂不绑定，审批时才填 master
 - [#3] `requirements.txt` 补 `mcp` / `openpyxl`；锁 `bcrypt==4.3.0`（passlib 1.7 跟 bcrypt 5.x 自检冲突）
 - [#3] `.env.example` `CORS_ORIGINS` 改 JSON 数组格式，Pydantic v2 不接受逗号分隔
 - [#4] antd v6 废弃 API 批量替换：`Drawer.width → size`（1 处）、`Statistic.valueStyle → styles.content`（30 处）、`Alert.message → title`（15 处）

@@ -428,7 +428,7 @@ function SalaryRecordList() {
               customRequest={async ({ file, onSuccess, onError }: any) => {
                 const fd = new FormData(); fd.append('file', file);
                 try {
-                  const { data } = await api.post('/uploads', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+                  const { data } = await api.post('/uploads', fd);
                   setBatchVoucherUrls(p => [...p, data.url]);
                   onSuccess(data);
                 } catch (e) { onError(e); }
@@ -498,7 +498,7 @@ function SalaryRecordList() {
               customRequest={async ({ file, onSuccess, onError }: any) => {
                 const fd = new FormData(); fd.append('file', file);
                 try {
-                  const { data } = await api.post('/uploads', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+                  const { data } = await api.post('/uploads', fd);
                   setVoucherUrls(p => [...p, data.url]);
                   onSuccess(data);
                 } catch (e) { onError(e); }

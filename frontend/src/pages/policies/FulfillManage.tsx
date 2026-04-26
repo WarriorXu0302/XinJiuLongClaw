@@ -138,7 +138,7 @@ function FulfillManage() {
         <Upload listType="picture-card" accept=".jpg,.jpeg,.png,.webp" multiple
           customRequest={async ({ file, onSuccess, onError }: any) => {
             const fd = new FormData(); fd.append('file', file);
-            try { const { data } = await api.post('/uploads', fd, { headers: { 'Content-Type': 'multipart/form-data' } }); setVoucherUrls(prev => [...prev, data.url]); onSuccess(data); }
+            try { const { data } = await api.post('/uploads', fd); setVoucherUrls(prev => [...prev, data.url]); onSuccess(data); }
             catch (e) { onError(e); }
           }}>
           <div><PlusOutlined /><div style={{ marginTop: 4, fontSize: 12 }}>上传凭证</div></div>

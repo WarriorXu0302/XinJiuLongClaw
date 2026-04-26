@@ -46,8 +46,10 @@ async function getPosition(): Promise<{ lat: number; lng: number }> {
 
 async function uploadFile(file: File | Blob): Promise<string> {
   const fd = new FormData();
-  fd.append('file', file);
-  const { data } = await api.post('/uploads', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  // Blob 没 name 属性，multipart 缺 filename 后端会 422。强制补一个带扩展名的。
+  const filename = (file as File).name || `camera-${Date.now()}.jpg`;
+  fd.append('file', file, filename);
+  const { data } = await api.post('/uploads', fd);
   return data.url;
 }
 

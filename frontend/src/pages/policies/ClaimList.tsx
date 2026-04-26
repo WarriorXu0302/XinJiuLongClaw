@@ -111,7 +111,7 @@ function ClaimList() {
     { title: '已核销', dataIndex: 'settled_amount', width: 110, align: 'right', render: (v: number) => `¥${Number(v).toFixed(2)}` },
     { title: '未核销', dataIndex: 'unsettled_amount', width: 110, align: 'right', render: (v: number) => <span style={{ color: v > 0 ? '#faad14' : undefined }}>¥{Number(v).toFixed(2)}</span> },
     { title: '状态', dataIndex: 'status', width: 90, render: (s: string) => { const info = STATUS_MAP[s] ?? { color: 'default', label: s }; return <Tag color={info.color}>{info.label}</Tag>; } },
-    { title: '时间', dataIndex: 'created_at', width: 160, render: (v: string) => v?.replace('T', ' ').slice(0, 19) },
+    { title: '时间', dataIndex: 'created_at', width: 160, render: (v: string) => v ? new Date(v).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '-' },
     { title: '操作', key: 'action', width: 100, render: (_, record) => (
       <Button type="link" size="small" disabled={record.unsettled_amount <= 0} onClick={() => { setActiveClaim(record); setAllocOpen(true); }}>核销分配</Button>
     ) },

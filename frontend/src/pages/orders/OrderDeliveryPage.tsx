@@ -43,7 +43,7 @@ function OrderDeliveryPage() {
     const formData = new FormData();
     formData.append('file', file);
     try {
-      const { data } = await api.post('/uploads', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const { data } = await api.post('/uploads', formData);
       setUploadedUrls(prev => [...prev, data.url]);
       onSuccess(data);
     } catch (err: any) {

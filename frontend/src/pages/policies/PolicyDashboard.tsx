@@ -70,7 +70,7 @@ function PolicyDashboard() {
   ];
 
   const tableData = approvedRequests.flatMap(r =>
-    r.request_items.map(i => ({ ...i, _purpose: r.usage_purpose ?? r.id.slice(0, 8), _created: r.created_at?.replace('T', ' ').slice(0, 19) }))
+    r.request_items.map(i => ({ ...i, _purpose: r.usage_purpose ?? r.id.slice(0, 8), _created: r.created_at ? new Date(r.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '-' }))
   );
 
   return (

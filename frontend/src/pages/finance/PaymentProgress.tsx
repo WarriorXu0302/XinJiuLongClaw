@@ -145,7 +145,7 @@ function PaymentProgress() {
     { title: '余额', dataIndex: 'balance_after', width: 90, align: 'right', render: (v: number) => `¥${Number(v).toLocaleString()}` },
     { title: '来源', dataIndex: 'related_type', width: 80, render: (v: string) => ({ purchase_payment: '采购', transfer_deduction: '被转码', transfer_credit: '转码入库', share_out: '分货', share_out_income: '分货收入' })[v] ?? v ?? '-' },
     { title: '备注', dataIndex: 'notes', width: 160, ellipsis: true },
-    { title: '时间', dataIndex: 'created_at', width: 100, render: (v: string) => v?.replace('T', ' ').slice(0, 10) },
+    { title: '时间', dataIndex: 'created_at', width: 100, render: (v: string) => v ? new Date(v).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }) : '-' },
   ];
 
   const shareCols: ColumnsType<any> = [
@@ -218,7 +218,7 @@ function PaymentProgress() {
             <Upload listType="picture-card" accept=".jpg,.jpeg,.png,.webp" multiple
               customRequest={async ({ file, onSuccess, onError }: any) => {
                 const fd = new FormData(); fd.append('file', file);
-                try { const { data } = await api.post('/uploads', fd, { headers: { 'Content-Type': 'multipart/form-data' } }); setVoucherUrls(p => [...p, data.url]); onSuccess(data); } catch (e) { onError(e); }
+                try { const { data } = await api.post('/uploads', fd); setVoucherUrls(p => [...p, data.url]); onSuccess(data); } catch (e) { onError(e); }
               }}><div><PlusOutlined /><div style={{ marginTop: 4, fontSize: 12 }}>上传</div></div></Upload>
           </Form.Item>
           <Form.Item name="notes" label="备注"><Input.TextArea rows={2} /></Form.Item>
@@ -249,7 +249,7 @@ function PaymentProgress() {
         <Upload listType="picture-card" accept=".jpg,.jpeg,.png,.webp" multiple
           customRequest={async ({ file, onSuccess, onError }: any) => {
             const fd = new FormData(); fd.append('file', file);
-            try { const { data } = await api.post('/uploads', fd, { headers: { 'Content-Type': 'multipart/form-data' } }); setLogisticsUrls(p => [...p, data.url]); onSuccess(data); } catch (e) { onError(e); }
+            try { const { data } = await api.post('/uploads', fd); setLogisticsUrls(p => [...p, data.url]); onSuccess(data); } catch (e) { onError(e); }
           }}><div><PlusOutlined /><div style={{ marginTop: 4, fontSize: 12 }}>物流单据</div></div></Upload>
         <div style={{ color: '#999', fontSize: 12, marginTop: 4 }}>上传快递单/物流回执照片</div>
       </Modal>

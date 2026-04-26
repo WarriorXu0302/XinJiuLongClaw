@@ -38,8 +38,9 @@ async function getPosition(): Promise<{ lat: number; lng: number }> {
 
 async function uploadFile(blob: Blob): Promise<string> {
   const fd = new FormData();
-  fd.append('file', blob);
-  const { data } = await api.post('/uploads', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  // Blob 没 name 属性，必须显式传 filename 否则 FastAPI UploadFile 422
+  fd.append('file', blob, `checkin-${Date.now()}.jpg`);
+  const { data } = await api.post('/uploads', fd);
   return data.url;
 }
 

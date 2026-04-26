@@ -117,7 +117,7 @@ function ArrivalReconcile() {
     if (!brandId) { message.warning('请先选择品牌'); return; }
     const formData = new FormData(); formData.append('file', file);
     try {
-      const { data } = await api.post(`/policies/requests/match-arrival?brand_id=${brandId}`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const { data } = await api.post(`/policies/requests/match-arrival?brand_id=${brandId}`, formData);
       setMatched(data.matched ?? []);
       setSalaryMatched(data.salary_matched ?? []);
       setUnmatched(data.unmatched ?? []);
@@ -146,7 +146,7 @@ function ArrivalReconcile() {
     { title: '余额', dataIndex: 'balance_after', width: 90, align: 'right', render: (v: number) => `¥${Number(v).toLocaleString()}` },
     { title: '来源', dataIndex: 'related_type', width: 80, render: (v: string) => FLOW_TYPE_LABEL[v]?.label ?? v ?? '-' },
     { title: '备注', dataIndex: 'notes', width: 200, ellipsis: true },
-    { title: '时间', dataIndex: 'created_at', width: 120, render: (v: string) => v?.replace('T', ' ').slice(0, 16) },
+    { title: '时间', dataIndex: 'created_at', width: 120, render: (v: string) => v ? new Date(v).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '-' },
   ];
 
   return (

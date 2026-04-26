@@ -383,7 +383,7 @@ function InspectionList() {
               <Upload listType="picture-card" accept=".jpg,.jpeg,.png,.webp" multiple
                 customRequest={async ({ file, onSuccess, onError }: any) => {
                   const fd = new FormData(); fd.append('file', file);
-                  try { const { data } = await api.post('/uploads', fd, { headers: { 'Content-Type': 'multipart/form-data' } }); setPayVouchers(p => [...p, data.url]); onSuccess(data); } catch (e) { onError(e); }
+                  try { const { data } = await api.post('/uploads', fd); setPayVouchers(p => [...p, data.url]); onSuccess(data); } catch (e) { onError(e); }
                 }}><div><PlusOutlined /><div style={{ marginTop: 4, fontSize: 12 }}>凭证</div></div></Upload>
             </>
           );
@@ -397,7 +397,7 @@ function InspectionList() {
         <Upload listType="picture-card" accept=".jpg,.jpeg,.png,.webp" multiple
           customRequest={async ({ file, onSuccess, onError }: any) => {
             const fd = new FormData(); fd.append('file', file);
-            try { const { data } = await api.post('/uploads', fd, { headers: { 'Content-Type': 'multipart/form-data' } }); setLogisticsUrls(p => [...p, data.url]); onSuccess(data); } catch (e) { onError(e); }
+            try { const { data } = await api.post('/uploads', fd); setLogisticsUrls(p => [...p, data.url]); onSuccess(data); } catch (e) { onError(e); }
           }}><div><PlusOutlined /><div style={{ marginTop: 4, fontSize: 12 }}>物流单据</div></div></Upload>
       </Modal>
     </>

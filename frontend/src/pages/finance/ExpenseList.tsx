@@ -161,7 +161,7 @@ function ExpenseList() {
     { title: '申请人', key: 'applicant', width: 80, render: (_, r) => r.applicant?.name ?? '-' },
     { title: '凭证', key: 'voucher', width: 50, render: (_, r: any) => r.voucher_urls?.length ? `${r.voucher_urls.length}张` : '-' },
     { title: '状态', dataIndex: 'status', width: 80, render: (s: string) => { const m = STATUS_MAP[s]; return m ? <Tag color={m.color}>{m.label}</Tag> : <Tag>{s}</Tag>; } },
-    { title: '时间', dataIndex: 'created_at', width: 120, render: (v: string) => v?.replace('T', ' ').slice(0, 16) },
+    { title: '时间', dataIndex: 'created_at', width: 120, render: (v: string) => v ? new Date(v).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '-' },
     { title: '操作', key: 'action', width: 100, render: (_, record) => (
       <Space size="small">
         {record.status === 'pending' && <a onClick={() => handleEdit(record)}>编辑</a>}
@@ -212,7 +212,7 @@ function ExpenseList() {
             <Upload listType="picture-card" accept=".jpg,.jpeg,.png,.webp" multiple
               customRequest={async ({ file, onSuccess, onError }: any) => {
                 const fd = new FormData(); fd.append('file', file);
-                try { const { data } = await api.post('/uploads', fd, { headers: { 'Content-Type': 'multipart/form-data' } }); setVoucherUrls(p => [...p, data.url]); onSuccess(data); }
+                try { const { data } = await api.post('/uploads', fd); setVoucherUrls(p => [...p, data.url]); onSuccess(data); }
                 catch (e) { onError(e); }
               }}>
               <div><PlusOutlined /><div style={{ marginTop: 4, fontSize: 12 }}>上传凭证</div></div>
@@ -237,7 +237,7 @@ function ExpenseList() {
           <Upload listType="picture-card" accept=".jpg,.jpeg,.png,.webp" multiple
             customRequest={async ({ file, onSuccess, onError }: any) => {
               const fd = new FormData(); fd.append('file', file);
-              try { const { data } = await api.post('/uploads', fd, { headers: { 'Content-Type': 'multipart/form-data' } }); setPayVoucherUrls(p => [...p, data.url]); onSuccess(data); } catch (e) { onError(e); }
+              try { const { data } = await api.post('/uploads', fd); setPayVoucherUrls(p => [...p, data.url]); onSuccess(data); } catch (e) { onError(e); }
             }}>
             <div><PlusOutlined /><div style={{ marginTop: 4, fontSize: 12 }}>付款凭证</div></div>
           </Upload>
@@ -247,7 +247,7 @@ function ExpenseList() {
           <Upload listType="picture-card" accept=".jpg,.jpeg,.png,.webp" multiple
             customRequest={async ({ file, onSuccess, onError }: any) => {
               const fd = new FormData(); fd.append('file', file);
-              try { const { data } = await api.post('/uploads', fd, { headers: { 'Content-Type': 'multipart/form-data' } }); setPayReceiptUrls(p => [...p, data.url]); onSuccess(data); } catch (e) { onError(e); }
+              try { const { data } = await api.post('/uploads', fd); setPayReceiptUrls(p => [...p, data.url]); onSuccess(data); } catch (e) { onError(e); }
             }}>
             <div><PlusOutlined /><div style={{ marginTop: 4, fontSize: 12 }}>签收单</div></div>
           </Upload>

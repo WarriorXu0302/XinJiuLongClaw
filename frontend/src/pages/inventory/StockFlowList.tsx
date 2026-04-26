@@ -30,7 +30,7 @@ const columns: ColumnsType<StockFlowItem> = [
   }},
   { title: '数量', dataIndex: 'quantity', width: 80, align: 'right' },
   { title: '成本单价', dataIndex: 'cost_price', width: 100, align: 'right', render: (v: number | null) => v != null ? `¥${Number(v).toFixed(2)}` : '-' },
-  { title: '时间', dataIndex: 'created_at', width: 170, render: (v: string) => v?.replace('T', ' ').slice(0, 19) },
+  { title: '时间', dataIndex: 'created_at', width: 170, render: (v: string) => v ? new Date(v).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '-' },
 ];
 
 function StockFlowList() {

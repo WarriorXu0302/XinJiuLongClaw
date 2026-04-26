@@ -27,7 +27,7 @@ const columns: ColumnsType<UsageRecord> = [
   { title: '可申报金额', dataIndex: 'reimbursement_amount', width: 110, align: 'right', render: (v: number) => `¥${Number(v).toFixed(2)}` },
   { title: '执行状态', dataIndex: 'execution_status', width: 100, render: (s: string) => <Tag color={{ pending: 'default', in_progress: 'blue', completed: 'green' }[s] || 'default'}>{s}</Tag> },
   { title: '申报状态', dataIndex: 'claim_status', width: 100, render: (s: string) => <Tag color={{ unclaimed: 'default', partially_claimed: 'orange', fully_claimed: 'green' }[s] || 'default'}>{s}</Tag> },
-  { title: '创建时间', dataIndex: 'created_at', width: 170, render: (v: string) => v?.replace('T', ' ').slice(0, 19) },
+  { title: '创建时间', dataIndex: 'created_at', width: 170, render: (v: string) => v ? new Date(v).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '-' },
 ];
 
 function UsageRecordList() {

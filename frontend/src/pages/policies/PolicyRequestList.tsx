@@ -235,7 +235,8 @@ function PolicyRequestList() {
       const applied = items.filter(i => i.fulfill_status !== 'pending').length;
       return pending > 0 ? <Tag>{pending}项待申请</Tag> : <Tag color="orange">{applied}项已提交</Tag>;
     }},
-    { title: '时间', dataIndex: 'created_at', width: 120, render: (v: string) => v?.replace('T', ' ').slice(0, 16) },
+    { title: '时间', dataIndex: 'created_at', width: 160,
+      render: (v: string) => v ? new Date(v).toLocaleString('zh-CN', { hour12: false }) : '-' },
   ];
 
   return (

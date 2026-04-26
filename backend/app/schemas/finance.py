@@ -161,8 +161,8 @@ class ManufacturerSettlementUpdate(BaseModel):
     brand_id: Optional[str] = None
     settlement_amount: Optional[Decimal] = None
     approved_claim_amount: Optional[Decimal] = None
-    settled_amount: Optional[Decimal] = None
-    unsettled_amount: Optional[Decimal] = None
+    # settled_amount / unsettled_amount 由后端 allocation-confirm 维护，不接受前端写入
+    # （曾因 PUT 接受这两个字段可回写"剩余 ¥X"再次分配导致重复入账）
     settlement_date: Optional[date] = None
     status: Optional[str] = None
     confirmed_by: Optional[str] = None

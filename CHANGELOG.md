@@ -31,6 +31,7 @@
 
 - [#11] `vite.config.ts` 提取 `BACKEND` 常量；`CLAUDE.md` / `README.md` 新增端口选择说明（为啥不用 8001）
 - [#9] 迁移内置 `_ensure_rls_prerequisites()` 幂等创建 erp_app role + helper 函数，migration 独立可跑
+- 新增 `skills/xinjiulong-erp/` Agent 技能包（SKILL.md + 11 份 references + 5 个 helper 脚本）：飞书交互规范、3 种结算模式、订单闭环、收款审批、政策兑付、稽查 5 场景、账户/工资/考勤/审批中心聚合，所有 250+ API 端点速查
 
 ### Changed
 
@@ -55,6 +56,16 @@
 - [6a8027d] **严重**：`confirm_arrival` 无幂等保护，重复点击/网络重试会让 F 类账户余额被加两次
 - [6a8027d] **严重**：`confirm_fulfill` 的 settled_amount 用 `+=` 累加，重复确认同一条目会无限膨胀，导致利润台账"政策兑付盈利"虚高
 - [6a8027d] 销售目标里程碑通知永远不推送（`prev_rate == rate` 条件始终不成立）
+- **严重**：`DELETE /api/inspection-cases/{id}` 拒绝列表漏掉 `'executed'`，已执行案件可被删除，库存+账户永久错乱。修正为只允许删 pending/approved/rejected
+- **严重**：`InspectionCase` A3/B2 的 payment_to_mfr 账户动账在 create 阶段就发生，update 不重算、reject 不反转 → 账户漂移。挪到 execute 阶段，统一入口（含余额校验 + account 不存在则 400）
+- **严重**：`POST /financing-orders/repayments/{id}/approve` F 类账户余额不足时**静默跳过**，但现金、PO.paid、order.repaid_principal 已更新 → 账务永久失衡。现在提前预校验，不足则整体 400 拒绝
+- **严重**：`approve_repayment` 无锁，多笔 pending 并发审批时 `order.repaid_principal +=` 互相覆盖丢一笔还款。加 `SELECT FOR UPDATE` 锁 repayment + order
+- **严重**：`submit_repayment` 不校验 `pay_acc.brand_id == order.brand_id`，可跨品牌还款串账。补 brand 一致性校验
+- **严重**：`ManufacturerSettlementUpdate` schema 允许 PUT `settled_amount/unsettled_amount`，财务可手工改回"剩余 ¥X"再次分配同一笔结算，导致 F 类账户重复入账。从 schema 移除这两个字段
+- **严重**：`DELETE /api/expense-claims/{id}` 无状态校验，删已 approved/paid/settled 的报销会让 share_out 扣款 / 日常拨款的账户变动无法回滚。改为只允许删 pending/rejected
+- **严重**：`approve` share_out 时 master/ptm 账户任一不存在就静默只做一半 → 账务失衡。两个账户都必须找到否则 400，且加 ptm 余额校验
+- **严重**：`reject_claim` 无状态校验，可驳回已 approved 的 share_out 但不反转账户。改为只允许驳回 pending
+- `pay_daily_claim` 无行锁，两个并发请求可能双扣账户。加 `SELECT FOR UPDATE` 锁 claim + account
 - [#3] `requirements.txt` 补 `mcp` / `openpyxl`；锁 `bcrypt==4.3.0`（passlib 1.7 跟 bcrypt 5.x 自检冲突）
 - [#3] `.env.example` `CORS_ORIGINS` 改 JSON 数组格式，Pydantic v2 不接受逗号分隔
 - [#4] antd v6 废弃 API 批量替换：`Drawer.width → size`（1 处）、`Statistic.valueStyle → styles.content`（30 处）、`Alert.message → title`（15 处）

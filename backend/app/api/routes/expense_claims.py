@@ -142,33 +142,37 @@ async def approve_claim(claim_id: str, user: CurrentUser, db: AsyncSession = Dep
     c.approved_by = user.get("employee_id")
 
     # share_out：审批通过时自动 1)总资金池入账 2)回款账户扣减
+    # 两个账户必须都找得到，否则 400；历史 bug：一个账户不存在时静默只做一半 → 账务失衡
     if c.claim_type == "share_out" and c.brand_id and c.amount > 0:
         from app.models.product import Account
         from app.api.routes.accounts import record_fund_flow
 
-        # 总资金池入账
         master_acc = (await db.execute(
             select(Account).where(Account.level == "master")
         )).scalar_one_or_none()
-        if master_acc:
-            master_acc.balance += c.amount
-            await record_fund_flow(
-                db, account_id=master_acc.id, flow_type='credit', amount=c.amount,
-                balance_after=master_acc.balance, related_type='share_out_income',
-                related_id=c.id, notes=f"分货收款: {c.title}",
-            )
-
-        # 回款账户扣减
         ptm_acc = (await db.execute(
             select(Account).where(Account.brand_id == c.brand_id, Account.account_type == 'payment_to_mfr')
         )).scalar_one_or_none()
-        if ptm_acc:
-            ptm_acc.balance -= c.amount
-            await record_fund_flow(
-                db, account_id=ptm_acc.id, flow_type='debit', amount=c.amount,
-                balance_after=ptm_acc.balance, related_type='share_out',
-                related_id=c.id, notes=f"分货扣减回款: {c.title}",
-            )
+        if master_acc is None:
+            raise HTTPException(400, "未配置总资金池 master 账户，无法 share_out 入账")
+        if ptm_acc is None:
+            raise HTTPException(400, "该品牌未配置 payment_to_mfr 账户，无法扣减回款")
+        if ptm_acc.balance < c.amount:
+            raise HTTPException(400,
+                f"payment_to_mfr 账户余额不足：¥{ptm_acc.balance} < 需扣 ¥{c.amount}")
+
+        master_acc.balance += c.amount
+        await record_fund_flow(
+            db, account_id=master_acc.id, flow_type='credit', amount=c.amount,
+            balance_after=master_acc.balance, related_type='share_out_income',
+            related_id=c.id, notes=f"分货收款: {c.title}",
+        )
+        ptm_acc.balance -= c.amount
+        await record_fund_flow(
+            db, account_id=ptm_acc.id, flow_type='debit', amount=c.amount,
+            balance_after=ptm_acc.balance, related_type='share_out',
+            related_id=c.id, notes=f"分货扣减回款: {c.title}",
+        )
 
     await db.flush()
     await log_audit(db, action="approve_expense_claim", entity_type="ExpenseClaim", entity_id=c.id, user=user)
@@ -181,6 +185,10 @@ async def reject_claim(claim_id: str, user: CurrentUser, db: AsyncSession = Depe
     c = await db.get(ExpenseClaim, claim_id)
     if not c:
         raise HTTPException(404, "不存在")
+    # 只能驳回 pending：已 approved 的 share_out 已动过账，驳回需走反向凭证
+    if c.status != "pending":
+        raise HTTPException(400,
+            f"状态为 '{c.status}'，只有待审批（pending）能驳回；已审批的需走反向凭证冲正")
     c.status = "rejected"
     await db.flush()
     return {"detail": "已驳回"}
@@ -238,13 +246,19 @@ async def pay_daily_claim(claim_id: str, user: CurrentUser, account_id: str = Qu
     from app.models.product import Account
     from app.api.routes.accounts import record_fund_flow
 
-    c = await db.get(ExpenseClaim, claim_id)
+    # 锁 claim 行，防止两个 pay 并发各自通过 status 校验后双扣账户
+    c = (await db.execute(
+        select(ExpenseClaim).where(ExpenseClaim.id == claim_id).with_for_update()
+    )).scalar_one_or_none()
     if not c:
         raise HTTPException(404, "不存在")
     if c.status != "approved":
         raise HTTPException(400, "需要先审批")
 
-    acc = await db.get(Account, account_id)
+    # 锁账户行以获取一致性的余额
+    acc = (await db.execute(
+        select(Account).where(Account.id == account_id).with_for_update()
+    )).scalar_one_or_none()
     if not acc:
         raise HTTPException(400, "账户不存在")
     if acc.balance < c.amount:
@@ -281,5 +295,9 @@ async def delete_claim(claim_id: str, user: CurrentUser, db: AsyncSession = Depe
     c = await db.get(ExpenseClaim, claim_id)
     if not c:
         raise HTTPException(404, "不存在")
+    # 只允许删 pending / rejected：其他状态已动过账户（share_out / pay），删除会让账户永久失衡
+    if c.status not in ("pending", "rejected"):
+        raise HTTPException(400,
+            f"状态为 '{c.status}' 的报销不能删除；已动账的需走反向凭证冲正")
     await db.delete(c)
     await db.flush()

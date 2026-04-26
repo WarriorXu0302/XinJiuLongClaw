@@ -98,36 +98,9 @@ async def create_inspection_case(
     bottles = await _bottles_of(obj, db)
     obj.profit_loss = _compute_profit_loss(obj, bottles)
 
-    # 回款账户联动
-    if obj.brand_id and obj.case_type in ('outflow_transfer', 'inflow_transfer'):
-        from app.models.product import Account, Product
-        from app.api.routes.accounts import record_fund_flow
-        ptm_acc = (await db.execute(
-            select(Account).where(Account.brand_id == obj.brand_id, Account.account_type == 'payment_to_mfr')
-        )).scalar_one_or_none()
-        # 单位换算：输入单位=箱时需要乘以 bottles_per_case
-        bpc = 1
-        if obj.quantity_unit == '箱' and obj.product_id:
-            prod = await db.get(Product, obj.product_id)
-            bpc = prod.bottles_per_case if prod and prod.bottles_per_case else 1
-        bottles = obj.quantity * bpc
-        if ptm_acc:
-            if obj.case_type == 'outflow_transfer' and obj.transfer_amount > 0:
-                # A3被转码：扣减回款
-                ptm_acc.balance -= obj.transfer_amount
-                await record_fund_flow(db, account_id=ptm_acc.id, flow_type='debit',
-                    amount=obj.transfer_amount, balance_after=ptm_acc.balance,
-                    related_type='transfer_deduction', related_id=obj.id,
-                    notes=f"被转码扣减回款 {obj.case_no}")
-            elif obj.case_type == 'inflow_transfer' and obj.purchase_price > 0 and bottles > 0:
-                # B2转码入库：增加回款（买入价×瓶数）
-                amt = obj.purchase_price * bottles
-                ptm_acc.balance += amt
-                await record_fund_flow(db, account_id=ptm_acc.id, flow_type='credit',
-                    amount=amt, balance_after=ptm_acc.balance,
-                    related_type='transfer_credit', related_id=obj.id,
-                    notes=f"转码入库增加回款 {obj.case_no} ({bottles}瓶)")
-        await db.flush()
+    # 注意：A3/B2 的 payment_to_mfr 账户联动**已挪到 execute 阶段统一处理**。
+    # 历史在 create 阶段就扣/加 ptm，但案件后续可能被 update/reject/delete，
+    # 而 update 不重算账户变动 → 漂移。统一只在 execute 阶段动账。
 
     await log_audit(db, action="create_inspection_case", entity_type="InspectionCase", entity_id=obj.id, user=user)
     await db.refresh(obj, ["product"])
@@ -205,7 +178,10 @@ async def execute_inspection_case(
     from app.models.product import Account, Product, Warehouse
     from app.api.routes.accounts import record_fund_flow
 
-    case = await db.get(InspectionCase, case_id)
+    # with_for_update 锁住 case 行，避免两个 execute 并发各自通过状态校验后重复扣款
+    case = (await db.execute(
+        select(InspectionCase).where(InspectionCase.id == case_id).with_for_update()
+    )).scalar_one_or_none()
     if case is None:
         raise HTTPException(404, "案件不存在")
     if case.status != 'approved':
@@ -285,6 +261,33 @@ async def execute_inspection_case(
             await record_fund_flow(db, account_id=brand_cash_acc.id, flow_type='credit', amount=income,
                 balance_after=brand_cash_acc.balance, related_type='inspection_income', related_id=case.id,
                 notes=f"清理回售收款 {case.case_no} ({bottles}瓶)")
+
+    # 1b. A3/B2 回款账户联动（historically in create phase — moved here for idempotency）
+    if case.case_type in ('outflow_transfer', 'inflow_transfer'):
+        ptm_acc = (await db.execute(
+            select(Account).where(
+                Account.brand_id == case.brand_id,
+                Account.account_type == 'payment_to_mfr',
+            )
+        )).scalar_one_or_none()
+        if ptm_acc is None:
+            raise HTTPException(400, "该品牌未配置 payment_to_mfr 账户，无法联动")
+        if case.case_type == 'outflow_transfer' and case.transfer_amount and case.transfer_amount > 0:
+            if ptm_acc.balance < case.transfer_amount:
+                raise HTTPException(400,
+                    f"payment_to_mfr 账户余额不足：¥{ptm_acc.balance} < 需扣 ¥{case.transfer_amount}")
+            ptm_acc.balance -= case.transfer_amount
+            await record_fund_flow(db, account_id=ptm_acc.id, flow_type='debit',
+                amount=case.transfer_amount, balance_after=ptm_acc.balance,
+                related_type='transfer_deduction', related_id=case.id,
+                notes=f"被转码扣减回款 {case.case_no}")
+        elif case.case_type == 'inflow_transfer' and case.purchase_price and bottles > 0:
+            amt = case.purchase_price * bottles
+            ptm_acc.balance += amt
+            await record_fund_flow(db, account_id=ptm_acc.id, flow_type='credit',
+                amount=amt, balance_after=ptm_acc.balance,
+                related_type='transfer_credit', related_id=case.id,
+                notes=f"转码入库增加回款 {case.case_no} ({bottles}瓶)")
 
     # 2. 入库/出库
     target_wh = None
@@ -385,37 +388,13 @@ async def delete_inspection_case(
     obj = await db.get(InspectionCase, case_id)
     if obj is None:
         raise HTTPException(404, "InspectionCase not found")
-    # 已执行的案件不允许删除（库存+账户已变动）
-    if obj.status in ('processing', 'settled', 'closed'):
-        raise HTTPException(400, f"已执行的案件（状态={obj.status}）不能删除，如需修正请联系财务管理员手工调账")
+    # 已执行的案件不允许删除：execute 时已动账+动库存，删除会导致账目和库存永久不平
+    # （历史 bug：拒绝列表漏掉 'executed'，导致已执行案件被删库存账户错乱）
+    if obj.status not in ('pending', 'approved', 'rejected'):
+        raise HTTPException(400,
+            f"案件状态为 {obj.status}，已执行/归档的案件不能删除；如需修正请联系财务手工调账或走反向凭证")
 
-    # 反转 create 时产生的账户变动（pending/approved 状态）
-    from app.models.product import Account
-    from app.api.routes.accounts import record_fund_flow
-    if obj.brand_id and obj.case_type in ('outflow_transfer', 'inflow_transfer'):
-        ptm_acc = (await db.execute(
-            select(Account).where(Account.brand_id == obj.brand_id, Account.account_type == 'payment_to_mfr')
-        )).scalar_one_or_none()
-        if ptm_acc:
-            if obj.case_type == 'outflow_transfer' and obj.transfer_amount and obj.transfer_amount > 0:
-                ptm_acc.balance += obj.transfer_amount  # 加回来
-                await record_fund_flow(db, account_id=ptm_acc.id, flow_type='credit',
-                    amount=obj.transfer_amount, balance_after=ptm_acc.balance,
-                    related_type='transfer_deduction_reverse', related_id=obj.id,
-                    notes=f"撤销被转码扣减 {obj.case_no}")
-            elif obj.case_type == 'inflow_transfer' and obj.purchase_price and obj.quantity:
-                from app.models.product import Product
-                prod = await db.get(Product, obj.product_id) if obj.product_id else None
-                bpc = prod.bottles_per_case if prod and prod.bottles_per_case else 1
-                bottles = obj.quantity * bpc if obj.quantity_unit == '箱' else obj.quantity
-                amt = obj.purchase_price * bottles
-                if amt > 0:
-                    ptm_acc.balance -= amt
-                    await record_fund_flow(db, account_id=ptm_acc.id, flow_type='debit',
-                        amount=amt, balance_after=ptm_acc.balance,
-                        related_type='transfer_credit_reverse', related_id=obj.id,
-                        notes=f"撤销转码入库 {obj.case_no}")
-
+    # create 阶段不再动账（A3/B2 的 ptm 联动已挪到 execute）→ 这里无需反转
     await log_audit(db, action="delete_inspection_case", entity_type="InspectionCase", entity_id=obj.id,
                     changes={"case_no": obj.case_no, "case_type": obj.case_type, "status": obj.status}, user=user)
     await db.delete(obj)

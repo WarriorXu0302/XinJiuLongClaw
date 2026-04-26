@@ -217,19 +217,28 @@ async def approve_repayment(
 ):
     """Approve → deduct brand cash account. Auto-reject if insufficient."""
     require_role(user, "boss")
-    rep = await db.get(FinancingRepayment, repayment_id)
+    # 锁 repayment 行，避免同一 repayment 被两个 approve 并发处理
+    rep = (await db.execute(
+        select(FinancingRepayment).where(FinancingRepayment.id == repayment_id).with_for_update()
+    )).scalar_one_or_none()
     if not rep:
         raise HTTPException(404, "还款申请不存在")
     if rep.status != "pending":
         raise HTTPException(400, f"状态为 '{rep.status}'，不是待审批")
 
-    order = await db.get(FinancingOrder, rep.financing_order_id)
+    # 锁 order 行：防止多笔 pending 并发 approve 时 `order.repaid_principal +=` 覆盖丢一笔
+    order = (await db.execute(
+        select(FinancingOrder).where(FinancingOrder.id == rep.financing_order_id).with_for_update()
+    )).scalar_one_or_none()
     if not order:
         raise HTTPException(400, "融资订单不存在")
 
     pay_acc = await db.get(Account, rep.payment_account_id)
     if not pay_acc:
         raise HTTPException(400, "现金账户不存在")
+    # 跨品牌校验：防止拿别品牌现金账户还本品牌融资
+    if pay_acc.brand_id and pay_acc.brand_id != order.brand_id:
+        raise HTTPException(400, "现金账户品牌与融资订单品牌不一致，拒绝跨品牌还款")
 
     from app.api.routes.accounts import record_fund_flow
     is_return = rep.repayment_type == "return_warehouse"
@@ -243,11 +252,30 @@ async def approve_repayment(
         await db.flush()
         return {"message": rep.reject_reason, "status": "rejected"}
 
+    # F 类结算预校验（以前是静默跳过 → 会让现金/PO/order 已更新但 F 类未扣，账务永久失衡）
+    f_acc = None
+    if rep.f_class_amount and rep.f_class_amount > 0:
+        if not rep.f_class_account_id:
+            raise HTTPException(400, "F类金额 > 0 但未指定 F 类账户")
+        f_acc = await db.get(Account, rep.f_class_account_id)
+        if not f_acc:
+            raise HTTPException(400, "F 类账户不存在")
+        if f_acc.brand_id and f_acc.brand_id != order.brand_id:
+            raise HTTPException(400, "F 类账户品牌与融资订单不一致")
+        if f_acc.balance < rep.f_class_amount:
+            raise HTTPException(400,
+                f"F类账户余额不足：¥{f_acc.balance} < 需扣 ¥{rep.f_class_amount}")
+
+    # 再校验剩余本金（并发已被锁拦住，这里仅兜底）
+    if not is_return and rep.principal_amount > order.outstanding_balance:
+        raise HTTPException(400,
+            f"还款本金 ¥{rep.principal_amount} 超过未还余额 ¥{order.outstanding_balance}（可能被其他并发还款已占用）")
+
     # 1. Deduct cash
     pay_acc.balance -= cash_needed
     await record_fund_flow(
         db, account_id=pay_acc.id, flow_type="debit", amount=cash_needed,
-        balance_after=pay_acc.balance, related_type="financing_repayment", related_id=order.id,
+        balance_after=pay_acc.balance, related_type="financing_repayment", related_id=rep.id,
         notes=f"{'退仓利息' if is_return else '融资还款'} {order.order_no} 本金¥{rep.principal_amount} 利息¥{rep.interest_amount}",
         created_by=user.get("employee_id"), brand_id=order.brand_id,
     )
@@ -259,22 +287,20 @@ async def approve_repayment(
         await record_fund_flow(
             db, account_id=fin_acc.id, flow_type="financing_repayment",
             amount=rep.principal_amount, balance_after=fin_acc.balance,
-            related_type="financing_repayment", related_id=order.id,
+            related_type="financing_repayment", related_id=rep.id,
             notes=f"{'退仓销账' if is_return else '融资还本'} {order.order_no} ¥{rep.principal_amount}",
             created_by=user.get("employee_id"), brand_id=order.brand_id,
         )
 
-    # 3. F-class settlement
-    if rep.f_class_amount > 0 and rep.f_class_account_id:
-        f_acc = await db.get(Account, rep.f_class_account_id)
-        if f_acc and f_acc.balance >= rep.f_class_amount:
-            f_acc.balance -= rep.f_class_amount
-            await record_fund_flow(
-                db, account_id=f_acc.id, flow_type="debit", amount=rep.f_class_amount,
-                balance_after=f_acc.balance, related_type="financing_repayment", related_id=order.id,
-                notes=f"融资带出F类 {order.order_no} ¥{rep.f_class_amount}",
-                created_by=user.get("employee_id"), brand_id=order.brand_id,
-            )
+    # 3. F-class settlement（前面已预校验，此处必定扣得动）
+    if f_acc is not None:
+        f_acc.balance -= rep.f_class_amount
+        await record_fund_flow(
+            db, account_id=f_acc.id, flow_type="debit", amount=rep.f_class_amount,
+            balance_after=f_acc.balance, related_type="financing_repayment", related_id=rep.id,
+            notes=f"融资带出F类 {order.order_no} ¥{rep.f_class_amount}",
+            created_by=user.get("employee_id"), brand_id=order.brand_id,
+        )
 
     # TODO: 退仓(return_warehouse) 场景应从主仓出库对应货物，抵消本金。
     # 目前 FinancingRepayment 无 return_product_id/return_quantity 字段，

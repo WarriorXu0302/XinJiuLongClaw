@@ -52,6 +52,9 @@
 - [971719c] **严重**：`salary_order_links` 无唯一约束，并发生成工资单时同一订单提成可能双发。加 `(order_id, is_manager_share)` 唯一约束 + 清理历史重复
 - [971719c] **严重**：采购撤销反扣 `payment_to_mfr` 账户时无余额校验，并发多单撤销可能让账户变负。加 SELECT FOR UPDATE + balance 校验
 - [971719c] OrderList 建单预览政策应收在 employee_pay（业务员垫差）模式下错误显示为 policy_gap，应为 0
+- [6a8027d] **严重**：`confirm_arrival` 无幂等保护，重复点击/网络重试会让 F 类账户余额被加两次
+- [6a8027d] **严重**：`confirm_fulfill` 的 settled_amount 用 `+=` 累加，重复确认同一条目会无限膨胀，导致利润台账"政策兑付盈利"虚高
+- [6a8027d] 销售目标里程碑通知永远不推送（`prev_rate == rate` 条件始终不成立）
 - [#3] `requirements.txt` 补 `mcp` / `openpyxl`；锁 `bcrypt==4.3.0`（passlib 1.7 跟 bcrypt 5.x 自检冲突）
 - [#3] `.env.example` `CORS_ORIGINS` 改 JSON 数组格式，Pydantic v2 不接受逗号分隔
 - [#4] antd v6 废弃 API 批量替换：`Drawer.width → size`（1 处）、`Statistic.valueStyle → styles.content`（30 处）、`Alert.message → title`（15 处）

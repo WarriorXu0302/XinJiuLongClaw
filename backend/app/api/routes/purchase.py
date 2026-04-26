@@ -334,13 +334,23 @@ async def cancel_paid_purchase_order(po_id: str, user: CurrentUser, db: AsyncSes
             await record_fund_flow(db, account_id=fin_acc.id, flow_type='credit', amount=po.financing_amount,
                 balance_after=fin_acc.balance, related_type='purchase_cancel', related_id=po.id,
                 notes=f"撤销采购付款(融资) {po.po_no}")
-    # 撤销回款账户增加
+    # 撤销回款账户减少（payment_to_mfr 代表"已应付给厂家"的记账，撤销时反扣）
+    # 用 SELECT FOR UPDATE 锁行 + 余额校验，防并发撤销多个 PO 导致账户变负
     payment_total = po.cash_amount + po.financing_amount
     if payment_total > 0 and po.brand_id:
         ptm_acc = (await db.execute(
-            select(Account).where(Account.brand_id == po.brand_id, Account.account_type == 'payment_to_mfr')
+            select(Account)
+            .where(Account.brand_id == po.brand_id, Account.account_type == 'payment_to_mfr')
+            .with_for_update()
         )).scalar_one_or_none()
         if ptm_acc:
+            if Decimal(str(ptm_acc.balance)) < Decimal(str(payment_total)):
+                raise HTTPException(
+                    400,
+                    f"回款账户 {ptm_acc.name} 余额不足 "
+                    f"(¥{ptm_acc.balance} < ¥{payment_total})，无法撤销。"
+                    "可能有并发操作或之前已部分结算，请联系财务核对。",
+                )
             ptm_acc.balance -= payment_total
             await record_fund_flow(db, account_id=ptm_acc.id, flow_type='debit', amount=payment_total,
                 balance_after=ptm_acc.balance, related_type='purchase_cancel', related_id=po.id,

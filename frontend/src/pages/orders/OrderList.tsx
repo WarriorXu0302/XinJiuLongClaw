@@ -557,7 +557,11 @@ function OrderList() {
                           <div style={{ textAlign: 'center' }}>
                             <div style={{ color: '#888', fontSize: 12 }}>政策应收</div>
                             <div style={{ fontSize: 18, fontWeight: 600, color: '#722ed1' }}>
-                              ¥{(settlementMode === 'customer_pay' ? 0 : policyGap).toLocaleString()}
+                              {/* 政策应收 = 公司需向厂家收回的政策差额。
+                                    customer_pay：客户按指导价付，无差额 → 0
+                                    employee_pay：业务员垫差额，非公司应收 → 0
+                                    company_pay：公司让利，等厂家兑付 → policy_gap */}
+                              ¥{(settlementMode === 'company_pay' ? policyGap : 0).toLocaleString()}
                             </div>
                           </div>
                         </Col>

@@ -334,12 +334,34 @@ async def update_receipt(receipt_id: str, body: ReceiptUpdate, user: CurrentUser
 
 @router.delete("/receipts/{receipt_id}", status_code=204)
 async def delete_receipt(receipt_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    """删除 Receipt — 只允许删未动账的（pending_confirmation / rejected）。
+
+    已 confirmed 的 Receipt 已加了 master balance 并写过 fund_flow，删掉会
+    导致账务永久失衡（余额虚高 / fund_flow 孤儿）。要撤销已入账的收款必须
+    走"反向凭证"流程（财务新建负数 Receipt），而不是 DELETE。
+    """
     require_role(user, "boss", "finance")
     obj = await db.get(Receipt, receipt_id)
     if obj is None:
         raise HTTPException(404, "Receipt not found")
+    if obj.status == "confirmed":
+        raise HTTPException(
+            400,
+            f"收款 {obj.receipt_no} 已入账，不能删除。如需撤销请走反向凭证流程（新建负数收款）。",
+        )
+    # 删关联 fund_flow（保险起见，即便 pending 状态理论上没有流水）
+    from app.models.fund_flow import FundFlow
+    await db.execute(
+        FundFlow.__table__.delete().where(
+            FundFlow.related_type == 'receipt',
+            FundFlow.related_id == obj.id,
+        )
+    )
     await db.delete(obj)
     await db.flush()
+    await log_audit(db, action="delete_receipt", entity_type="Receipt",
+                    entity_id=obj.id, user=user,
+                    changes={"receipt_no": obj.receipt_no, "status_when_deleted": obj.status})
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -413,12 +435,34 @@ async def update_payment(payment_id: str, body: PaymentUpdate, user: CurrentUser
 
 @router.delete("/payments/{payment_id}", status_code=204)
 async def delete_payment(payment_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    """删除 Payment — Payment 代表已经付出去的钱，删掉会导致账户余额虚低。
+
+    Payment 没有 status 字段区分草稿/已付，设计上每条都算已执行。
+    只有 admin 能强删（走 /accounts/fund-flows 反向凭证更规范）。
+    """
     require_role(user, "boss", "finance")
+    if not user.get("is_admin"):
+        raise HTTPException(
+            400,
+            "Payment 代表已付款记录，不能直接删除。"
+            "如需撤销请在资金流水页建反向凭证，或联系管理员。",
+        )
     obj = await db.get(Payment, payment_id)
     if obj is None:
         raise HTTPException(404, "Payment not found")
+    # 删关联 fund_flow
+    from app.models.fund_flow import FundFlow
+    await db.execute(
+        FundFlow.__table__.delete().where(
+            FundFlow.related_type == 'payment',
+            FundFlow.related_id == obj.id,
+        )
+    )
     await db.delete(obj)
     await db.flush()
+    await log_audit(db, action="delete_payment", entity_type="Payment",
+                    entity_id=obj.id, user=user,
+                    changes={"payment_no": obj.payment_no, "amount": float(obj.amount)})
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -473,12 +517,22 @@ async def update_expense(expense_id: str, body: ExpenseUpdate, user: CurrentUser
 
 @router.delete("/expenses/{expense_id}", status_code=204)
 async def delete_expense(expense_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    """删除费用单 — 已付款的禁止删（会导致账户余额虚低）。"""
     require_role(user, "boss", "finance")
     obj = await db.get(Expense, expense_id)
     if obj is None:
         raise HTTPException(404, "Expense not found")
+    if obj.status == PaymentRequestStatus.PAID or str(obj.status) == 'paid':
+        raise HTTPException(
+            400,
+            f"费用单 {obj.expense_no} 已付款，不能直接删除。"
+            "如需撤销请建反向凭证或联系管理员。",
+        )
     await db.delete(obj)
     await db.flush()
+    await log_audit(db, action="delete_expense", entity_type="Expense",
+                    entity_id=obj.id, user=user,
+                    changes={"expense_no": obj.expense_no, "status_when_deleted": str(obj.status)})
 
 
 @router.post("/expenses/{expense_id}/approve", response_model=ExpenseResponse)

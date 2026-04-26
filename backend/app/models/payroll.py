@@ -190,8 +190,15 @@ class SalaryRecord(Base):
 
 
 class SalaryOrderLink(Base):
-    """工资记录对应的订单明细（这月哪些订单算了提成）"""
+    """工资记录对应的订单明细（这月哪些订单算了提成）
+
+    唯一约束 (order_id, is_manager_share)：一个订单最多挂两次——员工本人提成
+    一次 + 经理分成一次。并发生成工资单时约束兜底避免双发。
+    """
     __tablename__ = "salary_order_links"
+    __table_args__ = (
+        UniqueConstraint("order_id", "is_manager_share", name="uq_order_commission_once"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     salary_record_id: Mapped[str] = mapped_column(

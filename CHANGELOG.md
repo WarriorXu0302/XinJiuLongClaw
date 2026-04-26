@@ -48,6 +48,10 @@
 - [007b14a] `FinanceApproval` 审批中心查询条件适配 P2c-1 新流程（`pending_receipt_count > 0`）
 - [651a55c] **review 发现严重 bug**：`POST /api/receipts` 和 MCP register-payment 立即动账但 Receipt.status 默认 `pending_confirmation`，会被 confirm_payment 当"待审"二次处理导致**重复加余额**。两路径显式设 `status=confirmed` 修复
 - [651a55c] RLS 补齐后业务员看不到 master 账户 → `upload_payment_voucher` 400。改成 account_id 暂不绑定，审批时才填 master
+- [971719c] **严重**：删除 Receipt/Payment/Expense 时没回滚账户余额、没删 fund_flow，账务永久失衡。已 confirmed/paid 的单据改为拒绝删除（要撤销走反向凭证）
+- [971719c] **严重**：`salary_order_links` 无唯一约束，并发生成工资单时同一订单提成可能双发。加 `(order_id, is_manager_share)` 唯一约束 + 清理历史重复
+- [971719c] **严重**：采购撤销反扣 `payment_to_mfr` 账户时无余额校验，并发多单撤销可能让账户变负。加 SELECT FOR UPDATE + balance 校验
+- [971719c] OrderList 建单预览政策应收在 employee_pay（业务员垫差）模式下错误显示为 policy_gap，应为 0
 - [#3] `requirements.txt` 补 `mcp` / `openpyxl`；锁 `bcrypt==4.3.0`（passlib 1.7 跟 bcrypt 5.x 自检冲突）
 - [#3] `.env.example` `CORS_ORIGINS` 改 JSON 数组格式，Pydantic v2 不接受逗号分隔
 - [#4] antd v6 废弃 API 批量替换：`Drawer.width → size`（1 处）、`Statistic.valueStyle → styles.content`（30 处）、`Alert.message → title`（15 处）

@@ -24,6 +24,8 @@
 - [#6] 审计日志 `open_id` 由前 8 字符明文改成 sha256 hash，防指纹定位个人（L2）
 - [#9] 给 8 张带 brand_id 的表补 RLS 品牌隔离策略（purchase_orders / financing_orders / expense_claims / receivables / policy_templates / brand_salary_schemes / policy_usage_records / tasting_wine_usage，修 health-check S3 的 8/11）
 - [#10] 给 4 张表补 RLS：customer_brand_salesman + customers（多对多反查）+ sales_targets（按品牌/层级隔离）+ policy_claims
+- [007b14a] **严重修复**：补齐 12 张核心表（orders/receipts/payments/accounts/fund_flows/salary_records 等）的 RLS policy。原 migration a1b2c3d4e5f6 因部署流程走 `stamp head` 从未真正应用，导致业务员自部署起就能看到 master 总资金池金额、所有品牌订单等跨品牌数据
+- [007b14a] POST /api/receipts 业务员不再直接动账，走"上传凭证 → 待财务审批 → 确认后才入账"流程（P2c-1，按用户 D3 决策）
 
 ### Added
 
@@ -38,6 +40,12 @@
 
 ### Fixed
 
+- [007b14a] **严重 bug**：`server_default="now()"` 是字符串字面量，PG 建表时立即求值固化，导致所有表的 `created_at` 都是同一个静态时间。21 个模型改 `func.now()` + migration 修所有表 DB default
+- [007b14a] 前端 11 个上传调用手工设 `Content-Type: multipart/form-data` 覆盖了 axios 的 boundary → 400；2 处 Blob 上传缺 filename → 422
+- [007b14a] 11 个页面时间字符串切片显示，实际少 8 小时。统一 `toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })`
+- [007b14a] `customers` 列表多品牌客户 JOIN CBS 重复显示，加 `distinct()`
+- [007b14a] `seed.py` 补业务员品牌绑定 + 客户 CBS + master 账户 + Position，RLS 启用后本地环境才能跑完整业务流
+- [007b14a] `FinanceApproval` 审批中心查询条件适配 P2c-1 新流程（`pending_receipt_count > 0`）
 - [#3] `requirements.txt` 补 `mcp` / `openpyxl`；锁 `bcrypt==4.3.0`（passlib 1.7 跟 bcrypt 5.x 自检冲突）
 - [#3] `.env.example` `CORS_ORIGINS` 改 JSON 数组格式，Pydantic v2 不接受逗号分隔
 - [#4] antd v6 废弃 API 批量替换：`Drawer.width → size`（1 处）、`Statistic.valueStyle → styles.content`（30 处）、`Alert.message → title`（15 处）

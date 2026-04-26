@@ -101,6 +101,8 @@ async def list_customers(
             base = base.where(CustomerBrandSalesman.salesman_id == salesman_id)
         if force_own:
             base = base.where(CustomerBrandSalesman.salesman_id == user["employee_id"])
+        # 多品牌客户（同一 customer 在 CBS 里有多条）join 后会重复，去重
+        base = base.distinct()
 
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
     rows = (await db.execute(

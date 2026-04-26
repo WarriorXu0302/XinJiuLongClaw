@@ -261,6 +261,67 @@ async def list_orders(
     return {"items": rows, "total": total}
 
 
+@router.get("/pending-receipt-confirmation")
+async def list_orders_pending_receipt_confirmation(
+    user: CurrentUser,
+    brand_id: str | None = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """审批中心列表：有 pending Receipt 的订单。
+
+    **必须注册在 /{order_id} GET 之前**，否则 "pending-receipt-confirmation"
+    会被当成 order_id 路径参数吃掉，返回 "Order not found"。
+
+    finance/boss 用。每个订单聚合显示：订单基本信息 + pending 凭证笔数和累计金额。
+    """
+    require_role(user, "boss", "finance", "admin")
+    from app.models.finance import Receipt
+
+    pending_sub = (
+        select(
+            Receipt.order_id,
+            func.count(Receipt.id).label("pending_count"),
+            func.coalesce(func.sum(Receipt.amount), 0).label("pending_amount"),
+        )
+        .where(Receipt.status == "pending_confirmation")
+        .group_by(Receipt.order_id)
+        .subquery()
+    )
+
+    q = (
+        select(Order, pending_sub.c.pending_count, pending_sub.c.pending_amount)
+        .join(pending_sub, pending_sub.c.order_id == Order.id)
+    )
+    if brand_id:
+        q = q.where(Order.brand_id == brand_id)
+
+    total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar() or 0
+    rows = (await db.execute(
+        q.order_by(Order.created_at.desc()).offset(skip).limit(limit)
+    )).all()
+
+    items = [
+        {
+            "order_id": order.id,
+            "order_no": order.order_no,
+            "customer_id": order.customer_id,
+            "brand_id": order.brand_id,
+            "salesman_id": order.salesman_id,
+            "total_amount": float(order.total_amount),
+            "customer_paid_amount": float(order.customer_paid_amount) if order.customer_paid_amount else None,
+            "settlement_mode": order.settlement_mode,
+            "pending_receipt_count": int(pending_count),
+            "pending_receipt_amount": float(pending_amount),
+            "payment_status": order.payment_status,
+            "created_at": order.created_at.isoformat() if order.created_at else None,
+        }
+        for order, pending_count, pending_amount in rows
+    ]
+    return {"items": items, "total": total}
+
+
 @router.get("/{order_id}", response_model=OrderResponse)
 async def get_order(order_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     order = (await db.execute(
@@ -595,11 +656,20 @@ async def upload_delivery(
 async def upload_payment_voucher(
     order_id: str, body: PaymentVoucherBody, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
-    """Upload payment voucher + register a Receipt (累加式；自动更新 payment_status)。"""
+    """业务员上传收款凭证 — 只建 pending Receipt，**不动账**。
+
+    P2c 行为：
+    - 新建 Receipt 状态为 'pending_confirmation'
+    - 订单 payment_status 置为 PENDING_CONFIRMATION（有任一待审就是这个状态）
+    - 不加账户余额、不写 fund_flow、不生成 commission、不刷 KPI
+    - 这些副作用由财务在审批中心 "确认收款" 时才触发
+
+    此前行为（凭证一上传就进账）的业务风险：任何业务员能伪造一条收款把公司账算多。
+    现在必须经财务审核。
+    """
     require_role(user, "boss", "finance", "salesman")
     from app.models.finance import Receipt
     from app.models.base import OrderPaymentMethod, PaymentStatus
-    from app.api.routes.accounts import record_fund_flow
     from app.models.product import Account
 
     order = await db.get(Order, order_id)
@@ -614,7 +684,7 @@ async def upload_payment_voucher(
     existing_urls = order.payment_voucher_urls or []
     order.payment_voucher_urls = existing_urls + body.voucher_urls
 
-    # 建 Receipt —— 自动进 master 现金池（收款统一入口）
+    # account_id 只做关联标记（最终入账账户），不读余额、不加减
     master_cash = (await db.execute(
         select(Account).where(Account.level == 'master', Account.account_type == 'cash')
     )).scalar_one_or_none()
@@ -633,42 +703,26 @@ async def upload_payment_voucher(
         payment_method=body.payment_method or OrderPaymentMethod.BANK,
         receipt_date=datetime.now(timezone.utc).date(),
         source_type=body.source_type or "customer",
+        status="pending_confirmation",
         notes=f"订单 {order.order_no} 收款（{body.source_type or 'customer'}）",
     )
     db.add(receipt)
-    master_cash.balance += body.amount
-    await record_fund_flow(
-        db, account_id=master_cash.id, flow_type='credit', amount=body.amount,
-        balance_after=master_cash.balance, related_type='receipt', related_id=receipt.id,
-        notes=f"订单收款 {order.order_no}", created_by=user.get('employee_id'),
-        brand_id=order.brand_id,
-    )
-    # 先 flush 让新 Receipt 落库，下面的 SUM 才能查到
-    await db.flush()
 
-    # 更新 payment_status
-    total_received = (await db.execute(
-        select(func.coalesce(func.sum(Receipt.amount), 0)).where(Receipt.order_id == order.id)
-    )).scalar_one()
-    target_amount = order.customer_paid_amount or order.total_amount
-    prev_status = order.payment_status
-    if Decimal(str(total_received)) >= target_amount:
-        order.payment_status = PaymentStatus.FULLY_PAID
-    elif total_received > 0:
-        order.payment_status = PaymentStatus.PARTIALLY_PAID
+    # 订单 payment_status 置为待审批（只要有任一 pending Receipt 就是这个状态）
+    order.payment_status = PaymentStatus.PENDING_CONFIRMATION
 
     await db.flush()
     await log_audit(db, action="upload_payment_voucher", entity_type="Order", entity_id=order.id,
-                    changes={"amount": float(body.amount), "source_type": body.source_type}, user=user)
+                    changes={"amount": float(body.amount), "source_type": body.source_type,
+                             "receipt_id": receipt.id}, user=user)
 
-    # 只在全款跃升时才通知财务；部分付款不打扰
-    if prev_status != PaymentStatus.FULLY_PAID and order.payment_status == PaymentStatus.FULLY_PAID:
-        await notify_roles(
-            db, role_codes=["admin", "boss", "finance"],
-            title=f"订单已全款：{order.order_no}",
-            content=f"订单 {order.order_no} 已收齐 ¥{target_amount}，请在审批中心确认收款。",
-            entity_type="Order", entity_id=order.id,
-        )
+    # 通知财务：有待审凭证
+    await notify_roles(
+        db, role_codes=["admin", "boss", "finance"],
+        title=f"待审凭证：{order.order_no}",
+        content=f"业务员上传了 ¥{body.amount} 的收款凭证，请在审批中心确认。",
+        entity_type="Order", entity_id=order.id,
+    )
     return order
 
 
@@ -676,19 +730,97 @@ async def upload_payment_voucher(
 async def confirm_payment(
     order_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
-    """delivered → completed: boss/finance confirms payment received."""
+    """财务/老板审批此订单所有 pending Receipt —— 动账 + 订单完成。
+
+    按用户 D3 Q1=B 决策：一个订单的多条凭证一起审批（one-fails-all-fails）。
+    本端点做三件事：
+      1. 找该订单所有 status='pending_confirmation' 的 Receipt
+      2. 对每条：加 master 现金池余额 + 写 fund_flow + 状态改 confirmed
+      3. 重算订单 payment_status（按已确认总额）；若全款则 status=completed
+
+    若订单没有 pending Receipt（历史订单走旧流程已入账），退回旧行为：仅 delivered→completed。
+    """
     require_role(user, "boss", "finance")
+    from app.models.finance import Receipt
+    from app.models.base import PaymentStatus
+    from app.api.routes.accounts import record_fund_flow
+    from app.models.product import Account
+    from app.services.receipt_service import (
+        apply_per_receipt_effects,
+        apply_post_confirmation_effects,
+    )
+
     order = await db.get(Order, order_id)
     if order is None:
         raise HTTPException(404, "Order not found")
     if order.status != OrderStatus.DELIVERED:
         raise HTTPException(400, f"订单状态为 '{order.status}'，只有已送达的订单才能确认收款")
 
-    order.status = OrderStatus.COMPLETED
-    order.completed_at = datetime.now(timezone.utc)
+    pending_receipts = (await db.execute(
+        select(Receipt).where(
+            Receipt.order_id == order.id,
+            Receipt.status == "pending_confirmation",
+        ).order_by(Receipt.created_at)
+    )).scalars().all()
+
+    now = datetime.now(timezone.utc)
+    emp_id = user.get("employee_id")
+    prev_payment_status = order.payment_status
+
+    if pending_receipts:
+        master_cash = (await db.execute(
+            select(Account).where(Account.level == 'master', Account.account_type == 'cash')
+        )).scalar_one_or_none()
+        if not master_cash:
+            raise HTTPException(400, "未配置公司总资金池（master 现金账户）")
+
+        # 批量确认：每条 Receipt 加账户 + 记流水 + 改 status + 分摊应收
+        for r in pending_receipts:
+            master_cash.balance += Decimal(str(r.amount))
+            await record_fund_flow(
+                db, account_id=master_cash.id, flow_type='credit', amount=r.amount,
+                balance_after=master_cash.balance, related_type='receipt', related_id=r.id,
+                notes=f"订单收款 {order.order_no}（审批确认）", created_by=emp_id,
+                brand_id=order.brand_id,
+            )
+            r.status = "confirmed"
+            r.confirmed_at = now
+            r.confirmed_by = emp_id
+            # 应收账款分摊（每条 Receipt 单独跑一次）
+            await apply_per_receipt_effects(db, r, order)
+
+        await db.flush()
+
+    # 重算 payment_status：按已 confirmed 的 Receipt 累计
+    total_confirmed = (await db.execute(
+        select(func.coalesce(func.sum(Receipt.amount), 0)).where(
+            Receipt.order_id == order.id,
+            Receipt.status == "confirmed",
+        )
+    )).scalar_one()
+    target_amount = order.customer_paid_amount or order.total_amount
+
+    if Decimal(str(total_confirmed)) >= target_amount:
+        order.payment_status = PaymentStatus.FULLY_PAID
+        order.status = OrderStatus.COMPLETED
+        order.completed_at = now
+    elif total_confirmed > 0:
+        order.payment_status = PaymentStatus.PARTIALLY_PAID
+    # total_confirmed == 0: 保持原状（兜底）
+
     await db.flush()
-    await log_audit(db, action="confirm_payment", entity_type="Order", entity_id=order.id, user=user)
-    if order.salesman_id:
+
+    # 订单层副作用一次性触发：Commission 生成 / KPI 刷新 / 里程碑通知
+    await apply_post_confirmation_effects(db, order, user, prev_payment_status)
+
+    await log_audit(
+        db, action="confirm_payment", entity_type="Order", entity_id=order.id,
+        changes={"confirmed_receipt_count": len(pending_receipts),
+                 "confirmed_amount": float(sum(Decimal(str(r.amount)) for r in pending_receipts))},
+        user=user,
+    )
+
+    if order.salesman_id and order.status == OrderStatus.COMPLETED:
         from app.models.user import User
         salesman_user = (await db.execute(
             select(User).where(User.employee_id == order.salesman_id)
@@ -698,6 +830,91 @@ async def confirm_payment(
                 db, recipient_id=salesman_user.id,
                 title=f"收款已确认: {order.order_no}",
                 content=f"订单 {order.order_no} 收款已确认，订单完成",
+                entity_type="Order", entity_id=order.id,
+            )
+    return order
+
+
+class RejectReceiptsBody(BaseModel):
+    reason: str = ""
+
+
+@router.post("/{order_id}/reject-payment-receipts", response_model=OrderResponse)
+async def reject_payment_receipts(
+    order_id: str, body: RejectReceiptsBody, user: CurrentUser, db: AsyncSession = Depends(get_db),
+):
+    """财务拒绝此订单所有 pending Receipt（D3 Q1=B: 一起拒绝）。
+
+    行为：
+      - Receipt.status = 'rejected'，记原因
+      - 订单 payment_status 回退：看还有没有已确认的 Receipt
+      - 通知业务员
+
+    不删除 Receipt（保留存根）。业务员可重新上传。
+    """
+    require_role(user, "boss", "finance")
+    from app.models.finance import Receipt
+    from app.models.base import PaymentStatus
+
+    order = await db.get(Order, order_id)
+    if order is None:
+        raise HTTPException(404, "Order not found")
+
+    pending_receipts = (await db.execute(
+        select(Receipt).where(
+            Receipt.order_id == order.id,
+            Receipt.status == "pending_confirmation",
+        )
+    )).scalars().all()
+
+    if not pending_receipts:
+        raise HTTPException(400, "此订单没有待审的凭证")
+
+    now = datetime.now(timezone.utc)
+    emp_id = user.get("employee_id")
+    reason = body.reason or ""
+
+    for r in pending_receipts:
+        r.status = "rejected"
+        r.confirmed_at = now  # 处理时间
+        r.confirmed_by = emp_id
+        r.rejected_reason = reason
+
+    await db.flush()
+
+    # 重算订单 payment_status：回退到"已 confirmed 的金额"对应状态
+    total_confirmed = (await db.execute(
+        select(func.coalesce(func.sum(Receipt.amount), 0)).where(
+            Receipt.order_id == order.id,
+            Receipt.status == "confirmed",
+        )
+    )).scalar_one()
+    target_amount = order.customer_paid_amount or order.total_amount
+
+    if Decimal(str(total_confirmed)) >= target_amount:
+        order.payment_status = PaymentStatus.FULLY_PAID  # 不该发生但兜底
+    elif total_confirmed > 0:
+        order.payment_status = PaymentStatus.PARTIALLY_PAID
+    else:
+        order.payment_status = PaymentStatus.UNPAID
+
+    await db.flush()
+    await log_audit(
+        db, action="reject_payment_receipts", entity_type="Order", entity_id=order.id,
+        changes={"rejected_count": len(pending_receipts), "reason": reason}, user=user,
+    )
+
+    # 通知业务员
+    if order.salesman_id:
+        from app.models.user import User
+        salesman_user = (await db.execute(
+            select(User).where(User.employee_id == order.salesman_id)
+        )).scalar_one_or_none()
+        if salesman_user:
+            await notify(
+                db, recipient_id=salesman_user.id,
+                title=f"凭证被拒：{order.order_no}",
+                content=f"{len(pending_receipts)} 条待审凭证被拒绝。原因：{reason or '未说明'}。请重新上传。",
                 entity_type="Order", entity_id=order.id,
             )
     return order

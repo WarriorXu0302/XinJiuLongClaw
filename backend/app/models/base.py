@@ -48,10 +48,16 @@ class OrderStatus(str, enum.Enum):
 
 
 class PaymentStatus(str, enum.Enum):
-    """Order payment status."""
+    """Order payment status.
+
+    pending_confirmation 说明：业务员上传了凭证建了 Receipt，
+    但财务尚未在审批中心确认。此状态下凭证不动账、订单不锁定。
+    财务确认后 Receipt.status=confirmed，根据累计金额转为 partially_paid 或 fully_paid。
+    """
 
     UNPAID = "unpaid"
     PARTIALLY_PAID = "partially_paid"
+    PENDING_CONFIRMATION = "pending_confirmation"
     FULLY_PAID = "fully_paid"
 
 

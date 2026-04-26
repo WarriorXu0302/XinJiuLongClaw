@@ -7,7 +7,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -69,7 +69,20 @@ class Receipt(Base):
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # 凭证来源：customer（客户付款）/ employee_advance（业务员垫付补款）/ company_advance（公司内部转账）
     source_type: Mapped[str] = mapped_column(String(20), default="customer")
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    # 审批状态（P2c 引入）：
+    #   pending_confirmation — 业务员传了凭证，财务未审（不动账）
+    #   confirmed            — 财务已确认（已动账）
+    #   rejected             — 财务拒绝（不动账、可查存根）
+    # 历史 Receipt（P2c 前建的）migration 批量标 confirmed。
+    status: Mapped[str] = mapped_column(
+        String(30), default="pending_confirmation", nullable=False, index=True
+    )
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    confirmed_by: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("employees.id"), nullable=True
+    )
+    rejected_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))
 
     customer: Mapped[Optional["Customer"]] = relationship("Customer", lazy="selectin")
@@ -108,7 +121,7 @@ class Payment(Base):
     )
     payment_date: Mapped[date] = mapped_column(Date, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))
 
     account: Mapped[Optional["Account"]] = relationship("Account", lazy="selectin")
@@ -158,7 +171,7 @@ class Expense(Base):
         default=ExpenseStatus.PENDING,
         nullable=False,
     )
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))
 
     payment_account: Mapped[Optional["Account"]] = relationship(
@@ -197,7 +210,7 @@ class ExpenseCategory(Base):
     )
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 
 class ManufacturerSettlement(Base):
@@ -241,7 +254,7 @@ class ManufacturerSettlement(Base):
     )
     confirmed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))
 
     manufacturer: Mapped[Optional["Supplier"]] = relationship(
@@ -316,7 +329,7 @@ class FinancePaymentRequest(Base):
     payment_voucher_urls: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     signed_photo_urls: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     paid_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))
 
     source_usage_record: Mapped[Optional["PolicyUsageRecord"]] = relationship(

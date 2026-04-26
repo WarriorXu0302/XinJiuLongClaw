@@ -927,6 +927,9 @@ async def confirm_arrival(
         ri = await db.get(PolicyRequestItem, item.item_id)
         if ri is None:
             continue
+        # 幂等保护：已到账的条目直接跳过，避免重复点击/网络重试把 F 类账户加两次
+        if ri.fulfill_status == "arrived" or ri.arrival_at is not None:
+            continue
         ri.fulfill_status = "arrived"
         ri.arrival_amount = Decimal(str(item.arrived_amount))
         ri.arrival_billcode = item.billcode
@@ -1047,12 +1050,15 @@ async def confirm_fulfill(
     ri = await db.get(PolicyRequestItem, body.item_id)
     if ri is None or ri.policy_request_id != request_id:
         raise HTTPException(404, "政策明细项不存在")
-    if ri.fulfill_status not in ("fulfilled", "settled"):
+    # 幂等：已 settled 的条目再次确认直接返回，避免 settled_amount 累加
+    if ri.fulfill_status == "settled":
+        return {"detail": "该项已归档，无需重复确认"}
+    if ri.fulfill_status != "fulfilled":
         raise HTTPException(400, f"状态为 '{ri.fulfill_status}'，需要先提交兑付凭证")
 
-    # 确认后归档。如果还有剩余数量，业务员在政策申请页继续申请时会重新激活状态
+    # 确认后归档。settled_amount 不累加，直接赋值为本次到账金额或应收总额
     ri.fulfill_status = "settled"
-    ri.settled_amount = (ri.settled_amount or Decimal("0")) + (ri.arrival_amount or ri.total_value)
+    ri.settled_amount = ri.arrival_amount if ri.arrival_amount and ri.arrival_amount > 0 else ri.total_value
     ri.confirmed_by = user.get("employee_id")
     await db.flush()
     await log_audit(db, action="confirm_fulfill", entity_type="PolicyRequestItem", entity_id=ri.id, user=user)

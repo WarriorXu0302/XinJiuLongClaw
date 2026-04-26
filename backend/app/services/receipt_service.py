@@ -249,9 +249,14 @@ async def apply_post_confirmation_effects(
                 continue
             rate = float(metric_actual / target_val)
 
-            # 里程碑推送：近似上一次 rate = 当前 - 刚确认订单的金额；
-            # 实际场景"刚跨过门槛"才推（幂等性由 notification 自身保证更佳，此处尽力）
-            prev_actual = metric_actual  # 保守：不假设 delta，里程碑 notify 可能重复但用户不太在意
+            # 里程碑推送："本次确认的订单"是新跨过的门槛。
+            # delta = 本次订单应收金额（confirm_payment 一次确认整单，所以等于 customer_paid_amount）
+            # prev_actual = metric_actual - delta 是本次确认前的累计值
+            delta = Decimal(str(order.customer_paid_amount or order.total_amount or 0))
+            if t.bonus_metric == "sales":
+                # sales 指标按订单创建时入账（跟 confirm_payment 无关），delta 不准确，跳过里程碑
+                continue
+            prev_actual = max(Decimal("0"), metric_actual - delta)
             prev_rate = float(prev_actual / target_val) if target_val > 0 else 0
             for milestone, emoji in [(0.5, "🎯"), (0.8, "💪"), (1.0, "🎉"), (1.2, "🏆")]:
                 if prev_rate < milestone <= rate:

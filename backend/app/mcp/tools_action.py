@@ -355,6 +355,9 @@ async def mcp_register_payment(body: MCPUploadPaymentRequest, db: AsyncSession =
         payment_method=OrderPaymentMethod.BANK,
         receipt_date=datetime.now(timezone.utc).date(),
         source_type=body.source_type,
+        # 下面立即动账，必须标 confirmed 避免被 confirm_payment 重复处理
+        status="confirmed",
+        confirmed_at=datetime.now(timezone.utc),
     )
     db.add(receipt)
     master_cash.balance += amt

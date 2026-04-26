@@ -684,13 +684,8 @@ async def upload_payment_voucher(
     existing_urls = order.payment_voucher_urls or []
     order.payment_voucher_urls = existing_urls + body.voucher_urls
 
-    # account_id 只做关联标记（最终入账账户），不读余额、不加减
-    master_cash = (await db.execute(
-        select(Account).where(Account.level == 'master', Account.account_type == 'cash')
-    )).scalar_one_or_none()
-    if not master_cash:
-        raise HTTPException(400, "未配置公司总资金池（master 现金账户），请先到账户管理创建")
-
+    # account_id 暂不绑定 master 账户：业务员因 RLS 看不到 master，但此时
+    # 本来也不该动账。财务在 confirm_payment 阶段才真正关联 master 并动账。
     now_str = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     receipt = Receipt(
         id=str(uuid.uuid4()),
@@ -698,7 +693,7 @@ async def upload_payment_voucher(
         customer_id=order.customer_id,
         order_id=order.id,
         brand_id=order.brand_id,
-        account_id=master_cash.id,
+        account_id=None,  # 审批通过时由 confirm_payment 填 master.id
         amount=body.amount,
         payment_method=body.payment_method or OrderPaymentMethod.BANK,
         receipt_date=datetime.now(timezone.utc).date(),
@@ -783,6 +778,9 @@ async def confirm_payment(
                 notes=f"订单收款 {order.order_no}（审批确认）", created_by=emp_id,
                 brand_id=order.brand_id,
             )
+            # 补填 account_id：业务员上传时因 RLS 看不到 master，审批时填上
+            if r.account_id is None:
+                r.account_id = master_cash.id
             r.status = "confirmed"
             r.confirmed_at = now
             r.confirmed_by = emp_id

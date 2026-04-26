@@ -75,7 +75,16 @@ async def create_receipt(body: ReceiptCreate, user: CurrentUser, db: AsyncSessio
 
     data = body.model_dump()
     data['account_id'] = master_cash.id  # 覆盖前端传入
-    obj = Receipt(id=str(uuid.uuid4()), receipt_no=_gen_no("RC"), **data)
+    # P2c-1 后 Receipt.status 默认是 pending_confirmation，但这条 endpoint 是
+    # finance/boss 直接建收款的快捷通道，建完立即动账（下面加 balance + fund_flow），
+    # 必须把 Receipt 标为 confirmed，否则后续 confirm_payment 会把它当"待审"再加一次账。
+    obj = Receipt(
+        id=str(uuid.uuid4()), receipt_no=_gen_no("RC"),
+        status="confirmed",
+        confirmed_at=datetime.now(timezone.utc),
+        confirmed_by=user.get("employee_id"),
+        **data,
+    )
     db.add(obj)
     await db.flush()
 

@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Boolean, ForeignKey, String, Text
+from sqlalchemy import Boolean, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -43,8 +43,8 @@ class ManufacturerExternalIdentity(Base):
         nullable=False,
     )
     last_seen_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
-    bound_at: Mapped[datetime] = mapped_column(server_default="now()")
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    bound_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))
 
     manufacturer: Mapped["Supplier"] = relationship("Supplier", lazy="selectin")
@@ -74,7 +74,7 @@ class FeishuBinding(Base):
         String(36), ForeignKey("users.id"), unique=True, nullable=False, index=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    bound_at: Mapped[datetime] = mapped_column(server_default="now()")
+    bound_at: Mapped[datetime] = mapped_column(server_default=func.now())
     last_seen_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     unbind_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 

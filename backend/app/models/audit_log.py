@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import ForeignKey, String, Text
+from sqlalchemy import ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -31,4 +31,4 @@ class AuditLog(Base):
     )
     changes: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())

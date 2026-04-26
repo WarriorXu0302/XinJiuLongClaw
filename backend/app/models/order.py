@@ -12,6 +12,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -111,7 +112,7 @@ class Order(Base):
     payment_voucher_urls: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
 
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))
 
     customer: Mapped[Optional["Customer"]] = relationship(
@@ -147,7 +148,7 @@ class OrderItem(Base):
     cost_price_snapshot: Mapped[Optional[Decimal]] = mapped_column(
         Numeric(15, 2), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))
 
     order: Mapped["Order"] = relationship("Order", back_populates="items")

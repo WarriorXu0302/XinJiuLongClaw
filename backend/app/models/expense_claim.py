@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import ForeignKey, Numeric, String, Text
+from sqlalchemy import ForeignKey, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -52,7 +52,7 @@ class ExpenseClaim(Base):
         String(36), ForeignKey("accounts.id"), nullable=True
     )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         onupdate=lambda: datetime.now(timezone.utc)
     )

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import ForeignKey, Integer, Numeric, String, Text, Boolean
+from sqlalchemy import ForeignKey, Integer, Numeric, String, Text, Boolean, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -80,7 +80,7 @@ class PolicyRequestItem(Base):
     scheme_no: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         onupdate=lambda: datetime.now(timezone.utc)
     )

@@ -6,7 +6,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Date, ForeignKey, Numeric, String, Text
+from sqlalchemy import Date, ForeignKey, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, PurchasePaymentMethod, PurchaseStatus
@@ -72,7 +72,7 @@ class PurchaseOrder(Base):
     expected_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     actual_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))
 
     brand: Mapped[Optional["Brand"]] = relationship("Brand", lazy="selectin")
@@ -105,7 +105,7 @@ class PurchaseOrderItem(Base):
     unit_price: Mapped[Decimal] = mapped_column(
         Numeric(15, 2), default=Decimal("0.00")
     )
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     purchase_order: Mapped["PurchaseOrder"] = relationship(
         "PurchaseOrder", back_populates="items"

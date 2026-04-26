@@ -10,7 +10,7 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Optional, TYPE_CHECKING
 
-from sqlalchemy import Boolean, Date, Float, ForeignKey, Integer, Numeric, String, Text, Time, UniqueConstraint
+from sqlalchemy import Boolean, Date, Float, ForeignKey, Integer, Numeric, String, Text, Time, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -46,7 +46,7 @@ class AttendanceRule(Base):
         String(36), ForeignKey("employees.id"), nullable=True,
     )  # null = 全局默认
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 
 class CheckinRecord(Base):
@@ -71,7 +71,7 @@ class CheckinRecord(Base):
     status: Mapped[str] = mapped_column(String(20), default="normal")  # normal/late/late_over30/absence
     late_minutes: Mapped[int] = mapped_column(Integer, default=0)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     employee: Mapped["Employee"] = relationship("Employee", lazy="selectin")
 
@@ -103,7 +103,7 @@ class CustomerVisit(Base):
     duration_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     is_valid: Mapped[bool] = mapped_column(Boolean, default=False)  # 时长达标才算有效
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     employee: Mapped["Employee"] = relationship("Employee", lazy="selectin")
     customer: Mapped[Optional["Customer"]] = relationship("Customer", lazy="selectin")
@@ -130,6 +130,6 @@ class LeaveRequest(Base):
     approved_by: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("employees.id"), nullable=True)
     approved_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     reject_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     employee: Mapped["Employee"] = relationship("Employee", foreign_keys=[employee_id], lazy="selectin")

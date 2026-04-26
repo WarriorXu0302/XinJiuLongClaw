@@ -5,7 +5,7 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Date, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Date, ForeignKey, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, CustomerSettlementMode
@@ -44,7 +44,7 @@ class Customer(Base):
     )
     status: Mapped[str] = mapped_column(String(20), default="active")
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))
 
     salesman: Mapped[Optional["Employee"]] = relationship(
@@ -77,7 +77,7 @@ class CustomerBrandSalesman(Base):
     salesman_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("employees.id"), nullable=False
     )
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 
 class Receivable(Base):
@@ -109,7 +109,7 @@ class Receivable(Base):
         String(20), default="unpaid"
     )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))
 
     customer: Mapped["Customer"] = relationship(

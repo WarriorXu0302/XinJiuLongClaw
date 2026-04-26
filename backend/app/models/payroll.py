@@ -12,7 +12,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional, TYPE_CHECKING
 
-from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -66,7 +66,7 @@ class BrandSalaryScheme(Base):
         Numeric(10, 2), default=Decimal("200.00"),
     )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         onupdate=lambda: datetime.now(__import__("datetime").timezone.utc)
     )
@@ -101,7 +101,7 @@ class EmployeeBrandPosition(Base):
         Numeric(10, 2), default=Decimal("0.00"),
     )
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False)  # 主属品牌
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     employee: Mapped["Employee"] = relationship("Employee", lazy="selectin")
     brand: Mapped["Brand"] = relationship("Brand", lazy="selectin")
@@ -128,7 +128,7 @@ class AssessmentItem(Base):
     completion_rate: Mapped[Decimal] = mapped_column(Numeric(5, 4), default=Decimal("0.0000"))  # 1.0 = 100%
     earned_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 
 class SalaryRecord(Base):
@@ -181,7 +181,7 @@ class SalaryRecord(Base):
     work_days_month: Mapped[int] = mapped_column(Integer, default=26)
     work_days_actual: Mapped[int] = mapped_column(Integer, default=26)
 
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         onupdate=lambda: datetime.now(__import__("datetime").timezone.utc)
     )
@@ -204,7 +204,7 @@ class SalaryOrderLink(Base):
     kpi_coefficient: Mapped[Decimal] = mapped_column(Numeric(5, 4), default=Decimal("1.0000"))
     commission_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
     is_manager_share: Mapped[bool] = mapped_column(Boolean, default=False)  # 是否是经理拿下属份额
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 
 class ManufacturerSalarySubsidy(Base):
@@ -233,7 +233,7 @@ class ManufacturerSalarySubsidy(Base):
         String(36), ForeignKey("accounts.id"), nullable=True,
     )
     reimburse_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     employee: Mapped["Employee"] = relationship("Employee", lazy="selectin")
     brand: Mapped["Brand"] = relationship("Brand", lazy="selectin")

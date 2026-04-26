@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Optional
 
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -69,7 +69,7 @@ class PolicyTemplate(Base):
         Numeric(15, 2), default=Decimal("0.00")
     )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))
 
     brand: Mapped[Optional["Brand"]] = relationship("Brand", lazy="selectin")
@@ -97,7 +97,7 @@ class PolicyAdjustment(Base):
         String(36), ForeignKey("employees.id"), nullable=True
     )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     creator: Mapped[Optional["Employee"]] = relationship(
         "Employee", foreign_keys=[created_by], lazy="selectin"

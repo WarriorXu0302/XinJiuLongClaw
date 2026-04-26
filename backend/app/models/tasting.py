@@ -5,7 +5,7 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from decimal import Decimal
 
@@ -52,7 +52,7 @@ class TastingWineUsage(Base):
         Boolean, default=False
     )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     source_usage_record: Mapped["PolicyUsageRecord"] = relationship(
         "PolicyUsageRecord", lazy="selectin"
@@ -98,7 +98,7 @@ class BottleDestruction(Base):
         String(36), ForeignKey("employees.id"), nullable=True
     )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     brand: Mapped["Brand"] = relationship("Brand", lazy="selectin")
     product: Mapped[Optional["Product"]] = relationship("Product", lazy="selectin")

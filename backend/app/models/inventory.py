@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import ForeignKey, Numeric, String, Text
+from sqlalchemy import ForeignKey, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import (
@@ -48,7 +48,7 @@ class Inventory(Base):
     source_purchase_order_id: Mapped[Optional[str]] = mapped_column(
         String(36), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))
 
     product: Mapped["Product"] = relationship("Product", lazy="selectin")
@@ -96,7 +96,7 @@ class InventoryBarcode(Base):
     outbound_stock_flow_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("stock_flow.id"), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))
 
     product: Mapped["Product"] = relationship("Product", lazy="selectin")
@@ -131,7 +131,7 @@ class StockOutAllocation(Base):
         default=CostAllocationMode.FIFO_FALLBACK,
         nullable=False,
     )
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     order_item: Mapped["OrderItem"] = relationship(
         "OrderItem", back_populates="stock_allocations"
@@ -175,7 +175,7 @@ class StockFlow(Base):
         String(36), ForeignKey("employees.id"), nullable=True
     )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     product: Mapped["Product"] = relationship("Product", lazy="selectin")
     warehouse: Mapped["Warehouse"] = relationship("Warehouse", lazy="selectin")

@@ -6,7 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Boolean, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -116,7 +116,7 @@ class InspectionCase(Base):
     voucher_urls: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
 
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     closed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 
     product: Mapped[Optional["Product"]] = relationship("Product", lazy="selectin")
@@ -189,7 +189,7 @@ class MarketCleanupCase(Base):
         nullable=False,
     )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     closed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 
     product: Mapped[Optional["Product"]] = relationship("Product", lazy="selectin")

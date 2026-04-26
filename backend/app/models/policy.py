@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -104,7 +104,7 @@ class PolicyRequest(Base):
         default=PolicyRequestStatus.PENDING_INTERNAL,
         nullable=False,
     )
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))
 
     order: Mapped[Optional["Order"]] = relationship("Order", lazy="selectin")
@@ -184,7 +184,7 @@ class PolicyUsageRecord(Base):
         default=ClaimStatusEnum.UNCLAIMED,
         nullable=False,
     )
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))
 
     policy_request: Mapped["PolicyRequest"] = relationship(
@@ -254,7 +254,7 @@ class PolicyClaim(Base):
         String(36), ForeignKey("employees.id"), nullable=True
     )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))
 
     manufacturer: Mapped[Optional["Supplier"]] = relationship(
@@ -318,7 +318,7 @@ class PolicyClaimItem(Base):
     advance_payer_company_snapshot: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("accounts.id"), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     policy_claim: Mapped["PolicyClaim"] = relationship(
         "PolicyClaim", back_populates="items"
@@ -351,7 +351,7 @@ class ClaimSettlementLink(Base):
         String(36), ForeignKey("employees.id"), nullable=True
     )
     confirmed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     policy_claim: Mapped["PolicyClaim"] = relationship(
         "PolicyClaim", back_populates="settlement_links"

@@ -14,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -55,7 +56,7 @@ class Brand(Base):
     )
     status: Mapped[str] = mapped_column(String(20), default="active")
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))
 
     products: Mapped[list["Product"]] = relationship(
@@ -94,7 +95,7 @@ class Product(Base):
     spec: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="active")
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))
 
     brand: Mapped[Optional["Brand"]] = relationship(
@@ -131,7 +132,7 @@ class Warehouse(Base):
         String(36), ForeignKey("employees.id"), nullable=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))
 
     brand: Mapped[Optional["Brand"]] = relationship(
@@ -174,7 +175,7 @@ class Account(Base):
     account_no: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))
 
     brand: Mapped[Optional["Brand"]] = relationship(
@@ -224,7 +225,7 @@ class Supplier(Base):
     brand_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("brands.id"), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(server_default="now()")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=lambda: datetime.now(timezone.utc))
 
     brand: Mapped[Optional["Brand"]] = relationship(

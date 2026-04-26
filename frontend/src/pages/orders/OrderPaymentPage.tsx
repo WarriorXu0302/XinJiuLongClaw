@@ -23,6 +23,8 @@ interface Receipt {
   id: string; receipt_no?: string; amount: string; source_type?: string;
   receipt_date?: string; payment_method?: string; notes?: string;
   created_at?: string;
+  status?: 'pending_confirmation' | 'confirmed' | 'rejected';
+  rejected_reason?: string;
 }
 
 function OrderPaymentPage() {
@@ -52,9 +54,8 @@ function OrderPaymentPage() {
       amount: amt,
       source_type: sourceType,
     }),
-    onSuccess: (r: any) => {
-      const newStatus = r.data?.payment_status;
-      message.success(newStatus === 'fully_paid' ? '全款已收齐，通知财务确认' : '已登记本次收款');
+    onSuccess: () => {
+      message.success('凭证已提交，等待财务审批');
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['order-receipts', orderId] });
       navigate('/orders');
@@ -67,7 +68,7 @@ function OrderPaymentPage() {
     const formData = new FormData();
     formData.append('file', file);
     try {
-      const { data } = await api.post('/uploads', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const { data } = await api.post('/uploads', formData);
       setUploadedUrls(prev => [...prev, data.url]);
       onSuccess(data);
     } catch (err: any) {
@@ -103,9 +104,15 @@ function OrderPaymentPage() {
   );
 
   const totalDue = Number(order.customer_paid_amount ?? order.total_amount);
-  const receivedTotal = receipts.reduce((s, r) => s + Number(r.amount), 0);
-  const customerReceived = receipts.filter(r => r.source_type === 'customer').reduce((s, r) => s + Number(r.amount), 0);
-  const employeeAdvanceReceived = receipts.filter(r => r.source_type === 'employee_advance').reduce((s, r) => s + Number(r.amount), 0);
+  // 只算"已确认"的凭证做"已收"统计（P2c-1 引入状态后的正确算法）
+  // pending_confirmation 是财务还没审、rejected 是被拒的——都不算已收
+  const confirmedReceipts = receipts.filter(r => (r.status ?? 'confirmed') === 'confirmed');
+  const pendingReceipts = receipts.filter(r => r.status === 'pending_confirmation');
+  const rejectedReceipts = receipts.filter(r => r.status === 'rejected');
+  const receivedTotal = confirmedReceipts.reduce((s, r) => s + Number(r.amount), 0);
+  const pendingTotal = pendingReceipts.reduce((s, r) => s + Number(r.amount), 0);
+  const customerReceived = confirmedReceipts.filter(r => r.source_type === 'customer').reduce((s, r) => s + Number(r.amount), 0);
+  const employeeAdvanceReceived = confirmedReceipts.filter(r => r.source_type === 'employee_advance').reduce((s, r) => s + Number(r.amount), 0);
   const remaining = Math.max(0, totalDue - receivedTotal);
 
   const isEmployeePay = order.settlement_mode === 'employee_pay';
@@ -113,12 +120,21 @@ function OrderPaymentPage() {
   const employeeShare = Number(order.policy_gap ?? 0);
   const customerRemaining = Math.max(0, customerShare - customerReceived);
   const employeeRemaining = Math.max(0, employeeShare - employeeAdvanceReceived);
+  // 已全款：订单 payment_status 为 fully_paid（审批完成）
+  // 待审批：有 pending_confirmation 凭证时 payment_status 为 pending_confirmation，显示为"已提交，等财务审批"
   const isFullyPaid = order.payment_status === 'fully_paid';
+  const isPendingConfirmation = order.payment_status === 'pending_confirmation';
 
   const SOURCE_LABEL: Record<string, { color: string; text: string }> = {
     customer: { color: 'blue', text: '客户付款' },
     employee_advance: { color: 'orange', text: '业务员垫付' },
     company_advance: { color: 'purple', text: '公司内部' },
+  };
+
+  const STATUS_LABEL: Record<string, { color: string; text: string }> = {
+    pending_confirmation: { color: 'gold', text: '待财务审批' },
+    confirmed: { color: 'green', text: '已确认' },
+    rejected: { color: 'red', text: '已拒绝' },
   };
 
   const historyTable = (
@@ -134,12 +150,22 @@ function OrderPaymentPage() {
               render: (v?: string) => v ? new Date(v).toLocaleString('zh-CN') : '-' },
             { title: '金额', dataIndex: 'amount', align: 'right' as const, width: 110,
               render: (v: string) => <Text strong>¥{Number(v).toLocaleString()}</Text> },
+            { title: '审批状态', dataIndex: 'status', width: 110,
+              render: (v?: string) => {
+                const m = STATUS_LABEL[v ?? 'confirmed'];
+                return <Tag color={m.color}>{m.text}</Tag>;
+              }},
             { title: '来源', dataIndex: 'source_type', width: 110,
               render: (v?: string) => {
                 const m = SOURCE_LABEL[v ?? 'customer'];
                 return <Tag color={m?.color ?? 'default'}>{m?.text ?? v}</Tag>;
               }},
-            { title: '备注', dataIndex: 'notes', ellipsis: true },
+            { title: '备注', dataIndex: 'notes', ellipsis: true,
+              render: (v: string | undefined, r: Receipt) => (
+                r.status === 'rejected' && r.rejected_reason
+                  ? <Text type="danger">拒绝原因：{r.rejected_reason}</Text>
+                  : v
+              ) },
           ]}
         />
       )}
@@ -203,18 +229,36 @@ function OrderPaymentPage() {
           type="success" showIcon icon={<LockOutlined />}
           style={{ marginBottom: 16 }}
           title="已收齐全款"
+          description="订单应收已全部收齐并经财务确认，本页面已锁定。"
+        />
+      ) : isPendingConfirmation ? (
+        <Alert
+          type="warning" showIcon
+          style={{ marginBottom: 16 }}
+          title={`已提交 ${pendingReceipts.length} 笔凭证（共 ¥${pendingTotal.toLocaleString()}），等待财务审批`}
           description={
             <>
-              <div>订单应收 ¥{totalDue.toLocaleString()} 已收齐，正在等待财务在<strong>审批中心</strong>确认收款。</div>
-              <div style={{ color: '#888', marginTop: 4 }}>本页面已锁定，不可再登记凭证。如需修正请联系财务。</div>
+              <div>在财务处理（批准 / 拒绝）之前，不能继续上传新凭证。</div>
+              {rejectedReceipts.length > 0 && (
+                <div style={{ color: '#ff4d4f', marginTop: 4 }}>
+                  历史有 {rejectedReceipts.length} 笔被拒，已在凭证记录里标红，请确认后再补传。
+                </div>
+              )}
             </>
           }
+        />
+      ) : rejectedReceipts.length > 0 ? (
+        <Alert
+          type="error" showIcon
+          style={{ marginBottom: 16 }}
+          title={`有 ${rejectedReceipts.length} 笔凭证被财务拒绝`}
+          description='请查看下方凭证记录的"拒绝原因"，按说明重新上传。'
         />
       ) : null}
 
       {historyTable}
 
-      {!isFullyPaid && <Card title={<><FileImageOutlined /> 登记本次收款</>} size="small" style={{ marginBottom: 16 }}>
+      {!isFullyPaid && !isPendingConfirmation && <Card title={<><FileImageOutlined /> 登记本次收款</>} size="small" style={{ marginBottom: 16 }}>
         {isEmployeePay && (
           <div style={{ marginBottom: 12 }}>
             <div style={{ marginBottom: 6, fontSize: 13, color: '#666' }}>凭证来源</div>
@@ -253,7 +297,7 @@ function OrderPaymentPage() {
         <div style={{ color: '#999', fontSize: 12, marginTop: 4 }}>微信/支付宝转账截图、银行回单等</div>
       </Card>}
 
-      {!isFullyPaid && (
+      {!isFullyPaid && !isPendingConfirmation && (
         <Button
           type="primary"
           size="large"

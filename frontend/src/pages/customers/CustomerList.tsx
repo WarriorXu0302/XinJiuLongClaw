@@ -170,7 +170,16 @@ function CustomerList() {
     { title: '订单号', dataIndex: 'order_no', width: 180 },
     { title: '金额', dataIndex: 'total_amount', width: 100, align: 'right', render: (v: string) => `¥${Number(v).toLocaleString()}` },
     { title: '状态', dataIndex: 'status', width: 120, render: (v: string) => <Tag>{v}</Tag> },
-    { title: '付款', dataIndex: 'payment_status', width: 100, render: (v: string) => <Tag color={v === 'fully_paid' ? 'green' : 'orange'}>{v}</Tag> },
+    { title: '付款', dataIndex: 'payment_status', width: 110, render: (v: string) => {
+      const m: Record<string, {c: string; t: string}> = {
+        fully_paid: { c: 'green', t: '已付清' },
+        pending_confirmation: { c: 'gold', t: '待审批' },
+        partially_paid: { c: 'orange', t: '部分' },
+        unpaid: { c: 'red', t: '未付' },
+      };
+      const e = m[v] ?? { c: 'default', t: v };
+      return <Tag color={e.c}>{e.t}</Tag>;
+    } },
     { title: '时间', dataIndex: 'created_at', width: 160, render: (v: string) => new Date(v).toLocaleString('zh-CN') },
   ];
 

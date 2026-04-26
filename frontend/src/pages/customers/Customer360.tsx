@@ -62,8 +62,17 @@ function Customer360() {
     { title: '金额', dataIndex: 'total_amount', width: 110, align: 'right' as const,
       render: (v: number) => `¥${v.toLocaleString()}` },
     { title: '订单状态', dataIndex: 'status', width: 110 },
-    { title: '付款', dataIndex: 'payment_status', width: 90,
-      render: (v: string) => <Tag color={v === 'fully_paid' ? 'green' : v === 'partially_paid' ? 'orange' : 'default'}>{v}</Tag> },
+    { title: '付款', dataIndex: 'payment_status', width: 100,
+      render: (v: string) => {
+        const m: Record<string, {c: string; t: string}> = {
+          fully_paid: { c: 'green', t: '已付清' },
+          pending_confirmation: { c: 'gold', t: '待审批' },
+          partially_paid: { c: 'orange', t: '部分' },
+          unpaid: { c: 'red', t: '未付' },
+        };
+        const e = m[v] ?? { c: 'default', t: v };
+        return <Tag color={e.c}>{e.t}</Tag>;
+      } },
     { title: '时间', dataIndex: 'created_at', width: 150 },
   ];
 

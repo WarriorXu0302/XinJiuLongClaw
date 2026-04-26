@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button, Descriptions, Empty, Form, Image, message, Modal, Select, Space, Tabs, Table, Tag, Typography, Upload } from 'antd';
+import { Button, Descriptions, Empty, Form, Image, Input, message, Modal, Select, Space, Tabs, Table, Tag, Typography, Upload } from 'antd';
 import { CheckCircleOutlined, CloseCircleOutlined, DollarOutlined, UploadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
@@ -149,11 +149,12 @@ function FinanceApproval() {
     refetchInterval: 5000,
   });
 
-  // Orders pending 确认收款（delivered + 全款才出现）
+  // Orders pending 确认收款（有 pending_confirmation Receipt 的订单）
+  // P2c-1 后：上传凭证不再动账，只建 pending Receipt；在这里按订单聚合供财务批量审
   const { data: deliveredOrders = [] } = useQuery<any[]>({
     queryKey: ['pending-confirm-payment', brandId],
-    queryFn: () => api.get('/orders', {
-      params: { ...params, status: 'delivered', payment_status: 'fully_paid', limit: 200 },
+    queryFn: () => api.get('/orders/pending-receipt-confirmation', {
+      params: brandId ? { brand_id: brandId } : {},
     }).then(r => extractItems(r.data)),
     refetchInterval: 5000,
   });
@@ -161,6 +162,16 @@ function FinanceApproval() {
     mutationFn: (id: string) => api.post(`/orders/${id}/confirm-payment`),
     onSuccess: () => {
       message.success('已确认收款');
+      queryClient.invalidateQueries({ queryKey: ['pending-confirm-payment'] });
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail ?? '失败'),
+  });
+  const rejectOrderPayMut = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      api.post(`/orders/${id}/reject-payment-receipts`, { reason }),
+    onSuccess: () => {
+      message.success('已拒绝，已通知业务员');
       queryClient.invalidateQueries({ queryKey: ['pending-confirm-payment'] });
       queryClient.invalidateQueries({ queryKey: ['orders'] });
     },
@@ -437,8 +448,6 @@ function FinanceApproval() {
             <Table
               columns={[
                 { title: '订单号', dataIndex: 'order_no', width: 180 },
-                { title: '客户', key: 'cust', width: 100, render: (_: any, r: any) => r.customer?.name ?? '-' },
-                { title: '业务员', key: 'sale', width: 100, render: (_: any, r: any) => r.salesman?.name ?? '-' },
                 { title: '结算模式', dataIndex: 'settlement_mode', width: 110,
                   render: (v: string) => {
                     const map: Record<string, {c: string; t: string}> = {
@@ -449,64 +458,55 @@ function FinanceApproval() {
                     const m = map[v] ?? { c: 'default', t: v };
                     return <Tag color={m.c}>{m.t}</Tag>;
                   }},
-                { title: '应收', dataIndex: 'customer_paid_amount', width: 110, align: 'right' as const,
-                  render: (v: string, r: any) => `¥${Number(v ?? r.total_amount).toLocaleString()}` },
-                { title: '付款状态', dataIndex: 'payment_status', width: 100,
-                  render: (v: string) => {
-                    const map: Record<string, {c: string; t: string}> = {
-                      fully_paid: { c: 'green', t: '已全款' },
-                      partially_paid: { c: 'orange', t: '部分付款' },
-                      unpaid: { c: 'red', t: '未收款' },
-                    };
-                    const m = map[v] ?? { c: 'default', t: v };
-                    return <Tag color={m.c}>{m.t}</Tag>;
-                  }},
-                { title: '凭证', dataIndex: 'payment_voucher_urls', width: 100,
-                  render: (urls: string[]) => urls?.length ? (
-                    <Typography.Link onClick={() => Modal.info({
-                      title: '付款凭证', width: 600,
-                      content: <Image.PreviewGroup><Space wrap>{urls.map((u, i) => <Image key={i} src={u} width={100} />)}</Space></Image.PreviewGroup>,
-                    })}>{urls.length} 张</Typography.Link>
-                  ) : <Typography.Text type="secondary">无</Typography.Text>},
-                { title: '操作', key: 'act', width: 180, render: (_: any, r: any) => (
+                { title: '订单应收', dataIndex: 'customer_paid_amount', width: 110, align: 'right' as const,
+                  render: (v: number, r: any) => `¥${Number(v ?? r.total_amount).toLocaleString()}` },
+                { title: '待审凭证', key: 'pending', width: 140, align: 'right' as const,
+                  render: (_: any, r: any) => (
+                    <span>
+                      <Tag color="gold">{r.pending_receipt_count} 笔</Tag>
+                      <strong>¥{Number(r.pending_receipt_amount).toLocaleString()}</strong>
+                    </span>
+                  )},
+                { title: '操作', key: 'act', width: 220, render: (_: any, r: any) => (
                   <Space>
-                    <a onClick={() => {
-                      const mode: Record<string, string> = { customer_pay: '客户付款', employee_pay: '业务垫付', company_pay: '公司垫付' };
-                      Modal.info({
-                        title: `订单 ${r.order_no}`,
-                        width: 520,
-                        content: (
-                          <Descriptions column={2} size="small" bordered style={{ marginTop: 12 }}>
-                            <Descriptions.Item label="客户">{r.customer?.name ?? '-'}</Descriptions.Item>
-                            <Descriptions.Item label="业务员">{r.salesman?.name ?? '-'}</Descriptions.Item>
-                            <Descriptions.Item label="结算模式"><Tag color="blue">{mode[r.settlement_mode] ?? r.settlement_mode}</Tag></Descriptions.Item>
-                            <Descriptions.Item label="付款状态"><Tag color={r.payment_status === 'fully_paid' ? 'green' : 'orange'}>{r.payment_status === 'fully_paid' ? '已全款' : r.payment_status}</Tag></Descriptions.Item>
-                            <Descriptions.Item label="订单总额">¥{Number(r.total_amount).toLocaleString()}</Descriptions.Item>
-                            <Descriptions.Item label="应收">¥{Number(r.customer_paid_amount ?? r.total_amount).toLocaleString()}</Descriptions.Item>
-                            {r.deal_amount && <Descriptions.Item label="客户到手价">¥{Number(r.deal_amount).toLocaleString()}</Descriptions.Item>}
-                            {r.policy_gap > 0 && <Descriptions.Item label="政策差额"><Typography.Text type="warning">¥{Number(r.policy_gap).toLocaleString()}</Typography.Text></Descriptions.Item>}
-                            {r.items?.length > 0 && (
-                              <Descriptions.Item label="商品" span={2}>
-                                {r.items.map((it: any, i: number) => <Tag key={i}>{it.product?.name ?? '商品'} ×{it.quantity}{it.quantity_unit || '箱'}</Tag>)}
-                              </Descriptions.Item>
-                            )}
-                          </Descriptions>
-                        ),
-                      });
-                    }}>详情</a>
                     <Button size="small" type="primary"
-                      disabled={r.payment_status !== 'fully_paid'}
+                      disabled={!(r.pending_receipt_count > 0)}
                       onClick={() => Modal.confirm({
                         title: `确认收款 - ${r.order_no}?`,
-                        content: `订单应收 ¥${Number(r.customer_paid_amount ?? r.total_amount).toLocaleString()}，确认钱已到账？确认后将流转到"政策兑付"阶段。`,
-                        onOk: () => confirmOrderPayMut.mutate(r.id),
+                        content: `订单应收 ¥${Number(r.customer_paid_amount ?? r.total_amount).toLocaleString()}，
+本次将批准 ${r.pending_receipt_count} 笔待审凭证（共 ¥${Number(r.pending_receipt_amount).toLocaleString()}）。
+确认后凭证入账、订单流转到"政策兑付"阶段。`,
+                        onOk: () => confirmOrderPayMut.mutate(r.order_id),
                       })}>
-                      {r.payment_status === 'fully_paid' ? '确认收款' : '未全款'}
+                      批准全部凭证
+                    </Button>
+                    <Button size="small" danger
+                      disabled={!(r.pending_receipt_count > 0)}
+                      onClick={() => {
+                        let reason = '';
+                        Modal.confirm({
+                          title: `拒绝订单 ${r.order_no} 的所有待审凭证?`,
+                          content: (
+                            <div>
+                              <div style={{ marginBottom: 8 }}>
+                                {r.pending_receipt_count} 笔凭证（共 ¥{Number(r.pending_receipt_amount).toLocaleString()}）将被拒绝，业务员需重新上传。
+                              </div>
+                              <Input.TextArea placeholder="拒绝原因（会通知业务员）"
+                                onChange={(e) => { reason = e.target.value; }}
+                                rows={3} />
+                            </div>
+                          ),
+                          okType: 'danger',
+                          okText: '确认拒绝',
+                          onOk: () => rejectOrderPayMut.mutate({ id: r.order_id, reason }),
+                        });
+                      }}>
+                      全部拒绝
                     </Button>
                   </Space>
                 )},
               ] as any}
-              dataSource={deliveredOrders} rowKey="id" size="middle" pagination={false}
+              dataSource={deliveredOrders} rowKey="order_id" size="middle" pagination={false}
             />,
         },
         {
@@ -831,7 +831,7 @@ function FinanceApproval() {
                   customRequest={async ({ file, onSuccess, onError }: any) => {
                     const fd = new FormData(); fd.append('file', file);
                     try {
-                      const { data } = await api.post('/uploads', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+                      const { data } = await api.post('/uploads', fd);
                       setPrVoucherUrls(p => [...p, data.url]);
                       onSuccess(data);
                     } catch (e) { onError(e); }
@@ -847,7 +847,7 @@ function FinanceApproval() {
                   customRequest={async ({ file, onSuccess, onError }: any) => {
                     const fd = new FormData(); fd.append('file', file);
                     try {
-                      const { data } = await api.post('/uploads', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+                      const { data } = await api.post('/uploads', fd);
                       setPrSignedUrls(p => [...p, data.url]);
                       onSuccess(data);
                     } catch (e) { onError(e); }

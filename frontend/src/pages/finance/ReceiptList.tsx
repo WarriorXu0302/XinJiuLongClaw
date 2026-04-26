@@ -73,6 +73,9 @@ function ReceiptList() {
       setModalOpen(false);
       form.resetFields();
       queryClient.invalidateQueries({ queryKey: ['receipts'] });
+      // 后端创建 Receipt 后会自动分摊应收账款，需同步刷新相关查询
+      queryClient.invalidateQueries({ queryKey: ['receivables'] });
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
     },
     onError: (err: any) => {
       message.error(err?.response?.data?.detail ?? '创建失败');
@@ -141,7 +144,7 @@ function ReceiptList() {
     { title: '金额', dataIndex: 'amount', width: 100, align: 'right', render: (v: number) => `¥${Number(v).toLocaleString()}` },
     { title: '支付方式', dataIndex: 'payment_method', width: 100 },
     { title: '收款日期', dataIndex: 'receipt_date', width: 120 },
-    { title: '创建时间', dataIndex: 'created_at', width: 170, render: (v: string) => v?.replace('T', ' ').slice(0, 19) },
+    { title: '创建时间', dataIndex: 'created_at', width: 170, render: (v: string) => v ? new Date(v).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '-' },
     { title: '操作', key: 'action', width: 120, render: (_, record) => <><a onClick={() => handleEdit(record)}>编辑</a></> },
   ];
 

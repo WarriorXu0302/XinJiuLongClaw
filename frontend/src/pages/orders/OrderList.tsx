@@ -318,7 +318,7 @@ function OrderList() {
     pending: '待提交', policy_pending_internal: '内部审批中', policy_pending_external: '厂家审批中',
     approved: '已审批', shipped: '已出库', delivered: '已妥投', completed: '已完成', policy_rejected: '已驳回',
   };
-  const PAY_LABEL: Record<string, string> = { unpaid: '未付款', partially_paid: '部分付款', fully_paid: '已付清' };
+  const PAY_LABEL: Record<string, string> = { unpaid: '未付款', partially_paid: '部分付款', pending_confirmation: '待财务审批', fully_paid: '已付清' };
 
   const columns: ColumnsType<Order> = [
     { title: '订单编号', dataIndex: 'order_no', width: 160, render: (v: string, r: Order) => <a onClick={() => setDetailRecord(r)}>{v}</a> },
@@ -331,7 +331,7 @@ function OrderList() {
     }},
     { title: '金额', dataIndex: 'total_amount', width: 90, align: 'right', render: (v: number) => `¥${Number(v).toFixed(0)}` },
     { title: '状态', dataIndex: 'status', width: 100, render: (s: string) => <Tag color={STATUS_COLOR[s] || 'default'}>{STATUS_LABEL[s] ?? s}</Tag> },
-    { title: '创建时间', dataIndex: 'created_at', width: 140, render: (v: string) => v?.replace('T', ' ').slice(0, 16) },
+    { title: '创建时间', dataIndex: 'created_at', width: 140, render: (v: string) => v ? new Date(v).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '-' },
     {
       title: '操作', key: 'action', width: 200, fixed: 'right' as const,
       render: (_, record) => {
@@ -352,19 +352,21 @@ function OrderList() {
               <a style={{ color: '#52c41a' }} onClick={() => navigate(`/orders/${record.id}/delivery`)}>上传送货照片</a>
             )}
             {s === 'delivered' && (() => {
-              const hasVoucher = (record.payment_voucher_urls?.length ?? 0) > 0;
-              const fullyPaid = record.payment_status === 'fully_paid';
-              if (fullyPaid && hasVoucher) {
-                return <Tag color="blue">已全款，待财务确认</Tag>;
+              const ps = record.payment_status;
+              if (ps === 'pending_confirmation') {
+                // 已有待审 Receipt，业务员等财务
+                return <Tag color="gold">已提交，待财务审批</Tag>;
               }
-              if (hasVoucher) {
+              if (ps === 'partially_paid') {
+                // 部分已审批通过，还差一部分
                 return (
                   <Space size="small">
-                    <Tag color="gold">已传凭证，待补款</Tag>
+                    <Tag color="orange">部分付款</Tag>
                     <a onClick={() => navigate(`/orders/${record.id}/payment`)}>继续补传</a>
                   </Space>
                 );
               }
+              // unpaid (含 rejected 后回退) — 允许上传
               return <a onClick={() => navigate(`/orders/${record.id}/payment`)}>上传收款凭证</a>;
             })()}
             {s === 'policy_rejected' && (
@@ -399,6 +401,7 @@ function OrderList() {
             options={[
               { value: 'unpaid', label: '未付款' },
               { value: 'partially_paid', label: '部分' },
+              { value: 'pending_confirmation', label: '待审批' },
               { value: 'fully_paid', label: '已付清' },
             ]} />
         </Space>
@@ -675,7 +678,7 @@ function OrderList() {
               <Descriptions column={3} size="small" bordered style={{ marginBottom: 12 }}>
                 <Descriptions.Item label="订单号"><Typography.Text copyable>{o.order_no}</Typography.Text></Descriptions.Item>
                 <Descriptions.Item label="状态"><Tag color={STATUS_COLOR[o.status] || 'default'}>{STATUS_LABEL[o.status] ?? o.status}</Tag></Descriptions.Item>
-                <Descriptions.Item label="付款"><Tag color={o.payment_status === 'fully_paid' ? 'green' : o.payment_status === 'partially_paid' ? 'orange' : 'default'}>{PAY_LABEL[o.payment_status] ?? o.payment_status}</Tag></Descriptions.Item>
+                <Descriptions.Item label="付款"><Tag color={o.payment_status === 'fully_paid' ? 'green' : o.payment_status === 'pending_confirmation' ? 'gold' : o.payment_status === 'partially_paid' ? 'orange' : 'default'}>{PAY_LABEL[o.payment_status] ?? o.payment_status}</Tag></Descriptions.Item>
                 <Descriptions.Item label="客户">{o.customer?.name ?? '-'}</Descriptions.Item>
                 <Descriptions.Item label="业务员">{o.salesman?.name ?? '-'}</Descriptions.Item>
                 <Descriptions.Item label="结算模式">{settlementLabel[o.settlement_mode] ?? o.settlement_mode ?? '-'}</Descriptions.Item>

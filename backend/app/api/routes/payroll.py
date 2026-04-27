@@ -22,6 +22,7 @@ from app.models.payroll import (
     SalaryRecord,
     SalaryOrderLink,
     ManufacturerSalarySubsidy,
+    KpiCoefficientRule,
 )
 from app.models.user import Employee
 from app.models.product import Brand, Account
@@ -989,17 +990,51 @@ class GenerateSalaryRequest(BaseModel):
     overwrite: bool = False  # 若已存在该期工资单是否覆盖
 
 
-def _compute_kpi_coefficient(actual: Decimal, target: Decimal) -> Decimal:
-    """根据回款完成率返回提成系数。
-    规则：<50% → 0；[50%,100%) → 按完成率（单调递增）；≥100% → 按完成率（继续放大）。
-    历史 bug：[0.8,1.0) 区间曾 return 0.8，导致完成度 0.9 的员工系数比 0.7 的还低（反转）。
+async def _fetch_kpi_rules(
+    db: AsyncSession, brand_id: str, at_date: Optional[date_type] = None
+) -> list[KpiCoefficientRule]:
+    """查询某品牌某日期生效的 KPI 规则集（按 min_rate 排序）。
+    at_date=None 时查当前有效；否则查 effective_from <= at_date < (effective_to or +∞)。
+    """
+    at = at_date or datetime.now(timezone.utc).date()
+    stmt = select(KpiCoefficientRule).where(
+        KpiCoefficientRule.brand_id == brand_id,
+        KpiCoefficientRule.effective_from <= at,
+    )
+    rows = (await db.execute(stmt.order_by(KpiCoefficientRule.min_rate))).scalars().all()
+    return [r for r in rows if r.effective_to is None or r.effective_to > at]
+
+
+def _apply_kpi_rule(rate: Decimal, rules: list[KpiCoefficientRule]) -> Decimal:
+    """按规则表算系数。落不进任何区间 → 兜底 1.0（保守）。"""
+    for r in rules:
+        if rate < Decimal(str(r.min_rate)):
+            continue
+        if r.max_rate is not None and rate >= Decimal(str(r.max_rate)):
+            continue
+        if r.mode == 'fixed':
+            return Decimal(str(r.fixed_value or 0)).quantize(Decimal("0.0001"))
+        # linear
+        return rate.quantize(Decimal("0.0001"))
+    return Decimal("1.0000")
+
+
+async def _compute_kpi_coefficient(
+    db: AsyncSession, brand_id: Optional[str], actual: Decimal, target: Decimal,
+) -> Decimal:
+    """根据品牌 KPI 规则表返回提成系数。
+    target<=0 或 brand_id=None → 不影响，返回 1.0（兜底）。
+    规则表缺失 → 返回 1.0（保守不倒扣）。
     """
     if not target or target <= 0:
         return Decimal("1.0")
     rate = actual / target
-    if rate < Decimal("0.5"):
-        return Decimal("0")
-    return rate.quantize(Decimal("0.0001"))
+    if not brand_id:
+        return rate.quantize(Decimal("0.0001")) if rate >= Decimal("0.5") else Decimal("0")
+    rules = await _fetch_kpi_rules(db, brand_id)
+    if not rules:
+        return Decimal("1.0")
+    return _apply_kpi_rule(rate, rules)
 
 
 async def _get_fully_paid_orders_for_employee(
@@ -1180,9 +1215,10 @@ async def generate_salary_records(
 
             cr, manager_share = await _commission_rate_for(db, ebp)
 
-            # KPI 系数（按实际完成率）
+            # KPI 系数（按实际完成率 + 品牌规则表）
             if kpi_item and kpi_item.target_value:
-                coef = _compute_kpi_coefficient(
+                coef = await _compute_kpi_coefficient(
+                    db, ebp.brand_id,
                     Decimal(str(kpi_item.actual_value or 0)),
                     Decimal(str(kpi_item.target_value)),
                 )
@@ -1345,6 +1381,21 @@ async def generate_salary_records(
             await db.delete(exists)
             await db.flush()
 
+        # 收集本次使用的 KPI 规则快照（按本员工涉及的品牌）
+        snapshot: dict = {}
+        _brand_ids = sorted({link["brand_id"] for link in order_links})
+        for _bid in _brand_ids:
+            _rules = await _fetch_kpi_rules(db, _bid)
+            snapshot[_bid] = [
+                {
+                    "min_rate": float(r.min_rate),
+                    "max_rate": float(r.max_rate) if r.max_rate is not None else None,
+                    "mode": r.mode,
+                    "fixed_value": float(r.fixed_value) if r.fixed_value is not None else None,
+                }
+                for r in _rules
+            ]
+
         rec = SalaryRecord(
             id=str(uuid.uuid4()),
             employee_id=emp.id,
@@ -1363,6 +1414,7 @@ async def generate_salary_records(
             status='draft',
             work_days_month=26,
             work_days_actual=26,
+            kpi_rule_snapshot=snapshot,
             notes="；".join(bonus_notes) if bonus_notes else None,
         )
         _recalc_salary_total(rec)
@@ -1724,4 +1776,278 @@ async def salary_detail(rec_id: str, user: CurrentUser, db: AsyncSession = Depen
         "reject_reason": rec.reject_reason,
         "paid_at": str(rec.paid_at) if rec.paid_at else None,
         "payment_voucher_urls": rec.payment_voucher_urls or [],
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# KPI 系数规则（品牌级，按完成率返回提成系数）
+#   仅 boss / admin 可增删改；salesman/finance/hr 可查
+# ═══════════════════════════════════════════════════════════════════
+
+class KpiRuleCreate(BaseModel):
+    brand_id: str
+    min_rate: Decimal
+    max_rate: Optional[Decimal] = None
+    mode: str  # 'linear' | 'fixed'
+    fixed_value: Optional[Decimal] = None
+    notes: Optional[str] = None
+
+
+class KpiRuleUpdate(BaseModel):
+    min_rate: Optional[Decimal] = None
+    max_rate: Optional[Decimal] = None
+    mode: Optional[str] = None
+    fixed_value: Optional[Decimal] = None
+    notes: Optional[str] = None
+
+
+class KpiRuleResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    brand_id: str
+    min_rate: Decimal
+    max_rate: Optional[Decimal] = None
+    mode: str
+    fixed_value: Optional[Decimal] = None
+    effective_from: date_type
+    effective_to: Optional[date_type] = None
+    notes: Optional[str] = None
+    created_by: Optional[str] = None
+    created_at: datetime
+
+
+def _validate_rule_body(
+    min_rate: Decimal, max_rate: Optional[Decimal], mode: str, fixed_value: Optional[Decimal]
+) -> None:
+    """共用校验：区间/模式/值域。"""
+    if min_rate < 0:
+        raise HTTPException(400, "min_rate 不能为负")
+    if max_rate is not None and max_rate <= min_rate:
+        raise HTTPException(400, "max_rate 必须大于 min_rate")
+    if mode not in ('linear', 'fixed'):
+        raise HTTPException(400, "mode 必须是 'linear' 或 'fixed'")
+    if mode == 'fixed':
+        if fixed_value is None or fixed_value < 0:
+            raise HTTPException(400, "mode=fixed 时 fixed_value 必填且非负")
+    # mode=linear 时 fixed_value 应忽略（允许传但不使用）
+
+
+async def _check_no_overlap(
+    db: AsyncSession, brand_id: str, min_rate: Decimal, max_rate: Optional[Decimal],
+    at_date: date_type, exclude_id: Optional[str] = None,
+) -> None:
+    """校验同品牌同生效期内区间不重叠。"""
+    existing = await _fetch_kpi_rules(db, brand_id, at_date)
+    lo = min_rate
+    hi = max_rate if max_rate is not None else Decimal("9999")
+    for r in existing:
+        if exclude_id and r.id == exclude_id:
+            continue
+        r_lo = Decimal(str(r.min_rate))
+        r_hi = Decimal(str(r.max_rate)) if r.max_rate is not None else Decimal("9999")
+        # 两区间重叠判定：lo < r_hi AND r_lo < hi
+        if lo < r_hi and r_lo < hi:
+            raise HTTPException(400,
+                f"区间 [{lo}, {hi}) 与已有规则 [{r_lo}, {r_hi}) 重叠")
+
+
+@router.get("/kpi-coefficient-rules", response_model=list[KpiRuleResponse])
+async def list_kpi_rules(
+    user: CurrentUser,
+    brand_id: Optional[str] = Query(None),
+    at_date: Optional[date_type] = Query(None, description="查该日期生效的规则；不传=当前"),
+    include_history: bool = Query(False, description="是否包含已失效历史"),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(KpiCoefficientRule)
+    if brand_id:
+        stmt = stmt.where(KpiCoefficientRule.brand_id == brand_id)
+    if not include_history:
+        at = at_date or datetime.now(timezone.utc).date()
+        stmt = stmt.where(
+            KpiCoefficientRule.effective_from <= at,
+        )
+    stmt = stmt.order_by(
+        KpiCoefficientRule.brand_id,
+        KpiCoefficientRule.effective_from.desc(),
+        KpiCoefficientRule.min_rate,
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    if not include_history:
+        at = at_date or datetime.now(timezone.utc).date()
+        rows = [r for r in rows if r.effective_to is None or r.effective_to > at]
+    return rows
+
+
+@router.post("/kpi-coefficient-rules", response_model=KpiRuleResponse, status_code=201)
+async def create_kpi_rule(
+    body: KpiRuleCreate, user: CurrentUser, db: AsyncSession = Depends(get_db),
+):
+    require_role(user, "boss", "admin")
+    _validate_rule_body(body.min_rate, body.max_rate, body.mode, body.fixed_value)
+    today = datetime.now(timezone.utc).date()
+    await _check_no_overlap(db, body.brand_id, body.min_rate, body.max_rate, today)
+    obj = KpiCoefficientRule(
+        id=str(uuid.uuid4()),
+        brand_id=body.brand_id,
+        min_rate=body.min_rate,
+        max_rate=body.max_rate,
+        mode=body.mode,
+        fixed_value=body.fixed_value if body.mode == 'fixed' else None,
+        effective_from=today,
+        notes=body.notes,
+        created_by=user.get("employee_id"),
+    )
+    db.add(obj)
+    await db.flush()
+    await log_audit(db, action="create_kpi_rule", entity_type="KpiCoefficientRule",
+                    entity_id=obj.id, user=user)
+    return obj
+
+
+@router.put("/kpi-coefficient-rules/{rule_id}", response_model=KpiRuleResponse)
+async def update_kpi_rule(
+    rule_id: str, body: KpiRuleUpdate, user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """改规则 = 旧记录设 effective_to=今天 + 插入新记录（历史留存）"""
+    require_role(user, "boss", "admin")
+    old = await db.get(KpiCoefficientRule, rule_id)
+    if old is None:
+        raise HTTPException(404, "规则不存在")
+    if old.effective_to is not None:
+        raise HTTPException(400, "该规则已失效，不能修改（应新建）")
+    payload = body.model_dump(exclude_unset=True)
+    new_min = Decimal(str(payload.get("min_rate", old.min_rate)))
+    new_max = payload.get("max_rate", old.max_rate)
+    new_max_d = Decimal(str(new_max)) if new_max is not None else None
+    new_mode = payload.get("mode", old.mode)
+    new_fixed = payload.get("fixed_value", old.fixed_value)
+    new_fixed_d = Decimal(str(new_fixed)) if new_fixed is not None else None
+    _validate_rule_body(new_min, new_max_d, new_mode, new_fixed_d)
+    today = datetime.now(timezone.utc).date()
+    await _check_no_overlap(db, old.brand_id, new_min, new_max_d, today, exclude_id=old.id)
+
+    # 历史留存：旧记录 effective_to = 今天；插入新记录
+    old.effective_to = today
+    new_obj = KpiCoefficientRule(
+        id=str(uuid.uuid4()),
+        brand_id=old.brand_id,
+        min_rate=new_min,
+        max_rate=new_max_d,
+        mode=new_mode,
+        fixed_value=new_fixed_d if new_mode == 'fixed' else None,
+        effective_from=today,
+        notes=payload.get("notes", old.notes),
+        created_by=user.get("employee_id"),
+    )
+    db.add(new_obj)
+    await db.flush()
+    await log_audit(db, action="update_kpi_rule", entity_type="KpiCoefficientRule",
+                    entity_id=new_obj.id,
+                    changes={"replaces": old.id}, user=user)
+    return new_obj
+
+
+@router.delete("/kpi-coefficient-rules/{rule_id}", status_code=204)
+async def delete_kpi_rule(
+    rule_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db),
+):
+    """删除 = 标记 effective_to=今天（软删，保留历史）"""
+    require_role(user, "boss", "admin")
+    obj = await db.get(KpiCoefficientRule, rule_id)
+    if obj is None:
+        raise HTTPException(404, "规则不存在")
+    if obj.effective_to is not None:
+        raise HTTPException(400, "规则已失效")
+    obj.effective_to = datetime.now(timezone.utc).date()
+    await db.flush()
+    await log_audit(db, action="delete_kpi_rule", entity_type="KpiCoefficientRule",
+                    entity_id=obj.id, user=user)
+
+
+@router.post("/salary-records/{record_id}/recompute")
+async def recompute_salary_record(
+    record_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db),
+):
+    """按当前 KPI 规则重算该工资单的提成部分。
+    仅 boss/admin；仅允许 draft/rejected 状态。
+    只刷 KPI 系数相关字段（提成、经理分成、合计），不动 HR 手填（罚款/奖金）。
+    """
+    require_role(user, "boss", "admin")
+    rec = await db.get(SalaryRecord, record_id)
+    if rec is None:
+        raise HTTPException(404, "工资单不存在")
+    if rec.status not in ('draft', 'rejected'):
+        raise HTTPException(400,
+            f"工资单状态为 '{rec.status}'，只有 draft/rejected 可重算；"
+            f"已审批/已发放的请走反向凭证冲正")
+
+    # 拉员工的 KPI 考核项（同期）
+    kpi_item = (await db.execute(
+        select(AssessmentItem).where(
+            AssessmentItem.employee_id == rec.employee_id,
+            AssessmentItem.period == rec.period,
+            AssessmentItem.item_code == 'kpi_revenue',
+        )
+    )).scalar_one_or_none()
+
+    # 拉现有 SalaryOrderLink
+    links = (await db.execute(
+        select(SalaryOrderLink).where(SalaryOrderLink.salary_record_id == rec.id)
+    )).scalars().all()
+
+    # 按品牌刷新 coef，重算每条 commission_amount
+    new_commission_total = Decimal("0")
+    new_manager_share_total = Decimal("0")
+    snapshot: dict = {}
+    brand_ids = sorted({l.brand_id for l in links})
+    for bid in brand_ids:
+        rules = await _fetch_kpi_rules(db, bid)
+        snapshot[bid] = [
+            {
+                "min_rate": float(r.min_rate),
+                "max_rate": float(r.max_rate) if r.max_rate is not None else None,
+                "mode": r.mode,
+                "fixed_value": float(r.fixed_value) if r.fixed_value is not None else None,
+            }
+            for r in rules
+        ]
+
+    for link in links:
+        if link.is_manager_share:
+            # 经理分成不按 KPI 系数放大（业务逻辑：只对下属业绩按 manager_share_rate 抽成）
+            coef = Decimal("1.0")
+        elif kpi_item and kpi_item.target_value:
+            coef = await _compute_kpi_coefficient(
+                db, link.brand_id,
+                Decimal(str(kpi_item.actual_value or 0)),
+                Decimal(str(kpi_item.target_value)),
+            )
+        else:
+            coef = Decimal("1.0")
+        link.kpi_coefficient = coef
+        link.commission_amount = (
+            Decimal(str(link.receipt_amount)) * Decimal(str(link.commission_rate_used)) * coef
+        ).quantize(Decimal("0.01"))
+        if link.is_manager_share:
+            new_manager_share_total += link.commission_amount
+        else:
+            new_commission_total += link.commission_amount
+
+    rec.commission_total = new_commission_total
+    rec.manager_share_total = new_manager_share_total
+    rec.kpi_rule_snapshot = snapshot
+    _recalc_salary_total(rec)
+    await db.flush()
+    await log_audit(db, action="recompute_salary_record", entity_type="SalaryRecord",
+                    entity_id=rec.id,
+                    changes={"commission_total": float(new_commission_total),
+                             "manager_share_total": float(new_manager_share_total)}, user=user)
+    return {
+        "detail": "已按最新 KPI 规则重算",
+        "commission_total": float(new_commission_total),
+        "manager_share_total": float(new_manager_share_total),
+        "total_pay": float(rec.total_pay),
+        "actual_pay": float(rec.actual_pay),
     }

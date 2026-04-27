@@ -98,11 +98,12 @@ async def _calc_actual(
         sales_stmt = sales_stmt.where(Order.salesman_id == employee_id)
     sales = (await db.execute(sales_stmt)).scalar_one()
 
-    # 回款 = Σ Receipt.amount
+    # 回款 = Σ Receipt.amount（仅财务已确认的）
     receipt_stmt = (
         select(func.coalesce(func.sum(Receipt.amount), 0))
         .select_from(Receipt)
         .join(Order, Order.id == Receipt.order_id, isouter=True)
+        .where(Receipt.status == 'confirmed')
     )
     # 按 Receipt 时间过滤（回款周期）
     receipt_stmt = receipt_stmt.where(extract("year", Receipt.receipt_date) == year)

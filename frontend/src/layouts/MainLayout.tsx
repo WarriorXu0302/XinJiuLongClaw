@@ -111,6 +111,7 @@ const menuItems: MenuItem[] = [
       { key: '/hr/employees', icon: <TeamOutlined />, label: '员工', roles: ['admin', 'boss', 'hr'] },
       { key: '/hr/salaries', icon: <AccountBookOutlined />, label: '工资', roles: ['admin', 'boss', 'hr', 'finance'] },
       { key: '/hr/salary-schemes', icon: <DollarOutlined />, label: '薪酬方案', roles: ['admin', 'boss', 'hr'] },
+      { key: '/hr/kpi-rules', icon: <DollarOutlined />, label: 'KPI 系数规则', roles: ['admin', 'boss'] },
       { key: '/hr/manufacturer-subsidies', icon: <BankOutlined />, label: '厂家补贴', roles: ['admin', 'boss', 'hr', 'finance'] },
       { key: '/hr/performance', icon: <DashboardOutlined />, label: '绩效', roles: ['admin', 'boss', 'hr'] },
       { key: '/hr/kpis', icon: <DashboardOutlined />, label: 'KPI', roles: ['admin', 'boss', 'hr'] },

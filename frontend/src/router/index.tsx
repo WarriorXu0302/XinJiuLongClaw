@@ -40,6 +40,7 @@ import UserList from '../pages/hr/UserList';
 import KPIList from '../pages/hr/KPIList';
 import CommissionList from '../pages/hr/CommissionList';
 import SalarySchemeList from '../pages/hr/SalarySchemeList';
+import KpiRulesList from '../pages/hr/KpiRulesList';
 import SalaryRecordList from '../pages/hr/SalaryRecordList';
 import SalaryDetail from '../pages/hr/SalaryDetail';
 import ManufacturerSubsidyList from '../pages/hr/ManufacturerSubsidyList';
@@ -128,6 +129,7 @@ const routes: RouteObject[] = [
       { path: 'hr/kpis', element: <KPIList /> },
       { path: 'hr/commissions', element: <CommissionList /> },
       { path: 'hr/salary-schemes', element: <AuthGuard requiredRoles={['admin', 'boss', 'hr']}><SalarySchemeList /></AuthGuard> },
+      { path: 'hr/kpi-rules', element: <AuthGuard requiredRoles={['admin', 'boss']}><KpiRulesList /></AuthGuard> },
       { path: 'hr/salaries', element: <AuthGuard requiredRoles={['admin', 'boss', 'hr']}><SalaryRecordList /></AuthGuard> },
       { path: 'hr/salaries/:id', element: <SalaryDetail /> },
       { path: 'hr/manufacturer-subsidies', element: <AuthGuard requiredRoles={['admin', 'boss', 'hr']}><ManufacturerSubsidyList /></AuthGuard> },

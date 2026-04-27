@@ -32,6 +32,8 @@
 - [#11] `vite.config.ts` 提取 `BACKEND` 常量；`CLAUDE.md` / `README.md` 新增端口选择说明（为啥不用 8001）
 - [#9] 迁移内置 `_ensure_rls_prerequisites()` 幂等创建 erp_app role + helper 函数，migration 独立可跑
 - 新增 `skills/xinjiulong-erp/` Agent 技能包（SKILL.md + 11 份 references + 5 个 helper 脚本）：飞书交互规范、3 种结算模式、订单闭环、收款审批、政策兑付、稽查 5 场景、账户/工资/考勤/审批中心聚合，所有 250+ API 端点速查
+- **KPI 系数规则**：新表 `kpi_coefficient_rules`（品牌 × 完成率区间 × 模式），老板/admin 可在 `/hr/kpi-rules` 页面增删改。规则支持 `linear`（系数=完成率）和 `fixed`（区间内固定值）两种模式，留存历史（改规则=旧记录设失效日+插入新记录）。工资单生成时冻结 `kpi_rule_snapshot` 用于审计，老板可对 draft/rejected 工资单 `POST /salary-records/{id}/recompute` 按当前规则重算提成
+- 补修 5 处 `SUM(Receipt.amount)` 漏过滤 `status='confirmed'` 的 bug（finance.py 创建 Receipt 后重算 payment_status / finance.py 两处 KPI 刷新 + 里程碑、sales_targets.py `/my-dashboard` 进度、mcp tools_action.py register-payment）。影响：业务员上传凭证未经审批就刷 KPI / 误触发 Commission 生成 / 仪表盘看到虚高进度
 
 ### Changed
 

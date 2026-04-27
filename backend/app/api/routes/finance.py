@@ -103,7 +103,10 @@ async def create_receipt(body: ReceiptCreate, user: CurrentUser, db: AsyncSessio
             total_received = (
                 await db.execute(
                     select(func.coalesce(func.sum(Receipt.amount), 0))
-                    .where(Receipt.order_id == obj.order_id)
+                    .where(
+                        Receipt.order_id == obj.order_id,
+                        Receipt.status == 'confirmed',  # 只算财务已确认的
+                    )
                 )
             ).scalar_one()
             prev_status = order.payment_status
@@ -181,6 +184,7 @@ async def create_receipt(body: ReceiptCreate, user: CurrentUser, db: AsyncSessio
                                 .select_from(Receipt).join(Order, Order.id == Receipt.order_id, isouter=True)
                                 .where(
                                     Order.salesman_id == order.salesman_id,
+                                    Receipt.status == 'confirmed',  # 只算财务已确认的
                                     _ext("year", Receipt.receipt_date) == now.year,
                                     _ext("month", Receipt.receipt_date) == now.month,
                                 )
@@ -234,6 +238,7 @@ async def create_receipt(body: ReceiptCreate, user: CurrentUser, db: AsyncSessio
                                 .select_from(Receipt).join(Order, Order.id == Receipt.order_id, isouter=True)
                                 .where(
                                     Order.salesman_id == order.salesman_id,
+                                    Receipt.status == 'confirmed',  # 只算财务已确认的
                                     _ext("year", Receipt.receipt_date) == now.year,
                                     _ext("month", Receipt.receipt_date) == now.month,
                                 )

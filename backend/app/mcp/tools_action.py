@@ -367,7 +367,10 @@ async def mcp_register_payment(body: MCPUploadPaymentRequest, db: AsyncSession =
     await db.flush()
 
     total_received = (await db.execute(
-        select(func.coalesce(func.sum(Receipt.amount), 0)).where(Receipt.order_id == order.id)
+        select(func.coalesce(func.sum(Receipt.amount), 0)).where(
+            Receipt.order_id == order.id,
+            Receipt.status == 'confirmed',  # 只算财务已确认的
+        )
     )).scalar_one()
     target = order.customer_paid_amount or order.total_amount
     # 保存更新前的 payment_status，用于判断是否首次到达 FULLY_PAID

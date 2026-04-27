@@ -181,6 +181,11 @@ class SalaryRecord(Base):
     work_days_month: Mapped[int] = mapped_column(Integer, default=26)
     work_days_actual: Mapped[int] = mapped_column(Integer, default=26)
 
+    # KPI 规则快照：生成/重算时冻结当时用的规则集合（按品牌分组）
+    # 结构：{ brand_id: [{min_rate, max_rate, mode, fixed_value}, ...] }
+    # 有争议时可直接翻工资单看当时用的规则，无需依赖 kpi_coefficient_rules 的当前状态
+    kpi_rule_snapshot: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         onupdate=lambda: datetime.now(__import__("datetime").timezone.utc)
@@ -243,4 +248,38 @@ class ManufacturerSalarySubsidy(Base):
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     employee: Mapped["Employee"] = relationship("Employee", lazy="selectin")
+    brand: Mapped["Brand"] = relationship("Brand", lazy="selectin")
+
+
+class KpiCoefficientRule(Base):
+    """KPI 完成率系数规则（品牌级，可按时间段留存历史）
+
+    业务规则（boss/admin 配置）：
+      - 按 brand_id 独立配置（每品牌一套）
+      - 覆盖完成率区间 [min_rate, max_rate)，max_rate=NULL 表示 +∞
+      - mode='linear'：系数 = 完成率（按 rate 线性）
+      - mode='fixed'：系数 = fixed_value（区间内固定）
+
+    历史留存：
+      - 改规则不 UPDATE 旧记录，而是 effective_to=today + INSERT 新记录
+      - 工资单另有 kpi_rule_snapshot 字段冻结当时用的规则集
+      - 同时段内同品牌的区间不允许重叠（应用层校验）
+    """
+    __tablename__ = "kpi_coefficient_rules"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    brand_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("brands.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    min_rate: Mapped[Decimal] = mapped_column(Numeric(6, 4), nullable=False)  # 闭区间下限
+    max_rate: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 4), nullable=True)  # 开区间上限，NULL=+∞
+    mode: Mapped[str] = mapped_column(String(10), nullable=False)  # linear | fixed
+    fixed_value: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 4), nullable=True)
+
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    effective_to: Mapped[Optional[date]] = mapped_column(Date, nullable=True, index=True)  # NULL = 当前有效
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("employees.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
     brand: Mapped["Brand"] = relationship("Brand", lazy="selectin")

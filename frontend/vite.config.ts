@@ -8,6 +8,9 @@ const BACKEND = 'http://localhost:8002'
 export default defineConfig({
   plugins: [react()],
   server: {
+    // 固定 5175（5173 常被微信/支付宝小程序开发工具占用，5174 给 Vite preview 留着）
+    port: 5175,
+    strictPort: true,
     proxy: {
       '/api': {
         target: BACKEND,

@@ -53,7 +53,12 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # --- CORS ---
-    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000"]
+    # 5175 前端（5173 常被微信/支付宝小程序开发工具占用）；5173 保留兼容
+    CORS_ORIGINS: list[str] = [
+        "http://localhost:5175",
+        "http://localhost:5173",
+        "http://localhost:3000",
+    ]
 
     # --- AI / LLM ---
     LLM_PROVIDER: Literal["dashscope", "anthropic"] = "dashscope"

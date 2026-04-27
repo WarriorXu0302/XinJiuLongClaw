@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Button, Form, InputNumber, message, Modal, Select, Space, Table, Tag, Typography, Alert, Switch,
 } from 'antd';
@@ -6,6 +6,7 @@ import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import api, { extractItems } from '../../api/client';
+import { useBrandStore } from '../../stores/brandStore';
 
 const { Title, Text } = Typography;
 
@@ -40,8 +41,15 @@ function KpiRulesList() {
   const [form] = Form.useForm();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Rule | null>(null);
-  const [brandFilter, setBrandFilter] = useState<string | undefined>(undefined);
+  // 顶部全局品牌选了就用它过滤；本页"筛选品牌"下拉与全局同步
+  const globalBrandId = useBrandStore(s => s.selectedBrandId);
+  const [brandFilter, setBrandFilter] = useState<string | undefined>(globalBrandId ?? undefined);
   const [includeHistory, setIncludeHistory] = useState(false);
+
+  // 顶部全局品牌切换时，同步本页筛选
+  useEffect(() => {
+    setBrandFilter(globalBrandId ?? undefined);
+  }, [globalBrandId]);
 
   const { data: brands = [] } = useQuery<Brand[]>({
     queryKey: ['brands-select'],

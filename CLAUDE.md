@@ -51,7 +51,7 @@ alembic revision --autogenerate -m "description"         # Generate new migratio
 ### Frontend (from `frontend/`)
 ```bash
 npm install        # Install dependencies
-npm run dev        # Dev server (port 5173, proxies /api and /mcp to localhost:8002)
+npm run dev        # Dev server (port 5175, proxies /api and /mcp to localhost:8002)
 npm run build      # Type-check then build (tsc -b && vite build)
 npm run lint       # ESLint
 ```

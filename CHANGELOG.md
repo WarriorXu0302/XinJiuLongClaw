@@ -66,6 +66,9 @@
 - **严重**：`approve` share_out 时 master/ptm 账户任一不存在就静默只做一半 → 账务失衡。两个账户都必须找到否则 400，且加 ptm 余额校验
 - **严重**：`reject_claim` 无状态校验，可驳回已 approved 的 share_out 但不反转账户。改为只允许驳回 pending
 - `pay_daily_claim` 无行锁，两个并发请求可能双扣账户。加 `SELECT FOR UPDATE` 锁 claim + account
+- **严重**：`_compute_kpi_coefficient` 在 [0.8, 1.0) 区间强制返回 0.8，导致完成率 0.9 的员工提成系数反而比 0.7 的（系数=0.7）低 → 员工提成发错钱。改为按完成率线性返回（<50% 为 0，其余 = rate）
+- **严重**：`performance.py` 4 处 `SUM(Receipt.amount)` 没过滤 `Receipt.status='confirmed'`，业务员上传凭证立刻（pending_confirmation 状态）或已被驳回（rejected）的收款也被算进 KPI 实际回款，可刷绩效。所有 Receipt SUM 补 `status='confirmed'` 过滤
+- **中等**：`policy_service.confirm_settlement_allocation` 未校验 `settlement.brand_id == claim.brand_id`，跨品牌 settlement 分配到 claim 时走 company_pay 路径会动 claim 品牌的 F 类/现金账户 → 跨品牌资金串账。补品牌一致性校验
 - [#3] `requirements.txt` 补 `mcp` / `openpyxl`；锁 `bcrypt==4.3.0`（passlib 1.7 跟 bcrypt 5.x 自检冲突）
 - [#3] `.env.example` `CORS_ORIGINS` 改 JSON 数组格式，Pydantic v2 不接受逗号分隔
 - [#4] antd v6 废弃 API 批量替换：`Drawer.width → size`（1 处）、`Statistic.valueStyle → styles.content`（30 处）、`Alert.message → title`（15 处）

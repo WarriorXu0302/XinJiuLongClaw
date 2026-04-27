@@ -86,6 +86,7 @@ async def employee_monthly(
             .select_from(Receipt).join(Order, Order.id == Receipt.order_id, isouter=True)
             .where(
                 Order.salesman_id == emp.id,
+                Receipt.status == 'confirmed',  # 只算财务已确认的收款
                 extract("year", Receipt.receipt_date) == y,
                 extract("month", Receipt.receipt_date) == m,
             )
@@ -212,6 +213,7 @@ async def refresh_assessment_actual(
                 .select_from(Receipt).join(Order, Order.id == Receipt.order_id, isouter=True)
                 .where(
                     Order.salesman_id == it.employee_id,
+                    Receipt.status == 'confirmed',  # 只算财务已确认的收款
                     extract("year", Receipt.receipt_date) == y,
                     extract("month", Receipt.receipt_date) == m,
                 )
@@ -386,6 +388,7 @@ async def init_assessment_items(
                 .select_from(Receipt).join(Order, Order.id == Receipt.order_id, isouter=True)
                 .where(
                     Order.salesman_id == it.employee_id,
+                    Receipt.status == 'confirmed',  # 只算财务已确认的收款
                     extract("year", Receipt.receipt_date) == y,
                     extract("month", Receipt.receipt_date) == m,
                 )
@@ -460,6 +463,7 @@ async def employee_trend(
             .select_from(Receipt).join(Order, Order.id == Receipt.order_id, isouter=True)
             .where(
                 Order.salesman_id == eid,
+                Receipt.status == 'confirmed',  # 只算财务已确认的收款
                 _ext("year", Receipt.receipt_date) == y,
                 _ext("month", Receipt.receipt_date) == m,
             )

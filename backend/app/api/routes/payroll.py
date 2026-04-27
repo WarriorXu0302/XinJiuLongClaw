@@ -990,16 +990,15 @@ class GenerateSalaryRequest(BaseModel):
 
 
 def _compute_kpi_coefficient(actual: Decimal, target: Decimal) -> Decimal:
-    """根据回款完成率返回提成系数（A 方案）。<50% 为 0；>=100% 按完成率放大。"""
+    """根据回款完成率返回提成系数。
+    规则：<50% → 0；[50%,100%) → 按完成率（单调递增）；≥100% → 按完成率（继续放大）。
+    历史 bug：[0.8,1.0) 区间曾 return 0.8，导致完成度 0.9 的员工系数比 0.7 的还低（反转）。
+    """
     if not target or target <= 0:
         return Decimal("1.0")
     rate = actual / target
     if rate < Decimal("0.5"):
         return Decimal("0")
-    if rate < Decimal("0.8"):
-        return rate.quantize(Decimal("0.0001"))
-    if rate < Decimal("1.0"):
-        return Decimal("0.8")
     return rate.quantize(Decimal("0.0001"))
 
 

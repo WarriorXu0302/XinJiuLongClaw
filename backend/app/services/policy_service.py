@@ -93,6 +93,14 @@ async def confirm_settlement_allocation(
             f"Allocated {allocated_amount} exceeds claim "
             f"unsettled balance {claim.unsettled_amount}"
         )
+    # 品牌一致性校验：防止把 A 品牌的 settlement 分配到 B 品牌的 claim，
+    # 继而走 company_pay 路径动 B 品牌的 F 类/现金账户（跨品牌串账）
+    if (settlement.brand_id and claim.brand_id
+            and settlement.brand_id != claim.brand_id):
+        raise ValueError(
+            f"Settlement brand {settlement.brand_id} 与 claim brand "
+            f"{claim.brand_id} 不一致，拒绝跨品牌结算分配"
+        )
 
     items: list[PolicyClaimItem] = claim.items
     if not items:

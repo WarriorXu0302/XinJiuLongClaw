@@ -226,6 +226,7 @@ async def create_receipt(body: ReceiptCreate, user: CurrentUser, db: AsyncSessio
                             _s = (await db.execute(
                                 select(func.coalesce(func.sum(Order.total_amount), 0)).where(
                                     Order.salesman_id == order.salesman_id,
+                                    Order.status.notin_(["rejected", "cancelled"]),
                                     _ext("year", Order.created_at) == now.year,
                                     _ext("month", Order.created_at) == now.month,
                                 )

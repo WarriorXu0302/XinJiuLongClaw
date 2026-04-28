@@ -73,10 +73,11 @@ async def employee_monthly(
         month_target = next((t for t in targets if t.target_month == m), None)
         year_target = next((t for t in targets if t.target_month is None), None)
 
-        # 本月实际销售额 + 回款
+        # 本月实际销售额 + 回款（排除已驳回/取消）
         actual_sales = (await db.execute(
             select(func.coalesce(func.sum(Order.total_amount), 0)).where(
                 Order.salesman_id == emp.id,
+                Order.status.notin_(["rejected", "cancelled"]),
                 extract("year", Order.created_at) == y,
                 extract("month", Order.created_at) == m,
             )
@@ -450,10 +451,11 @@ async def employee_trend(
     result = []
     for y, m in periods:
         period_str = f"{y}-{str(m).zfill(2)}"
-        # 销售 & 回款
+        # 销售 & 回款（排除已驳回/取消）
         s = (await db.execute(
             select(func.coalesce(func.sum(Order.total_amount), 0)).where(
                 Order.salesman_id == eid,
+                Order.status.notin_(["rejected", "cancelled"]),
                 _ext("year", Order.created_at) == y,
                 _ext("month", Order.created_at) == m,
             )

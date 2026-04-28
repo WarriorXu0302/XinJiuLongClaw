@@ -809,7 +809,11 @@ async def confirm_payment(
     await db.flush()
 
     # 订单层副作用一次性触发：Commission 生成 / KPI 刷新 / 里程碑通知
-    await apply_post_confirmation_effects(db, order, user, prev_payment_status)
+    # 传本次刚 confirm 的金额和，里程碑 prev_rate 用它算（否则 partial confirm 会推错档）
+    newly_confirmed = sum((Decimal(str(r.amount)) for r in pending_receipts), Decimal("0"))
+    await apply_post_confirmation_effects(
+        db, order, user, prev_payment_status, newly_confirmed_amount=newly_confirmed,
+    )
 
     await log_audit(
         db, action="confirm_payment", entity_type="Order", entity_id=order.id,

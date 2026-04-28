@@ -113,29 +113,101 @@ class ConfirmPaymentRequest(BaseModel):
 
 @router.post("/confirm-order-payment")
 async def mcp_confirm_order_payment(body: ConfirmPaymentRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 确认订单收款（delivered + fully_paid → completed）。admin/boss/finance。"""
+    """AI 审批该订单所有 pending 收款凭证（等价于 HTTP 层 POST /orders/{id}/confirm-payment）。
+    - 将 pending_confirmation 的 Receipt 转 confirmed + 动账
+    - 应收账款分摊 (apply_per_receipt_effects)
+    - 若跃升到 fully_paid：生成 Commission / 刷新 KPI / 推销售目标里程碑 (apply_post_confirmation_effects)
+    历史 bug：只置 status=completed，跳过所有副作用，Commission 不生成、KPI 不刷新。
+    """
+    from datetime import datetime, timezone
+    from decimal import Decimal
+    from sqlalchemy import func
     from app.models.order import Order
-    from app.models.base import OrderStatus
+    from app.models.finance import Receipt
+    from app.models.product import Account
+    from app.models.base import OrderStatus, PaymentStatus
+    from app.api.routes.accounts import record_fund_flow
+    from app.services.receipt_service import (
+        apply_per_receipt_effects, apply_post_confirmation_effects,
+    )
     user = db.info.get("mcp_user", {})
     require_mcp_role(user, 'boss', 'finance')
 
     order = (await db.execute(select(Order).where(Order.order_no == body.order_no))).scalar_one_or_none()
     if not order:
         raise HTTPException(404, f"订单 {body.order_no} 不存在")
-    if order.status != OrderStatus.DELIVERED:
-        raise HTTPException(400, f"订单状态为 {order.status}，需要 delivered")
-    if order.payment_status != 'fully_paid':
-        raise HTTPException(400, f"付款状态为 {order.payment_status}，需要 fully_paid")
 
-    from datetime import datetime, timezone
-    order.status = OrderStatus.COMPLETED
-    order.completed_at = datetime.now(timezone.utc)
+    # 拉所有 pending 的 Receipt
+    pending_receipts = (await db.execute(
+        select(Receipt).where(
+            Receipt.order_id == order.id,
+            Receipt.status == 'pending_confirmation',
+        )
+    )).scalars().all()
+    if not pending_receipts:
+        raise HTTPException(400, "订单没有待确认的收款凭证")
+
+    master_cash = (await db.execute(
+        select(Account).where(Account.level == 'master', Account.account_type == 'cash')
+    )).scalar_one_or_none()
+    if not master_cash:
+        raise HTTPException(400, "未配置公司总资金池（master 现金账户）")
+
+    prev_payment_status = order.payment_status
+    now = datetime.now(timezone.utc)
+    emp_id = user.get("employee_id")
+
+    # 每条 Receipt 动账 + 应收分摊（与 HTTP 层 confirm_payment 一致）
+    for r in pending_receipts:
+        master_cash.balance += Decimal(str(r.amount))
+        await record_fund_flow(
+            db, account_id=master_cash.id, flow_type='credit', amount=r.amount,
+            balance_after=master_cash.balance, related_type='receipt', related_id=r.id,
+            notes=f"MCP 订单收款 {order.order_no}（审批确认）", created_by=emp_id,
+            brand_id=order.brand_id,
+        )
+        if r.account_id is None:
+            r.account_id = master_cash.id
+        r.status = 'confirmed'
+        r.confirmed_at = now
+        r.confirmed_by = emp_id
+        await apply_per_receipt_effects(db, r, order)
     await db.flush()
-    await log_audit(db, action="confirm_payment", entity_type="Order", entity_id=order.id, user=user)
+
+    # 重算 payment_status
+    total_confirmed = (await db.execute(
+        select(func.coalesce(func.sum(Receipt.amount), 0)).where(
+            Receipt.order_id == order.id,
+            Receipt.status == 'confirmed',
+        )
+    )).scalar_one()
+    target_amount = order.customer_paid_amount or order.total_amount
+    if Decimal(str(total_confirmed)) >= target_amount:
+        order.payment_status = PaymentStatus.FULLY_PAID
+        order.status = OrderStatus.COMPLETED
+        order.completed_at = now
+    elif total_confirmed > 0:
+        order.payment_status = PaymentStatus.PARTIALLY_PAID
+    await db.flush()
+
+    # 订单层副作用：Commission / KPI / 里程碑（首次 FULLY_PAID 时生成一次 Commission）
+    newly_confirmed = sum((Decimal(str(r.amount)) for r in pending_receipts), Decimal("0"))
+    await apply_post_confirmation_effects(
+        db, order, user, prev_payment_status, newly_confirmed_amount=newly_confirmed,
+    )
+
+    await log_audit(
+        db, action="confirm_payment", entity_type="Order", entity_id=order.id,
+        changes={"confirmed_receipt_count": len(pending_receipts),
+                 "confirmed_amount": float(sum(Decimal(str(r.amount)) for r in pending_receipts))},
+        user=user,
+    )
     await db.refresh(order, ["customer"])
-    return {"order_no": order.order_no, "status": "completed",
+    return {"order_no": order.order_no, "status": order.status,
+            "payment_status": order.payment_status,
             "customer": order.customer.name if order.customer else None,
-            "total_amount": float(order.total_amount) if order.total_amount else 0}
+            "confirmed_count": len(pending_receipts),
+            "total_confirmed": float(total_confirmed)}
 
 
 # ═══════════════════════════════════════════════════════════════════

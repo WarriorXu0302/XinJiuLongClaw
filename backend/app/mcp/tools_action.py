@@ -325,15 +325,23 @@ class MCPUploadPaymentRequest(BaseModel):
 
 @router.post("/register-payment")
 async def mcp_register_payment(body: MCPUploadPaymentRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 登记一笔收款（等价于前端 upload-payment-voucher）。"""
+    """AI 登记一笔财务已确认的收款（等价于 HTTP 层 POST /api/receipts，boss/finance 直接动账）。
+    业务员走的路径是"上传凭证 pending → 财务审批 confirmed"，应调 upload-payment-voucher 而非此接口。
+    逻辑与 finance.py:create_receipt 一致：Receipt 立即标 confirmed，动 master 现金，
+    分摊应收，首次 FULLY_PAID 时通过 apply_post_confirmation_effects 生成 Commission / 刷 KPI / 推里程碑。
+    """
     from app.models.order import Order
     from app.models.finance import Receipt
     from app.models.product import Account
     from app.models.base import PaymentStatus, OrderPaymentMethod
     from app.api.routes.accounts import record_fund_flow
+    from app.services.receipt_service import (
+        apply_per_receipt_effects, apply_post_confirmation_effects,
+    )
 
     user = db.info.get("mcp_user", {})
-    require_mcp_role(user, "boss", "finance", "salesman")
+    # 与 HTTP 层 POST /api/receipts 权限对齐：仅 boss/finance（业务员请走 upload-payment-voucher 审批流）
+    require_mcp_role(user, "boss", "finance")
     order = (await db.execute(select(Order).where(Order.order_no == body.order_no))).scalar_one_or_none()
     if not order:
         raise HTTPException(404, f"订单 {body.order_no} 不存在")
@@ -348,97 +356,52 @@ async def mcp_register_payment(body: MCPUploadPaymentRequest, db: AsyncSession =
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     amt = Decimal(str(body.amount))
+    now = datetime.now(timezone.utc)
+    emp_id = user.get("employee_id")
     receipt = Receipt(
         id=str(uuid.uuid4()), receipt_no=f"RC-{ts}-{uuid.uuid4().hex[:6]}",
         customer_id=order.customer_id, order_id=order.id, brand_id=order.brand_id,
         account_id=master_cash.id, amount=amt,
         payment_method=OrderPaymentMethod.BANK,
-        receipt_date=datetime.now(timezone.utc).date(),
+        receipt_date=now.date(),
         source_type=body.source_type,
-        # 下面立即动账，必须标 confirmed 避免被 confirm_payment 重复处理
         status="confirmed",
-        confirmed_at=datetime.now(timezone.utc),
+        confirmed_at=now,
+        confirmed_by=emp_id,
     )
     db.add(receipt)
     master_cash.balance += amt
-    await record_fund_flow(db, account_id=master_cash.id, flow_type='credit', amount=amt,
+    await record_fund_flow(
+        db, account_id=master_cash.id, flow_type='credit', amount=amt,
         balance_after=master_cash.balance, related_type='receipt', related_id=receipt.id,
-        notes=f"MCP收款 {order.order_no}", brand_id=order.brand_id)
+        notes=f"MCP收款 {order.order_no}", brand_id=order.brand_id,
+        created_by=emp_id,
+    )
     await db.flush()
 
+    # 应收账款分摊（单条）
+    await apply_per_receipt_effects(db, receipt, order)
+
+    # 重算 payment_status（只算 confirmed）
     total_received = (await db.execute(
         select(func.coalesce(func.sum(Receipt.amount), 0)).where(
             Receipt.order_id == order.id,
-            Receipt.status == 'confirmed',  # 只算财务已确认的
+            Receipt.status == 'confirmed',
         )
     )).scalar_one()
     target = order.customer_paid_amount or order.total_amount
-    # 保存更新前的 payment_status，用于判断是否首次到达 FULLY_PAID
-    prev_status = order.payment_status
+    prev_payment_status = order.payment_status
     if Decimal(str(total_received)) >= target:
         order.payment_status = PaymentStatus.FULLY_PAID
     elif total_received > 0:
         order.payment_status = PaymentStatus.PARTIALLY_PAID
     await db.flush()
 
-    # ── 订单首次全额回款 → 自动生成 Commission（与 finance.py create_receipt 逻辑一致）──
-    if (prev_status != PaymentStatus.FULLY_PAID
-        and order.payment_status == PaymentStatus.FULLY_PAID
-        and order.salesman_id and order.brand_id):
-        from app.models.user import Commission
-        from app.models.payroll import EmployeeBrandPosition, BrandSalaryScheme
-        # 幂等：同一订单不重复挂
-        existed = (await db.execute(
-            select(Commission).where(Commission.order_id == order.id)
-        )).scalar_one_or_none()
-        if not existed:
-            # 取员工在该品牌的个性化提成率；没有就取品牌+岗位默认
-            ebp = (await db.execute(
-                select(EmployeeBrandPosition).where(
-                    EmployeeBrandPosition.employee_id == order.salesman_id,
-                    EmployeeBrandPosition.brand_id == order.brand_id,
-                )
-            )).scalar_one_or_none()
-            rate = None
-            if ebp and ebp.commission_rate is not None:
-                rate = Decimal(str(ebp.commission_rate))
-            else:
-                scheme = (await db.execute(
-                    select(BrandSalaryScheme).where(
-                        BrandSalaryScheme.brand_id == order.brand_id,
-                        BrandSalaryScheme.position_code == (ebp.position_code if ebp else 'salesman'),
-                    )
-                )).scalar_one_or_none()
-                if scheme:
-                    rate = Decimal(str(scheme.commission_rate))
-            if rate and rate > 0:
-                # 提成基数 = 订单应收（公司实际拿到的钱）
-                # customer_pay/employee_pay → total_amount；company_pay → deal_amount
-                comm_base = order.customer_paid_amount or order.total_amount
-                comm_amount = (Decimal(str(comm_base)) * rate).quantize(Decimal("0.01"))
-                db.add(Commission(
-                    id=str(uuid.uuid4()),
-                    employee_id=order.salesman_id,
-                    brand_id=order.brand_id,
-                    order_id=order.id,
-                    commission_amount=comm_amount,
-                    status='pending',
-                    notes=f"订单{order.order_no} 基数¥{comm_base} × {rate*100}%（{order.settlement_mode}）",
-                ))
-                await db.flush()
+    # 订单层副作用：Commission / KPI / 销售目标里程碑（首次跃升到 FULLY_PAID 时生成 Commission）
+    await apply_post_confirmation_effects(
+        db, order, user, prev_payment_status, newly_confirmed_amount=amt,
+    )
 
-    # 更新信用客户的 Receivable.paid_amount
-    from app.models.customer import Receivable
-    ar = (await db.execute(select(Receivable).where(Receivable.order_id == order.id))).scalar_one_or_none()
-    if ar:
-        ar.paid_amount = float(total_received)
-        if float(total_received) >= float(ar.amount):
-            ar.status = "fully_paid"
-        elif float(total_received) > 0:
-            ar.status = "partially_paid"
-        await db.flush()
-
-    # refresh customer for return info
     await db.refresh(order, ["customer"])
     return {"receipt_no": receipt.receipt_no, "order_no": order.order_no,
             "amount": float(amt),
@@ -1528,23 +1491,31 @@ async def mcp_receive_purchase_order(body: MCPReceivePurchaseOrderRequest, db: A
         po = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.po_no == body.po_id))).scalar_one_or_none()
     if not po:
         raise HTTPException(404, f"采购单 {body.po_id} 不存在")
-    if po.status not in ("approved", "shipped"):
-        raise HTTPException(400, f"采购单状态为 {po.status}，只有 approved/shipped 可收货")
 
-    # 入库：为每个采购项创建 StockFlow + Inventory 记录（与 API 一致）
+    # 与 HTTP 层（purchase.py:receive_purchase_order）保持一致的状态校验：
+    #   - 已 received/completed → 400 拒绝（幂等挡；否则重复建 StockFlow/Inventory）
+    #   - 品鉴仓跳过付款校验
+    #   - 其他仓必须 paid/shipped（不能跳过付款审批直接入库）
+    from app.models.base import PurchaseStatus
     from app.models.product import Product, Warehouse
     from app.models.inventory import Inventory, StockFlow
-    from sqlalchemy.orm import selectinload
+
+    if po.status in (PurchaseStatus.RECEIVED, PurchaseStatus.COMPLETED):
+        raise HTTPException(400, f"采购单已收货，状态: {po.status}")
 
     wh_id = po.warehouse_id
     if not wh_id:
         raise HTTPException(400, "采购单没有设置目标仓库")
+    wh = await db.get(Warehouse, wh_id)
+    is_tasting = wh and wh.warehouse_type == 'tasting'
+    if not is_tasting and po.status not in (PurchaseStatus.PAID, PurchaseStatus.SHIPPED):
+        raise HTTPException(400, f"采购单状态为 '{po.status}'，需要先审批付款才能收货")
 
+    from app.models.purchase import PurchaseOrderItem
     batch_no = f"PO-{datetime.now(timezone.utc).strftime('%Y%m%d')}"
     po_items = (await db.execute(
         select(PurchaseOrderItem).where(PurchaseOrderItem.po_id == po.id)
     )).scalars().all() if not hasattr(po, 'items') or not po.items else po.items
-    from app.models.purchase import PurchaseOrderItem
 
     inbound_count = 0
     for item in po_items:
@@ -1984,41 +1955,75 @@ async def mcp_create_salary_scheme(body: MCPCreateSalarySchemeRequest, db: Async
 # ═══════════════════════════════════════════════════════════════════
 
 class MCPConfirmSubsidyArrivalRequest(BaseModel):
-    subsidy_ids: list[str]
-    arrival_billcode: Optional[str] = None
+    brand_id: str
+    period: str              # "YYYY-MM"
+    arrived_amount: float    # 厂家实际打款金额，必须等于该品牌该期 pending+advanced 合计
+    billcode: Optional[str] = None
+    notes: Optional[str] = None
 
 
 @router.post("/confirm-subsidy-arrival")
 async def mcp_confirm_subsidy_arrival(body: MCPConfirmSubsidyArrivalRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 确认厂家工资补贴到账。将补贴状态设为 reimbursed 并记录到账信息。"""
+    """AI 确认厂家工资补贴到账。
+    与 HTTP 层 /api/payroll/manufacturer-subsidies/confirm-arrival 一致：
+      - 按 (brand_id, period) 批量处理所有 pending/advanced 记录
+      - arrived_amount 必须精确等于合计（避免漏账）
+      - 钱进品牌现金账户 + 记 fund_flow（历史 MCP 版只改 status 不动账 → 账目失衡）
+    """
     from app.models.payroll import ManufacturerSalarySubsidy
-    from datetime import datetime, timezone
+    from app.models.product import Account
+    from app.api.routes.accounts import record_fund_flow
 
     user = db.info.get("mcp_user", {})
     require_mcp_role(user, "boss", "finance")
 
-    if not body.subsidy_ids:
-        raise HTTPException(400, "subsidy_ids 不能为空")
+    subs = (await db.execute(
+        select(ManufacturerSalarySubsidy).where(
+            ManufacturerSalarySubsidy.brand_id == body.brand_id,
+            ManufacturerSalarySubsidy.period == body.period,
+            ManufacturerSalarySubsidy.status.in_(('pending', 'advanced')),
+        )
+    )).scalars().all()
+    if not subs:
+        raise HTTPException(400, f"未找到 {body.period} 待到账补贴")
+    total = sum((s.subsidy_amount for s in subs), Decimal("0"))
+    arrived = Decimal(str(body.arrived_amount))
+    if arrived != total:
+        raise HTTPException(400, f"到账金额 ¥{arrived} 与应收合计 ¥{total} 不一致")
+
+    cash_acc = (await db.execute(
+        select(Account).where(
+            Account.brand_id == body.brand_id,
+            Account.account_type == 'cash',
+            Account.level == 'project',
+        )
+    )).scalar_one_or_none()
+    if not cash_acc:
+        raise HTTPException(400, "品牌未配置现金账户")
 
     now = datetime.now(timezone.utc)
-    confirmed_count = 0
-    for sid in body.subsidy_ids:
-        subsidy = await db.get(ManufacturerSalarySubsidy, sid)
-        if not subsidy:
-            raise HTTPException(404, f"补贴记录 {sid} 不存在")
-        if subsidy.status == "reimbursed":
-            continue  # 已到账，跳过
-        subsidy.status = "reimbursed"
-        subsidy.arrival_at = now
-        subsidy.reimbursed_at = now
-        if body.arrival_billcode:
-            subsidy.arrival_billcode = body.arrival_billcode
-        confirmed_count += 1
+    cash_acc.balance += total
+    await record_fund_flow(
+        db, account_id=cash_acc.id, flow_type='credit', amount=total,
+        balance_after=cash_acc.balance,
+        related_type='manufacturer_salary_arrival',
+        notes=f"MCP 厂家工资补贴到账 {body.period} 单据 {body.billcode or '-'}",
+        created_by=user.get('employee_id'),
+    )
+    for s in subs:
+        s.status = 'reimbursed'
+        s.arrival_at = now
+        s.arrival_billcode = body.billcode
+        s.reimbursed_at = now
+        s.reimburse_account_id = cash_acc.id
+        s.reimburse_notes = body.notes
 
     await db.flush()
-    await log_audit(db, action="confirm_subsidy_arrival", entity_type="ManufacturerSalarySubsidy",
-                    entity_id=",".join(body.subsidy_ids[:5]), user=user)
-    return {"confirmed_count": confirmed_count, "total_requested": len(body.subsidy_ids)}
+    await log_audit(db, action="confirm_subsidy_arrival",
+                    entity_type="ManufacturerSalarySubsidy",
+                    changes={"brand_id": body.brand_id, "period": body.period,
+                             "amount": float(total), "count": len(subs)}, user=user)
+    return {"detail": f"已核销 {len(subs)} 条，合计 ¥{total}", "count": len(subs)}
 
 
 # ═══════════════════════════════════════════════════════════════════

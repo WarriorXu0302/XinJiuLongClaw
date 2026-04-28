@@ -72,11 +72,14 @@ async def apply_post_confirmation_effects(
     order: Order,
     user: dict[str, Any],
     prev_payment_status: str,
+    newly_confirmed_amount: Decimal | None = None,
 ) -> None:
     """订单层一次性副作用：Commission 生成 / KPI 刷新 / 销售目标里程碑通知。
 
     调用前：订单 payment_status 已被更新到最新（基于 confirmed Receipts SUM）。
     prev_payment_status 是更新前的值，用来判断"首次全款"触发 Commission。
+    newly_confirmed_amount 是本次调用刚 confirm 的金额合计（多条 Receipt 一起审批时传和）。
+      里程碑计算用它作为 delta 算 prev_rate（不传则兜底整单应收，早期有 bug 会推错里程碑）。
     """
     from app.models.user import Commission, User
     from app.models.payroll import (
@@ -222,6 +225,7 @@ async def apply_post_confirmation_effects(
                     await db.execute(
                         select(func.coalesce(func.sum(Order.total_amount), 0)).where(
                             Order.salesman_id == order.salesman_id,
+                            Order.status.notin_(["rejected", "cancelled"]),
                             extract("year", Order.created_at) == now.year,
                             extract("month", Order.created_at) == now.month,
                         )
@@ -249,13 +253,14 @@ async def apply_post_confirmation_effects(
                 continue
             rate = float(metric_actual / target_val)
 
-            # 里程碑推送："本次确认的订单"是新跨过的门槛。
-            # delta = 本次订单应收金额（confirm_payment 一次确认整单，所以等于 customer_paid_amount）
-            # prev_actual = metric_actual - delta 是本次确认前的累计值
-            delta = Decimal(str(order.customer_paid_amount or order.total_amount or 0))
+            # 里程碑推送：delta = 本次刚 confirm 的金额（调用方传），算 prev_rate 判新跨门槛
+            # 未传时兜底用整单应收（历史行为），partial confirm 场景会推错里程碑
             if t.bonus_metric == "sales":
                 # sales 指标按订单创建时入账（跟 confirm_payment 无关），delta 不准确，跳过里程碑
                 continue
+            delta = newly_confirmed_amount if newly_confirmed_amount is not None else Decimal(
+                str(order.customer_paid_amount or order.total_amount or 0)
+            )
             prev_actual = max(Decimal("0"), metric_actual - delta)
             prev_rate = float(prev_actual / target_val) if target_val > 0 else 0
             for milestone, emoji in [(0.5, "🎯"), (0.8, "💪"), (1.0, "🎉"), (1.2, "🏆")]:

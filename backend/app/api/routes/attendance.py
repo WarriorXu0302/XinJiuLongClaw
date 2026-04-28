@@ -309,6 +309,17 @@ async def visit_enter(body: VisitEnterRequest, user: CurrentUser, db: AsyncSessi
     if not body.photo_url:
         raise HTTPException(400, "必须拍照打卡")
 
+    # 防重复进店：存在未关闭（leave_time=NULL）的前次拜访时拒绝，强制先 /leave
+    unclosed = (await db.execute(
+        select(CustomerVisit).where(
+            CustomerVisit.employee_id == emp_id,
+            CustomerVisit.leave_time.is_(None),
+        ).limit(1)
+    )).scalar_one_or_none()
+    if unclosed:
+        raise HTTPException(400,
+            f"还有未离店的拜访（进店时间 {unclosed.enter_time}），请先到那家店/leave 再发起新的进店")
+
     # 自动补 customer_name
     cust_name = body.customer_name
     if body.customer_id and not cust_name:

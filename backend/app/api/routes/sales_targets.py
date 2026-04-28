@@ -87,8 +87,11 @@ async def _calc_actual(
     from app.models.finance import Receipt
     from sqlalchemy import extract
 
-    # 销售 = Σ Order.total_amount
-    sales_stmt = select(func.coalesce(func.sum(Order.total_amount), 0))
+    # 销售 = Σ Order.total_amount（排除已驳回/已取消的订单，否则虚假达成触发阶梯奖）
+    sales_stmt = (
+        select(func.coalesce(func.sum(Order.total_amount), 0))
+        .where(Order.status.notin_(["rejected", "cancelled"]))
+    )
     sales_stmt = sales_stmt.where(extract("year", Order.created_at) == year)
     if month:
         sales_stmt = sales_stmt.where(extract("month", Order.created_at) == month)

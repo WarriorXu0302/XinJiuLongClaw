@@ -75,6 +75,14 @@
 - [#3] `.env.example` `CORS_ORIGINS` 改 JSON 数组格式，Pydantic v2 不接受逗号分隔
 - [#4] antd v6 废弃 API 批量替换：`Drawer.width → size`（1 处）、`Statistic.valueStyle → styles.content`（30 处）、`Alert.message → title`（15 处）
 - [#5] antd v6 `InputNumber.addonBefore/After` → 原生 `prefix/suffix`（19 处）。视觉略有差异（addon 灰底块 → 内嵌符号），功能等价
+- **严重**：`mcp_receive_purchase_order` 允许 `approved` 状态直接入库（对比 HTTP 层要求 `paid/shipped`），AI Agent 可跳过付款审批；且无 `received` 幂等挡，重复调用会双写 StockFlow/Inventory。对齐 HTTP 层状态校验 + `received` 拒绝 + 品鉴仓例外
+- **严重**：`mcp_confirm_subsidy_arrival` 只改 status 不动账户 → 补贴"已到账"但品牌现金账户没加钱。重写为按 `(brand_id, period)` 批量处理 + 金额精确匹配 + 品牌现金入账（与 HTTP 层一致）
+- **严重**：`mcp_confirm_order_payment` 只置 `status=completed` 跳过所有副作用 → Commission 不生成、KPI 不刷新、里程碑不推送。重写为完整对齐 `POST /api/orders/{id}/confirm-payment`（批量 confirm 所有 pending Receipt、动账、分摊应收、调 receipt_service）
+- **严重**：`mcp_register_payment` 原本是自实现（Receipt/Commission 等），易与 receipt_service 失同步。改为调用 `apply_per_receipt_effects` + `apply_post_confirmation_effects`，权限收紧到 boss/finance（业务员走 upload-payment-voucher 审批流）
+- **严重**：`mcp_receive_purchase_order` 本身的 `PurchaseOrderItem` import 写在使用之后（NameError 潜在），移到使用前
+- `sales_targets._calc_actual` / `finance.py` 里程碑 / `receipt_service` / `performance.py`（两处）/ `dashboard.py`（两处）共 6 处 `SUM(Order.total_amount)` 漏过滤 `Order.status`，`rejected`/`cancelled` 订单被算进销售达成/绩效 → 可能虚假触发阶梯奖金；统一 `notin_(["rejected","cancelled"])`
+- `apply_post_confirmation_effects` 加 `newly_confirmed_amount` 参数用于里程碑 prev_rate 计算（历史用整单应收估算，partial confirm 场景会误推里程碑档位）。三处调用方（orders.py、mcp tools_action、mcp tools_approval）均补传
+- `attendance.visit_enter` 无"未关闭前次拜访"校验 → 员工连续 enter 十次不 leave 会刷多条开放记录；补强制先 leave
 
 ### Known issues（未修复）
 

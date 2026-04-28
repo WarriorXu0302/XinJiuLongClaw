@@ -506,11 +506,14 @@ async def dashboard_trend(
     end = _date.today()
     start = end - _td(days=days - 1)
 
-    # 每日销售额
+    # 每日销售额（排除已驳回/取消）
     sales_stmt = (
         select(cast(Order.created_at, _SqlDate).label("d"),
                func.coalesce(func.sum(Order.total_amount), 0).label("v"))
-        .where(cast(Order.created_at, _SqlDate) >= start)
+        .where(
+            cast(Order.created_at, _SqlDate) >= start,
+            Order.status.notin_(["rejected", "cancelled"]),
+        )
     )
     if brand_id:
         sales_stmt = sales_stmt.where(Order.brand_id == brand_id)
@@ -543,12 +546,15 @@ async def dashboard_trend(
         })
         d += _td(days=1)
 
-    # 本月分品牌销售
+    # 本月分品牌销售（排除已驳回/取消）
     now_first = _date(end.year, end.month, 1)
     brand_sales_stmt = (
         select(Order.brand_id,
                func.coalesce(func.sum(Order.total_amount), 0).label("v"))
-        .where(cast(Order.created_at, _SqlDate) >= now_first)
+        .where(
+            cast(Order.created_at, _SqlDate) >= now_first,
+            Order.status.notin_(["rejected", "cancelled"]),
+        )
         .group_by(Order.brand_id)
     )
     brand_rows = (await db.execute(brand_sales_stmt)).all()

@@ -29,9 +29,13 @@
 
 ### Added
 
+- 引入小程序子项目 `miniprogram/`（uni-app · Vue 3），承载 C 端商城 + 业务员工作台双端。完成业务员工作台前端骨架（17 个 salesman-* 页，覆盖接单池 / 履约 / 凭证上传 / 打卡 / 拜访 / 请假 / 报销 / 稽查 / KPI / 通知 / 邀请码 / 我的客户 / 跳单告警），打卡模块对齐 ERP `CheckinRecord` / `CustomerVisit` 模型，C 端注册强制 invite_code。`.gitignore` + `README.md` + `CLAUDE.md` 同步更新
+- `README.md` + `CLAUDE.md` 新增"部署拓扑"说明：monorepo 三子项目各自独立部署，backend 是统一后端，frontend/miniprogram 不共享包管理、不做 pnpm workspace；后端按路由前缀分端（`/api/` 给 ERP，`/api/mall/` 给小程序），共享 service 层靠 ActorContext 承接两端调用
 - [#11] `vite.config.ts` 提取 `BACKEND` 常量；`CLAUDE.md` / `README.md` 新增端口选择说明（为啥不用 8001）
 - [#9] 迁移内置 `_ensure_rls_prerequisites()` 幂等创建 erp_app role + helper 函数，migration 独立可跑
 - 新增 `skills/xinjiulong-erp/` Agent 技能包（SKILL.md + 11 份 references + 5 个 helper 脚本）：飞书交互规范、3 种结算模式、订单闭环、收款审批、政策兑付、稽查 5 场景、账户/工资/考勤/审批中心聚合，所有 250+ API 端点速查
+- 补充 6 份 **企业 Agent 业务沉淀文档** 到 `skills/xinjiulong-erp/references/`：`state-machines.md`（13 种实体状态机）/ `field-semantics.md`（关键字段三模式语义）/ `fund-flows-catalog.md`（22 个动账场景）/ `business-rules.md`（19 节硬性规则，新增 §零 身份隔离红线）/ `agent-playbook.md`（30 个员工话术 → API 序列剧本）/ `pitfalls.md`（43 个历史 bug，新增身份绑定类 5 条）；SKILL.md 顶部新增"总览类"索引 + 原则 0 "先绑定身份用用户本人 JWT"，明确 Agent 永不持固定 token / 不跨 open_id 复用 / 密码不进 memory
+- 新增 `skills/xinjiulong-erp/references/miniprogram-status.md`：沉淀小程序端三端部署拓扑、17 个 salesman-* + C 端页清单、后端 `/api/mall/*` 路由**文件已写但 main.py 未挂载（全部 404）**的真实状态，让 Agent 不要误推"去小程序做 XXX"；约定接通判据是 `GET /api/mall/products` 返 200
 - **KPI 系数规则**：新表 `kpi_coefficient_rules`（品牌 × 完成率区间 × 模式），老板/admin 可在 `/hr/kpi-rules` 页面增删改。规则支持 `linear`（系数=完成率）和 `fixed`（区间内固定值）两种模式，留存历史（改规则=旧记录设失效日+插入新记录）。工资单生成时冻结 `kpi_rule_snapshot` 用于审计，老板可对 draft/rejected 工资单 `POST /salary-records/{id}/recompute` 按当前规则重算提成
 - 补修 5 处 `SUM(Receipt.amount)` 漏过滤 `status='confirmed'` 的 bug（finance.py 创建 Receipt 后重算 payment_status / finance.py 两处 KPI 刷新 + 里程碑、sales_targets.py `/my-dashboard` 进度、mcp tools_action.py register-payment）。影响：业务员上传凭证未经审批就刷 KPI / 误触发 Commission 生成 / 仪表盘看到虚高进度
 

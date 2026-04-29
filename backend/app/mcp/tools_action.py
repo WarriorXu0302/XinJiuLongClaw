@@ -1,15 +1,15 @@
 """
 MCP 操作类工具 — 写入数据（受 RLS + 角色约束）。
 
-⚠️ 本模块与前端业务逻辑不对齐，正在重写中。
+薄壳化改造：所有业务计算 / 动账逻辑走 HTTP 层（app/api/routes/*）。
+MCP 只负责：
+  1) name/code → UUID 转换（agent 友好）
+  2) 调 HTTP 真身 handler 函数（复用所有校验 / 权限 / 事务）
+  3) 包装返回值为 AI 友好扁平 dict（含 name 字段方便 agent 展示）
 
-已知差异（不完整）：
-- customer_paid_amount 的三种结算模式计算与 api/routes/orders.py 不完全一致
-- preview-order 对非标准 settlement_mode 有 silent fallback，返回错误金额
-- 部分工具的副作用链不完整（未做 Receipt / payment_status / commission 全链路）
-
-新改动别加到这里：业务逻辑只应存在于 app/api/routes/* 和 app/services/*。
-MCP 应该改为薄壳子调那些 endpoint，不再复刻一份业务计算。
+禁止：
+  - 在此文件里自己实现 customer_paid_amount / 政策匹配 / 动账
+  - 绕过 HTTP 的权限校验（salesman 硬绑定 / CBS 归属）
 """
 import uuid
 from datetime import datetime, timezone
@@ -20,7 +20,15 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
+from app.mcp._resolvers import (
+    resolve_customer_id,
+    resolve_product_id,
+    resolve_salesman_id,
+    resolve_policy_template_id,
+    resolve_warehouse_id,
+)
 from app.mcp.auth import require_mcp_employee, require_mcp_role
 from app.mcp.deps import get_mcp_db
 from app.services.audit_service import log_audit
@@ -29,127 +37,100 @@ router = APIRouter()
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 10.5 预览订单（不创建，只匹配政策+算价格）
+# 10.5 预览订单（薄壳调 POST /api/orders/preview）
 # ═══════════════════════════════════════════════════════════════════
 
 class MCPPreviewOrderRequest(BaseModel):
-    customer_id: str
-    salesman_id: str
-    settlement_mode: str = "customer_pay"
-    items: list[dict]  # [{product_id, quantity, quantity_unit}]
-    policy_template_id: Optional[str] = None
+    items: list[dict]  # [{product_id, quantity, quantity_unit}]  product_id 支持 UUID/code/name
+    settlement_mode: str  # customer_pay / employee_pay / company_pay（必填，非法值 400）
+    policy_template_id: Optional[str] = None  # 支持 UUID/code/name；不传则按品牌+箱数匹配
+    deal_unit_price: Optional[float] = None
+    customer_id: Optional[str] = None  # 支持 UUID/code/name；salesman 传了会校验归属
+    # 兼容旧参数：salesman_id 不再使用（HTTP 层硬绑定到当前用户）
+    salesman_id: Optional[str] = None
 
 
 @router.post("/preview-order")
 async def mcp_preview_order(body: MCPPreviewOrderRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """预览订单：匹配政策模板 + 计算价格，不真正创建。用于建单前确认。"""
-    from app.models.policy_template import PolicyTemplate
-    from app.models.product import Product
+    """预览订单：匹配政策模板 + 计算金额。
+
+    不创建订单。调 HTTP `POST /api/orders/preview`，计算逻辑完全一致。
+    AI agent 建单前先 preview 拿金额给用户确认，确认后再调 create-order。
+    """
+    from app.api.routes.orders import preview_order, OrderPreviewRequest, OrderItemCreate
 
     user = db.info.get("mcp_user", {})
     require_mcp_employee(user)
 
-    # 解析商品，确定品牌+箱数
-    products = []
-    brand_id = None
-    total_cases = 0
+    # 解析商品 name/code → UUID
+    resolved_items = []
     for it in body.items:
-        pid = it["product_id"]
-        prod = await db.get(Product, pid)
-        if not prod:
-            prod = (await db.execute(select(Product).where(Product.code == pid))).scalar_one_or_none()
-        if not prod:
-            prod = (await db.execute(select(Product).where(Product.name == pid))).scalar_one_or_none()
-        if not prod:
-            raise HTTPException(404, f"商品 {pid} 不存在")
-        if brand_id and prod.brand_id != brand_id:
-            raise HTTPException(400, "所有商品必须属于同一品牌")
-        brand_id = prod.brand_id
-        products.append((prod, it))
-        if it.get("quantity_unit", "箱") == "箱":
-            total_cases += it["quantity"]
+        pid = await resolve_product_id(db, it["product_id"])
+        resolved_items.append(OrderItemCreate(
+            product_id=pid,
+            quantity=it["quantity"],
+            quantity_unit=it.get("quantity_unit", "箱"),
+        ))
 
-    # 匹配政策模板
-    if body.policy_template_id:
-        tmpl = await db.get(PolicyTemplate, body.policy_template_id)
-        if not tmpl:
-            tmpl = (await db.execute(select(PolicyTemplate).where(PolicyTemplate.code == body.policy_template_id))).scalar_one_or_none()
-        if not tmpl or not tmpl.is_active:
-            return {"matched": False, "error": "指定的政策模板不存在或已停用"}
-        if tmpl.min_cases and total_cases != tmpl.min_cases:
-            return {"matched": False, "error": f"政策模板要求 {tmpl.min_cases} 箱，当前 {total_cases} 箱"}
-    else:
-        tmpl = (await db.execute(
-            select(PolicyTemplate).where(
-                PolicyTemplate.brand_id == brand_id,
-                PolicyTemplate.is_active == True,
-                PolicyTemplate.min_cases == total_cases,
-            )
-        )).scalar_one_or_none()
-        if not tmpl:
-            return {"matched": False, "error": f"没有匹配的政策模板（品牌箱数={total_cases}）。请先创建对应箱数的政策模板"}
+    # 解析 customer / policy_template
+    customer_id = await resolve_customer_id(db, body.customer_id) if body.customer_id else None
+    policy_tmpl_id = (
+        await resolve_policy_template_id(db, body.policy_template_id)
+        if body.policy_template_id else None
+    )
 
-    guide_price = Decimal(str(tmpl.required_unit_price or 0))
-    customer_price = Decimal(str(tmpl.customer_unit_price or guide_price))
+    http_body = OrderPreviewRequest(
+        items=resolved_items,
+        settlement_mode=body.settlement_mode,
+        policy_template_id=policy_tmpl_id,
+        deal_unit_price=Decimal(str(body.deal_unit_price)) if body.deal_unit_price is not None else None,
+        customer_id=customer_id,
+    )
 
-    total_bottles = 0
-    item_details = []
-    for prod, it in products:
-        bpc = prod.bottles_per_case or 6
-        qty = it["quantity"]
-        unit = it.get("quantity_unit", "箱")
-        bottles = qty * bpc if unit == "箱" else qty
-        total_bottles += bottles
-        item_details.append({
-            "product": prod.name, "quantity": qty, "unit": unit,
-            "bottles": bottles, "bottles_per_case": bpc,
-        })
+    # 调 HTTP 真身 handler（事务 / 权限 / 校验全部复用）
+    resp = await preview_order(http_body, user=user, db=db)
 
-    total_amount = guide_price * total_bottles
-    deal_amount = customer_price * total_bottles
-    policy_gap = total_amount - deal_amount
-
-    sm = body.settlement_mode
-    if sm in ("customer_pay", "employee_pay"):
-        customer_paid = float(total_amount)
-    elif sm == "company_pay":
-        customer_paid = float(deal_amount)
-    else:
-        customer_paid = float(total_amount)
-
-    # 政策福利明细
-    benefits = tmpl.benefit_rules or []
-    benefit_summary = []
-    for b in benefits:
-        benefit_summary.append({
-            "type": b.get("benefit_type", ""),
-            "name": b.get("name", ""),
-            "quantity": b.get("quantity", 0),
-            "unit_value": b.get("unit_value", 0),
-            "is_material": b.get("is_material", False),
-        })
+    # 加载 tmpl 的 benefits / 名称给 agent 展示
+    from app.models.policy_template import PolicyTemplate
+    tmpl = (await db.execute(
+        select(PolicyTemplate).where(PolicyTemplate.id == resp.policy_template_id)
+        .options(selectinload(PolicyTemplate.benefits))
+    )).scalar_one()
+    benefit_summary = [
+        {
+            "benefit_type": b.benefit_type,
+            "name": b.name,
+            "quantity": b.quantity,
+            "quantity_unit": b.quantity_unit or "次",
+            "standard_unit_value": float(b.standard_unit_value or 0),
+            "unit_value": float(b.unit_value or 0),
+            "is_material": b.is_material or False,
+        }
+        for b in (tmpl.benefits or [])
+    ]
 
     return {
         "matched": True,
-        "policy_template": tmpl.name,
-        "policy_template_code": tmpl.code,
-        "policy_template_id": tmpl.id,
-        "guide_price_per_bottle": float(guide_price),
-        "customer_price_per_bottle": float(customer_price),
-        "total_cases": total_cases,
-        "total_bottles": total_bottles,
-        "items": item_details,
-        "total_amount": float(total_amount),
-        "deal_amount": float(deal_amount),
-        "policy_gap": float(policy_gap),
-        "policy_value": float(tmpl.total_policy_value or 0),
-        "policy_surplus": float((tmpl.total_policy_value or 0) - policy_gap),
-        "customer_paid_amount": customer_paid,
-        "settlement_mode": sm,
+        "policy_template_id": resp.policy_template_id,
+        "policy_template": resp.policy_template_name,
+        "policy_template_code": resp.policy_template_code,
+        "brand_id": resp.brand_id,
+        "settlement_mode": resp.settlement_mode,
+        "total_cases": resp.total_cases,
+        "total_bottles": resp.total_bottles,
+        "guide_price_per_bottle": float(resp.guide_price_per_bottle),
+        "customer_price_per_bottle": float(resp.customer_price_per_bottle),
+        "total_amount": float(resp.total_amount),
+        "deal_amount": float(resp.deal_amount),
+        "policy_gap": float(resp.policy_gap),
+        "policy_value": float(resp.policy_value),
+        "policy_surplus": float(resp.policy_surplus),
+        "customer_paid_amount": float(resp.customer_paid_amount),
+        "policy_receivable": float(resp.policy_receivable),
         "benefits": benefit_summary,
         "valid_from": str(tmpl.valid_from) if tmpl.valid_from else None,
         "valid_to": str(tmpl.valid_to) if tmpl.valid_to else None,
-        "hint": "确认无误后调用 create-order 创建订单（参数一致即可）",
+        "hint": "确认无误后调 create-order 用同一组参数建单（事务化：Order + PolicyRequest + submit-policy 一次完成）",
     }
 
 
@@ -158,158 +139,110 @@ async def mcp_preview_order(body: MCPPreviewOrderRequest, db: AsyncSession = Dep
 # ═══════════════════════════════════════════════════════════════════
 
 class MCPCreateOrderRequest(BaseModel):
-    customer_id: str
-    salesman_id: str
-    policy_template_id: Optional[str] = None  # 可选：不传则按品牌+箱数自动匹配
+    customer_id: str  # UUID / code / name 任一
+    salesman_id: Optional[str] = None  # salesman 不传会硬绑定本人；boss/manager 可指定
+    policy_template_id: Optional[str] = None  # 不传则按品牌+箱数自动匹配
     settlement_mode: str  # customer_pay / employee_pay / company_pay
     items: list[dict]  # [{product_id, quantity, quantity_unit}]
     deal_unit_price: Optional[float] = None
-    advance_payer_id: Optional[str] = None
+    advance_payer_id: Optional[str] = None  # employee_pay 模式必传
     warehouse_id: Optional[str] = None
     notes: Optional[str] = None
 
 
 @router.post("/create-order")
 async def mcp_create_order(body: MCPCreateOrderRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 创建订单。指导价从政策模板强制读取。"""
-    from app.models.policy_template import PolicyTemplate
-    from app.models.product import Product
-    from app.models.order import Order, OrderItem
+    """AI 建单（事务化原子接口）。
+
+    薄壳调 HTTP `POST /api/orders/create-with-policy`，该接口一次完成：
+      1) 建 Order + OrderItem（指导价从政策模板强制读取）
+      2) 建 PolicyRequest + PolicyRequestItem[]（连带政策申请）
+      3) submit-policy（订单推进到 policy_pending_internal）
+
+    与前端 OrderList.tsx createMutation 完全对齐。
+    身份硬绑定 / 客户归属校验 / 金额计算都在 HTTP 层统一做。
+    """
+    from app.api.routes.orders import (
+        create_order_with_policy,
+        OrderCreateWithPolicyRequest,
+    )
+    from app.schemas.order import OrderItemCreate
 
     user = db.info.get("mcp_user", {})
     require_mcp_role(user, "boss", "salesman", "sales_manager")
-    # salesman 身份硬绑定：不信 body 传入的 salesman_id
-    roles = user.get("roles") or []
-    if "admin" not in roles and "boss" not in roles and "sales_manager" not in roles:
-        emp_id = user.get("employee_id")
-        if not emp_id:
-            raise HTTPException(400, "当前用户未绑定员工档案，无法建单")
-        body.salesman_id = emp_id
-    else:
-        # boss/manager 指定业务员：支持 UUID、工号、姓名查找
-        from app.models.user import Employee
-        emp = await db.get(Employee, body.salesman_id)
-        if not emp:
-            emp = (await db.execute(select(Employee).where(Employee.employee_no == body.salesman_id))).scalar_one_or_none()
-        if not emp:
-            emp = (await db.execute(select(Employee).where(Employee.name == body.salesman_id))).scalar_one_or_none()
-        if not emp:
-            raise HTTPException(404, f"业务员 {body.salesman_id} 不存在")
-        body.salesman_id = emp.id
 
-    # customer_id 支持 UUID 或 code 查找
-    from app.models.customer import Customer
-    cust = await db.get(Customer, body.customer_id)
-    if not cust:
-        cust = (await db.execute(select(Customer).where(Customer.code == body.customer_id))).scalar_one_or_none()
-    if not cust:
-        cust = (await db.execute(select(Customer).where(Customer.name == body.customer_id))).scalar_one_or_none()
-    if not cust:
-        raise HTTPException(404, f"客户 {body.customer_id} 不存在（支持 UUID/编码/名称查找）")
-    body.customer_id = cust.id
+    # name/code → UUID
+    customer_id = await resolve_customer_id(db, body.customer_id)
 
-    # 先解析商品，确定品牌和总箱数
-    products = []
-    brand_id = None
-    total_cases = 0
+    # salesman_id：HTTP 层会做硬绑定（salesman 必须是本人，boss/manager 可指定）
+    # 但 MCP 如果传入 name/code 要先转 UUID，方便 HTTP 校验
+    salesman_id = None
+    if body.salesman_id:
+        salesman_id = await resolve_salesman_id(db, body.salesman_id)
+
+    resolved_items = []
     for it in body.items:
-        pid = it["product_id"]
-        prod = await db.get(Product, pid)
-        if not prod:
-            prod = (await db.execute(select(Product).where(Product.code == pid))).scalar_one_or_none()
-        if not prod:
-            prod = (await db.execute(select(Product).where(Product.name == pid))).scalar_one_or_none()
-        if not prod:
-            raise HTTPException(404, f"商品 {pid} 不存在（支持 UUID/编码/名称）")
-        if brand_id and prod.brand_id != brand_id:
-            raise HTTPException(400, "所有商品必须属于同一品牌")
-        brand_id = prod.brand_id
-        products.append((prod, it))
-        if it.get("quantity_unit", "箱") == "箱":
-            total_cases += it["quantity"]
-
-    # 政策模板：手动指定或按品牌+箱数自动匹配
-    if body.policy_template_id:
-        tmpl = await db.get(PolicyTemplate, body.policy_template_id)
-        if not tmpl:
-            tmpl = (await db.execute(select(PolicyTemplate).where(PolicyTemplate.code == body.policy_template_id))).scalar_one_or_none()
-        if not tmpl or not tmpl.is_active:
-            raise HTTPException(400, "政策模板不存在或已停用")
-        if tmpl.min_cases and total_cases != tmpl.min_cases:
-            raise HTTPException(400, f"政策模板要求 {tmpl.min_cases} 箱，当前 {total_cases} 箱")
-    else:
-        tmpl = (await db.execute(
-            select(PolicyTemplate).where(
-                PolicyTemplate.brand_id == brand_id,
-                PolicyTemplate.is_active == True,
-                PolicyTemplate.min_cases == total_cases,
-            )
-        )).scalar_one_or_none()
-        if not tmpl:
-            raise HTTPException(400, f"没有匹配的政策模板（品牌={brand_id}，箱数={total_cases}）。请先创建对应箱数的政策模板")
-
-    guide_price = Decimal(str(tmpl.required_unit_price or 0))
-    customer_price = Decimal(str(body.deal_unit_price or tmpl.customer_unit_price or guide_price))
-
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    order = Order(
-        id=str(uuid.uuid4()), order_no=f"SO-{ts}-{uuid.uuid4().hex[:6]}",
-        customer_id=body.customer_id, salesman_id=body.salesman_id,
-        brand_id=brand_id, settlement_mode=body.settlement_mode,
-        settlement_mode_snapshot=body.settlement_mode,
-        advance_payer_id=body.advance_payer_id, warehouse_id=body.warehouse_id,
-        policy_template_id=tmpl.id, notes=body.notes,
-    )
-    total = Decimal("0")
-    total_bottles = 0
-    for prod, it in products:
-        bpc = prod.bottles_per_case or 6
-        bottles = it["quantity"] * bpc if it.get("quantity_unit", "箱") == "箱" else it["quantity"]
-        order.items.append(OrderItem(
-            id=str(uuid.uuid4()), order_id=order.id,
-            product_id=prod.id, quantity=it["quantity"],
-            quantity_unit=it.get("quantity_unit", "箱"), unit_price=guide_price,
+        resolved_items.append(OrderItemCreate(
+            product_id=await resolve_product_id(db, it["product_id"]),
+            quantity=it["quantity"],
+            quantity_unit=it.get("quantity_unit", "箱"),
         ))
-        total += guide_price * bottles
-        total_bottles += bottles
 
-    order.total_amount = total
-    order.deal_unit_price = customer_price
-    order.deal_amount = customer_price * total_bottles
-    order.policy_gap = total - order.deal_amount
-    order.policy_value = tmpl.total_policy_value
-    order.policy_surplus = (tmpl.total_policy_value or Decimal("0")) - order.policy_gap
+    policy_tmpl_id = (
+        await resolve_policy_template_id(db, body.policy_template_id)
+        if body.policy_template_id else None
+    )
+    warehouse_id = (
+        await resolve_warehouse_id(db, body.warehouse_id)
+        if body.warehouse_id else None
+    )
+    advance_payer_id = (
+        await resolve_salesman_id(db, body.advance_payer_id)
+        if body.advance_payer_id else None
+    )
 
-    if body.settlement_mode not in ("customer_pay", "employee_pay", "company_pay"):
-        raise HTTPException(400, f"settlement_mode 必须为 customer_pay/employee_pay/company_pay，收到: {body.settlement_mode}")
-    if body.settlement_mode in ("customer_pay", "employee_pay"):
-        order.customer_paid_amount = total
-    else:
-        order.customer_paid_amount = order.deal_amount
-    order.policy_receivable = order.policy_gap if body.settlement_mode != "customer_pay" else Decimal("0")
+    http_body = OrderCreateWithPolicyRequest(
+        customer_id=customer_id,
+        salesman_id=salesman_id,
+        items=resolved_items,
+        policy_template_id=policy_tmpl_id,
+        settlement_mode=body.settlement_mode,
+        deal_unit_price=Decimal(str(body.deal_unit_price)) if body.deal_unit_price is not None else None,
+        advance_payer_id=advance_payer_id,
+        warehouse_id=warehouse_id,
+        notes=body.notes,
+    )
 
-    db.add(order)
-    try:
-        await db.flush()
-    except Exception as e:
-        raise HTTPException(500, f"创建订单失败: {e}")
-    await log_audit(db, action="create_order", entity_type="Order", entity_id=order.id, user=user)
+    # 调 HTTP 真身 handler（含 salesman 硬绑定 / CBS 校验 / 事务化三步）
+    order = await create_order_with_policy(http_body, user=user, db=db)
+
+    # 返回扁平 dict 给 AI（含 name 字段方便展示）
     return {
         "order_no": order.order_no,
-        "policy_template": tmpl.name,
-        "policy_template_code": tmpl.code,
-        "guide_price": float(guide_price),
-        "customer_price": float(customer_price),
-        "total_cases": total_cases,
-        "total_bottles": total_bottles,
-        "total_amount": float(total),
-        "deal_amount": float(order.deal_amount),
-        "policy_gap": float(order.policy_gap),
-        "policy_value": float(tmpl.total_policy_value or 0),
-        "policy_surplus": float(order.policy_surplus or 0),
-        "customer_paid_amount": float(order.customer_paid_amount),
+        "order_id": order.id,
+        "status": order.status,  # 'policy_pending_internal' after create-with-policy
+        "customer": order.customer.name if order.customer else None,
+        "salesman": order.salesman.name if order.salesman else None,
+        "brand_id": order.brand_id,
+        "policy_template_id": order.policy_template_id,
         "settlement_mode": order.settlement_mode,
-        "status": order.status,
+        "total_amount": float(order.total_amount) if order.total_amount else 0,
+        "deal_amount": float(order.deal_amount) if order.deal_amount else 0,
+        "policy_gap": float(order.policy_gap) if order.policy_gap else 0,
+        "policy_value": float(order.policy_value) if order.policy_value else 0,
+        "policy_surplus": float(order.policy_surplus) if order.policy_surplus else 0,
+        "customer_paid_amount": float(order.customer_paid_amount) if order.customer_paid_amount else 0,
+        "policy_receivable": float(order.policy_receivable) if order.policy_receivable else 0,
+        "items": [
+            {
+                "product": it.product.name if it.product else None,
+                "quantity": it.quantity,
+                "quantity_unit": it.quantity_unit,
+                "unit_price": float(it.unit_price) if it.unit_price else 0,
+            }
+            for it in order.items
+        ],
+        "hint": "订单已建 + 政策申请已提 + 已进入内部审批。下一步：等待 boss 审批（调 approve-order-policy）。",
     }
 
 
@@ -325,89 +258,107 @@ class MCPUploadPaymentRequest(BaseModel):
 
 @router.post("/register-payment")
 async def mcp_register_payment(body: MCPUploadPaymentRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 登记一笔财务已确认的收款（等价于 HTTP 层 POST /api/receipts，boss/finance 直接动账）。
-    业务员走的路径是"上传凭证 pending → 财务审批 confirmed"，应调 upload-payment-voucher 而非此接口。
-    逻辑与 finance.py:create_receipt 一致：Receipt 立即标 confirmed，动 master 现金，
-    分摊应收，首次 FULLY_PAID 时通过 apply_post_confirmation_effects 生成 Commission / 刷 KPI / 推里程碑。
+    """AI 登记一笔财务已确认的收款（等价于 HTTP `POST /api/receipts`，boss/finance 直接动账）。
+
+    业务员请走 `upload-payment-voucher`（上传凭证 pending → 财务审批 confirmed）路径，
+    别用此接口。
+
+    薄壳调 HTTP create_receipt：
+      - Receipt 立即 status=confirmed + 动 master 现金
+      - apply_per_receipt_effects 应收分摊
+      - 首次 FULLY_PAID 时生成 Commission / 刷 KPI / 推里程碑
     """
-    from app.models.order import Order
-    from app.models.finance import Receipt
-    from app.models.product import Account
-    from app.models.base import PaymentStatus, OrderPaymentMethod
-    from app.api.routes.accounts import record_fund_flow
-    from app.services.receipt_service import (
-        apply_per_receipt_effects, apply_post_confirmation_effects,
-    )
+    from app.api.routes.finance import create_receipt
+    from app.schemas.finance import ReceiptCreate
 
     user = db.info.get("mcp_user", {})
-    # 与 HTTP 层 POST /api/receipts 权限对齐：仅 boss/finance（业务员请走 upload-payment-voucher 审批流）
     require_mcp_role(user, "boss", "finance")
-    order = (await db.execute(select(Order).where(Order.order_no == body.order_no))).scalar_one_or_none()
-    if not order:
-        raise HTTPException(404, f"订单 {body.order_no} 不存在")
-    if body.amount <= 0:
-        raise HTTPException(400, "金额必须大于 0")
 
-    master_cash = (await db.execute(
-        select(Account).where(Account.level == 'master', Account.account_type == 'cash')
-    )).scalar_one_or_none()
-    if not master_cash:
-        raise HTTPException(400, "未配置公司总资金池")
+    order = await _resolve_order_for_receipt(db, body.order_no)
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    amt = Decimal(str(body.amount))
-    now = datetime.now(timezone.utc)
-    emp_id = user.get("employee_id")
-    receipt = Receipt(
-        id=str(uuid.uuid4()), receipt_no=f"RC-{ts}-{uuid.uuid4().hex[:6]}",
-        customer_id=order.customer_id, order_id=order.id, brand_id=order.brand_id,
-        account_id=master_cash.id, amount=amt,
-        payment_method=OrderPaymentMethod.BANK,
-        receipt_date=now.date(),
+    http_body = ReceiptCreate(
+        customer_id=order.customer_id,
+        order_id=order.id,
+        amount=Decimal(str(body.amount)),
         source_type=body.source_type,
-        status="confirmed",
-        confirmed_at=now,
-        confirmed_by=emp_id,
     )
-    db.add(receipt)
-    master_cash.balance += amt
-    await record_fund_flow(
-        db, account_id=master_cash.id, flow_type='credit', amount=amt,
-        balance_after=master_cash.balance, related_type='receipt', related_id=receipt.id,
-        notes=f"MCP收款 {order.order_no}", brand_id=order.brand_id,
-        created_by=emp_id,
-    )
-    await db.flush()
+    receipt = await create_receipt(http_body, user=user, db=db)
 
-    # 应收账款分摊（单条）
-    await apply_per_receipt_effects(db, receipt, order)
-
-    # 重算 payment_status（只算 confirmed）
-    total_received = (await db.execute(
-        select(func.coalesce(func.sum(Receipt.amount), 0)).where(
-            Receipt.order_id == order.id,
-            Receipt.status == 'confirmed',
+    # Re-fetch order 最新 payment_status
+    from app.models.order import Order
+    order = (await db.execute(
+        select(Order).where(Order.id == order.id).options(
+            selectinload(Order.customer)
         )
     )).scalar_one()
-    target = order.customer_paid_amount or order.total_amount
-    prev_payment_status = order.payment_status
-    if Decimal(str(total_received)) >= target:
-        order.payment_status = PaymentStatus.FULLY_PAID
-    elif total_received > 0:
-        order.payment_status = PaymentStatus.PARTIALLY_PAID
-    await db.flush()
+    return {
+        "receipt_no": receipt.receipt_no,
+        "order_no": order.order_no,
+        "amount": float(receipt.amount),
+        "customer": order.customer.name if order.customer else None,
+        "payment_status": order.payment_status,
+        "status": order.status,
+    }
 
-    # 订单层副作用：Commission / KPI / 销售目标里程碑（首次跃升到 FULLY_PAID 时生成 Commission）
-    await apply_post_confirmation_effects(
-        db, order, user, prev_payment_status, newly_confirmed_amount=amt,
+
+async def _resolve_order_for_receipt(db: AsyncSession, order_no: str):
+    """MCP 专属：按 order_no 查 Order。小工具集中在这里避免各 tool 重复 query。"""
+    from app.models.order import Order
+    order = (await db.execute(
+        select(Order).where(Order.order_no == order_no)
+    )).scalar_one_or_none()
+    if not order:
+        raise HTTPException(404, f"订单 {order_no} 不存在")
+    return order
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 12.1 上传收款凭证（业务员路径，不直接动账 —— 走财务审批流）
+# ═══════════════════════════════════════════════════════════════════
+
+
+class MCPUploadPaymentVoucherRequest(BaseModel):
+    order_no: str
+    amount: float  # 本次凭证金额
+    voucher_urls: list[str] = []  # 飞书图片 → /api/uploads 返回的 URL
+    source_type: Optional[str] = "customer"
+
+
+@router.post("/upload-payment-voucher")
+async def mcp_upload_payment_voucher(
+    body: MCPUploadPaymentVoucherRequest, db: AsyncSession = Depends(get_mcp_db)
+):
+    """AI 代业务员上传收款凭证（pending_confirmation，等财务审批）。
+
+    薄壳调 HTTP `POST /api/orders/{id}/upload-payment-voucher`：
+      - 建 Receipt（status='pending_confirmation'，不动账）
+      - Order.payment_status = pending_confirmation
+      - 通知财务"有新凭证待审"
+
+    凭业务员权限。财务审批前不会生成 Commission，不刷 KPI。
+    """
+    from app.api.routes.orders import upload_payment_voucher, PaymentVoucherBody
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "salesman", "sales_manager")
+
+    order = await _resolve_order_for_receipt(db, body.order_no)
+    http_body = PaymentVoucherBody(
+        voucher_urls=body.voucher_urls,
+        amount=Decimal(str(body.amount)),
+        source_type=body.source_type or "customer",
     )
-
-    await db.refresh(order, ["customer"])
-    return {"receipt_no": receipt.receipt_no, "order_no": order.order_no,
-            "amount": float(amt),
-            "customer": order.customer.name if order.customer else None,
-            "total_received": float(total_received),
-            "target": float(target), "payment_status": order.payment_status}
+    result = await upload_payment_voucher(
+        order_id=order.id, body=http_body, user=user, db=db,
+    )
+    return {
+        "order_no": result.order_no,
+        "status": result.status,
+        "payment_status": result.payment_status,
+        "amount_uploaded": float(body.amount),
+        "voucher_count": len(body.voucher_urls),
+        "hint": "凭证已上传，等待财务审批（预计 1-2 小时内）。财务审批通过后才算真正入账 + 生成提成。",
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1475,89 +1426,46 @@ async def mcp_create_supplier(body: MCPCreateSupplierRequest, db: AsyncSession =
 
 class MCPReceivePurchaseOrderRequest(BaseModel):
     po_id: str
-    received_items: list[dict] = []  # [{product_id, received_quantity}]
+    batch_no: Optional[str] = None  # HTTP 必传，不传就按 PO-YYYYMMDD 自动生成
+    received_items: list[dict] = []  # 当前未使用；HTTP 按 po.items 全额入库
 
 
 @router.post("/receive-purchase-order")
 async def mcp_receive_purchase_order(body: MCPReceivePurchaseOrderRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 采购收货。将采购单状态更新为 received。"""
+    """AI 采购收货（薄壳调 HTTP `POST /api/purchase-orders/{id}/receive`）。
+
+    HTTP 层会做：
+      - 状态校验（paid/shipped 才能收货，品鉴仓例外）
+      - 已 received 幂等挡
+      - 按品牌做 StockFlow / Inventory 入库
+      - 成本价按箱单价÷bpc 换算到瓶
+    """
+    from app.api.routes.purchase import receive_purchase_order
     from app.models.purchase import PurchaseOrder
 
     user = db.info.get("mcp_user", {})
     require_mcp_role(user, "boss", "warehouse", "purchase")
 
+    # 解析 UUID 或 po_no
     po = await db.get(PurchaseOrder, body.po_id)
     if not po:
-        po = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.po_no == body.po_id))).scalar_one_or_none()
+        po = (await db.execute(
+            select(PurchaseOrder).where(PurchaseOrder.po_no == body.po_id)
+        )).scalar_one_or_none()
     if not po:
         raise HTTPException(404, f"采购单 {body.po_id} 不存在")
 
-    # 与 HTTP 层（purchase.py:receive_purchase_order）保持一致的状态校验：
-    #   - 已 received/completed → 400 拒绝（幂等挡；否则重复建 StockFlow/Inventory）
-    #   - 品鉴仓跳过付款校验
-    #   - 其他仓必须 paid/shipped（不能跳过付款审批直接入库）
-    from app.models.base import PurchaseStatus
-    from app.models.product import Product, Warehouse
-    from app.models.inventory import Inventory, StockFlow
-
-    if po.status in (PurchaseStatus.RECEIVED, PurchaseStatus.COMPLETED):
-        raise HTTPException(400, f"采购单已收货，状态: {po.status}")
-
-    wh_id = po.warehouse_id
-    if not wh_id:
-        raise HTTPException(400, "采购单没有设置目标仓库")
-    wh = await db.get(Warehouse, wh_id)
-    is_tasting = wh and wh.warehouse_type == 'tasting'
-    if not is_tasting and po.status not in (PurchaseStatus.PAID, PurchaseStatus.SHIPPED):
-        raise HTTPException(400, f"采购单状态为 '{po.status}'，需要先审批付款才能收货")
-
-    from app.models.purchase import PurchaseOrderItem
-    batch_no = f"PO-{datetime.now(timezone.utc).strftime('%Y%m%d')}"
-    po_items = (await db.execute(
-        select(PurchaseOrderItem).where(PurchaseOrderItem.po_id == po.id)
-    )).scalars().all() if not hasattr(po, 'items') or not po.items else po.items
-
-    inbound_count = 0
-    for item in po_items:
-        bpc = 1
-        if item.quantity_unit == "箱":
-            prod = await db.get(Product, item.product_id)
-            bpc = prod.bottles_per_case if prod and prod.bottles_per_case else 1
-        bottles = item.quantity * bpc
-        per_bottle_cost = Decimal(str(item.unit_price)) / bpc if bpc > 1 else Decimal(str(item.unit_price))
-
-        ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-        db.add(StockFlow(
-            id=str(uuid.uuid4()), flow_no=f"SF-{ts}-{uuid.uuid4().hex[:6]}",
-            flow_type="inbound", product_id=item.product_id,
-            warehouse_id=wh_id, batch_no=batch_no,
-            cost_price=per_bottle_cost, quantity=bottles,
-            reference_no=po.po_no,
-            notes=f"采购入库 {po.po_no} ({item.quantity}{item.quantity_unit}={bottles}瓶)",
-        ))
-
-        inv = (await db.execute(
-            select(Inventory).where(
-                Inventory.product_id == item.product_id,
-                Inventory.warehouse_id == wh_id,
-                Inventory.batch_no == batch_no,
-            )
-        )).scalar_one_or_none()
-        if inv:
-            inv.quantity += bottles
-        else:
-            db.add(Inventory(
-                product_id=item.product_id, warehouse_id=wh_id,
-                batch_no=batch_no, quantity=bottles,
-                cost_price=per_bottle_cost,
-                source_purchase_order_id=po.id,
-            ))
-        inbound_count += bottles
-
-    po.status = "received"
-    await db.flush()
-    await log_audit(db, action="receive_purchase_order", entity_type="PurchaseOrder", entity_id=po.id, user=user)
-    return {"po_id": po.id, "po_no": po.po_no, "status": po.status, "inbound_bottles": inbound_count}
+    batch_no = body.batch_no or f"PO-{datetime.now(timezone.utc).strftime('%Y%m%d')}"
+    result = await receive_purchase_order(
+        po_id=po.id, user=user, batch_no=batch_no, db=db,
+    )
+    return {
+        "po_id": result.id,
+        "po_no": result.po_no,
+        "status": result.status,
+        "batch_no": batch_no,
+        "hint": "入库完成，库存已增加",
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -2027,106 +1935,17 @@ async def mcp_confirm_subsidy_arrival(body: MCPConfirmSubsidyArrivalRequest, db:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 39. 政策物料兑付
+# 39. 政策物料兑付 — 已被 Phase 3 的新 fulfill-materials 取代
+#     旧实现错误：只改字段不扣库存，fulfilled_qty 直接赋值而非累加
+#     见文件末尾 mcp_fulfill_materials 的正确实现（薄壳调 HTTP）
 # ═══════════════════════════════════════════════════════════════════
-
-class MCPFulfillPolicyMaterialsRequest(BaseModel):
-    request_id: str
-    items: list[dict]  # [{item_id, fulfilled_quantity}]
-
-
-@router.post("/fulfill-policy-materials")
-async def mcp_fulfill_policy_materials(body: MCPFulfillPolicyMaterialsRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 更新政策物料兑付数量。逐条更新 PolicyRequestItem 的 fulfilled_qty。"""
-    from app.models.policy import PolicyRequest
-    from app.models.policy_request_item import PolicyRequestItem
-    from datetime import datetime, timezone
-
-    user = db.info.get("mcp_user", {})
-    require_mcp_role(user, "boss", "finance")
-
-    pr = await db.get(PolicyRequest, body.request_id)
-    if not pr:
-        raise HTTPException(404, f"政策申请 {body.request_id} 不存在")
-
-    if not body.items:
-        raise HTTPException(400, "items 不能为空")
-
-    now = datetime.now(timezone.utc)
-    updated_count = 0
-    for it in body.items:
-        item_id = it.get("item_id")
-        fulfilled_quantity = it.get("fulfilled_quantity", 0)
-        if not item_id:
-            raise HTTPException(400, "每个 item 必须包含 item_id")
-        item = await db.get(PolicyRequestItem, item_id)
-        if not item:
-            raise HTTPException(404, f"政策项 {item_id} 不存在")
-        if item.policy_request_id != body.request_id:
-            raise HTTPException(400, f"政策项 {item_id} 不属于政策申请 {body.request_id}")
-        item.fulfilled_qty = fulfilled_quantity
-        if fulfilled_quantity >= item.quantity:
-            item.fulfill_status = "fulfilled"
-            item.fulfilled_at = now
-        elif fulfilled_quantity > 0:
-            item.fulfill_status = "applied"
-        updated_count += 1
-
-    # 检查所有 item 是否全部兑付完成
-    all_items = (await db.execute(
-        select(PolicyRequestItem).where(PolicyRequestItem.policy_request_id == body.request_id)
-    )).scalars().all()
-    all_fulfilled = all(i.fulfilled_qty >= i.quantity for i in all_items)
-
-    # 如果所有 item 都已兑付，更新父 PolicyRequest 状态
-    if all_fulfilled:
-        from app.models.base import PolicyRequestStatus
-        if pr.status not in (PolicyRequestStatus.APPROVED, "completed"):
-            pr.status = PolicyRequestStatus.APPROVED
-
-    await db.flush()
-    await log_audit(db, action="fulfill_policy_materials", entity_type="PolicyRequest",
-                    entity_id=body.request_id, user=user)
-    return {
-        "updated_count": updated_count,
-        "all_fulfilled": all_fulfilled,
-        "request_id": body.request_id,
-    }
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 40. 确认政策到账
+# 40. 确认政策到账 — 已被 Phase 3 的新 confirm-policy-arrival 取代（薄壳调 HTTP）
+#     旧实现语义错误：只改 PolicyRequest.status，不动 Item.fulfill_status 也不进 F 类账户
+#     见文件末尾 mcp_confirm_policy_arrival 的正确实现
 # ═══════════════════════════════════════════════════════════════════
-
-class MCPConfirmPolicyArrivalRequest(BaseModel):
-    request_id: str
-
-
-@router.post("/confirm-policy-arrival")
-async def mcp_confirm_policy_arrival(body: MCPConfirmPolicyArrivalRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 确认政策到账。将政策申请状态设为 approved（已到账确认）。"""
-    from app.models.policy import PolicyRequest
-    from app.models.base import PolicyRequestStatus
-    from datetime import datetime, timezone
-
-    user = db.info.get("mcp_user", {})
-    require_mcp_role(user, "boss", "finance")
-
-    pr = await db.get(PolicyRequest, body.request_id)
-    if not pr:
-        raise HTTPException(404, f"政策申请 {body.request_id} 不存在")
-    if pr.status == PolicyRequestStatus.APPROVED:
-        raise HTTPException(400, "该政策申请已确认到账")
-
-    now = datetime.now(timezone.utc)
-    pr.status = PolicyRequestStatus.APPROVED
-    pr.updated_at = now
-
-    await db.flush()
-    await log_audit(db, action="confirm_policy_arrival", entity_type="PolicyRequest",
-                    entity_id=pr.id, user=user)
-    return {"request_id": pr.id, "status": pr.status}
-
 
 # ═══════════════════════════════════════════════════════════════════
 # 41. 确认政策兑付完成
@@ -2564,3 +2383,322 @@ async def mcp_create_market_cleanup_case(body: MCPCreateMarketCleanupCaseRequest
     await db.flush()
     await log_audit(db, action="create_market_cleanup_case", entity_type="MarketCleanupCase", entity_id=case.id, user=user)
     return {"case_no": case.case_no, "status": "pending"}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 50-55. 政策兑付链路（6 个 tool 薄壳化 HTTP）
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPFulfillMaterialsItem(BaseModel):
+    product_id: str  # UUID/code/name
+    quantity: int
+    quantity_unit: str = "瓶"
+    request_item_id: Optional[str] = None
+    barcode: Optional[str] = None
+
+
+class MCPFulfillMaterialsRequest(BaseModel):
+    request_id: str  # 政策申请 ID
+    items: list[MCPFulfillMaterialsItem]
+
+
+@router.post("/fulfill-materials")
+async def mcp_fulfill_materials(body: MCPFulfillMaterialsRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 政策物料出库（薄壳调 HTTP `/policies/requests/{id}/fulfill-materials`）。
+
+    前端 PolicyRequestList.tsx:119 对应动作。业务员说"政策赠品给客户了" → 扣库存 + 更新 RequestItem 状态。
+    """
+    from app.api.routes.policies import fulfill_materials, MaterialFulfillRequest, MaterialFulfillItem
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "finance")
+
+    # product_id name/code → UUID
+    resolved_items = []
+    for it in body.items:
+        pid = await resolve_product_id(db, it.product_id)
+        resolved_items.append(MaterialFulfillItem(
+            product_id=pid,
+            quantity=it.quantity,
+            quantity_unit=it.quantity_unit,
+            request_item_id=it.request_item_id,
+            barcode=it.barcode,
+        ))
+
+    http_body = MaterialFulfillRequest(items=resolved_items)
+    result = await fulfill_materials(
+        request_id=body.request_id, body=http_body, user=user, db=db,
+    )
+    return {
+        "request_id": body.request_id,
+        "detail": result.get("detail"),
+        "flows_count": len(result.get("flows", [])),
+        "hint": "物料已从品鉴仓出库，已按瓶扣减库存 + 更新 request_item.fulfilled_qty",
+    }
+
+
+class MCPFulfillItemStatusRequest(BaseModel):
+    request_id: str
+    request_item_id: str
+    fulfill_status: str  # applied / fulfilled / settled
+    fulfill_qty: int = 0
+    scheme_no: Optional[str] = None
+    actual_cost: Optional[float] = None
+    notes: Optional[str] = None
+
+
+@router.post("/fulfill-item-status")
+async def mcp_fulfill_item_status(body: MCPFulfillItemStatusRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 更新政策明细项状态（薄壳调 HTTP `/policies/requests/{id}/fulfill-item-status`）。
+
+    前端 PolicyRequestList.tsx:101/135 对应动作，用于 applied/fulfilled/settled 过程更新。
+    """
+    from app.api.routes.policies import update_fulfill_item_status, FulfillItemStatusUpdate
+
+    user = db.info.get("mcp_user", {})
+    # 与 HTTP 层 require_role("boss", "finance") 对齐
+    require_mcp_role(user, "boss", "finance")
+
+    http_body = FulfillItemStatusUpdate(
+        request_item_id=body.request_item_id,
+        fulfill_status=body.fulfill_status,
+        fulfill_qty=body.fulfill_qty,
+        scheme_no=body.scheme_no,
+        actual_cost=body.actual_cost,
+        notes=body.notes,
+    )
+    result = await update_fulfill_item_status(
+        request_id=body.request_id, body=http_body, user=user, db=db,
+    )
+    return {
+        "request_id": body.request_id,
+        "request_item_id": body.request_item_id,
+        "new_status": body.fulfill_status,
+        "detail": result.get("detail") if isinstance(result, dict) else "已更新",
+    }
+
+
+class MCPSubmitVoucherRequest(BaseModel):
+    request_id: str
+    item_id: str
+    voucher_urls: list[str]
+
+
+@router.post("/submit-policy-voucher")
+async def mcp_submit_policy_voucher(body: MCPSubmitVoucherRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 提交政策兑付凭证（薄壳调 HTTP `/policies/requests/{id}/submit-voucher`）。
+
+    前端 FulfillManage.tsx:52 对应动作。业务员/财务将兑付凭证上传 → item.fulfill_status=fulfilled。
+    """
+    from app.api.routes.policies import submit_fulfill_voucher, FulfillVoucherBody
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "finance", "salesman")
+
+    http_body = FulfillVoucherBody(
+        item_id=body.item_id,
+        voucher_urls=body.voucher_urls,
+    )
+    result = await submit_fulfill_voucher(
+        request_id=body.request_id, body=http_body, user=user, db=db,
+    )
+    return {
+        "request_id": body.request_id,
+        "item_id": body.item_id,
+        "voucher_count": len(body.voucher_urls),
+        "detail": result.get("detail") if isinstance(result, dict) else "已提交",
+    }
+
+
+class MCPConfirmFulfillRequest(BaseModel):
+    request_id: str
+    item_id: str
+
+
+@router.post("/confirm-fulfill")
+async def mcp_confirm_fulfill(body: MCPConfirmFulfillRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 财务归档政策兑付（薄壳调 HTTP `/policies/requests/{id}/confirm-fulfill`）。
+
+    前端 FulfillManage.tsx:62 对应动作。fulfilled → settled，进利润台账。幂等。
+    """
+    from app.api.routes.policies import confirm_fulfill, ConfirmFulfillBody
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "finance")
+
+    http_body = ConfirmFulfillBody(item_id=body.item_id)
+    result = await confirm_fulfill(
+        request_id=body.request_id, body=http_body, user=user, db=db,
+    )
+    return {
+        "request_id": body.request_id,
+        "item_id": body.item_id,
+        "detail": result.get("detail") if isinstance(result, dict) else "已归档",
+    }
+
+
+class MCPConfirmArrivalItem(BaseModel):
+    item_id: str
+    arrived_amount: float
+    billcode: Optional[str] = None
+
+
+class MCPConfirmArrivalRequest(BaseModel):
+    items: list[MCPConfirmArrivalItem]
+
+
+@router.post("/confirm-policy-arrival")
+async def mcp_confirm_policy_arrival(body: MCPConfirmArrivalRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 财务确认政策到账（薄壳调 HTTP `/policies/requests/confirm-arrival`）。
+
+    前端 ArrivalReconcile.tsx:58/74 对应动作。财务收到厂家打款 → item.fulfill_status=arrived + F 类账户加钱。
+    幂等：已 arrived 的 item 跳过。
+    """
+    from app.api.routes.policies import confirm_arrival, ArrivalConfirmRequest, ArrivalConfirmItem
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "finance")
+
+    http_items = [
+        ArrivalConfirmItem(
+            item_id=it.item_id,
+            arrived_amount=it.arrived_amount,
+            billcode=it.billcode,
+        )
+        for it in body.items
+    ]
+    http_body = ArrivalConfirmRequest(items=http_items, salary_items=[])
+    result = await confirm_arrival(body=http_body, user=user, db=db)
+    return {
+        "detail": result.get("detail"),
+        "updated": result.get("updated", 0),
+        "hint": "F 类账户已加款（per item arrival_amount），跳过已 arrived 的",
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 56. 采购撤销（薄壳调 HTTP `/purchase-orders/{id}/cancel`）
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPCancelPurchaseOrderRequest(BaseModel):
+    po_id: str  # UUID / po_no
+
+
+@router.post("/cancel-purchase-order")
+async def mcp_cancel_purchase_order(body: MCPCancelPurchaseOrderRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 撤销已付款采购单（薄壳调 HTTP `/purchase-orders/{id}/cancel`）。
+
+    仅 paid 状态可撤销（已 received 的走退货）。反转账户变动：品牌 cash/F类/financing 恢复，
+    payment_to_mfr 反扣。HTTP 层用 SELECT FOR UPDATE 锁防并发。
+    """
+    from app.api.routes.purchase import cancel_paid_purchase_order
+    from app.models.purchase import PurchaseOrder
+
+    user = db.info.get("mcp_user", {})
+    # 与 HTTP 层 cancel_paid_purchase_order 的 require_role("boss", "purchase") 对齐
+    require_mcp_role(user, "boss", "purchase")
+
+    po = await db.get(PurchaseOrder, body.po_id)
+    if not po:
+        po = (await db.execute(
+            select(PurchaseOrder).where(PurchaseOrder.po_no == body.po_id)
+        )).scalar_one_or_none()
+    if not po:
+        raise HTTPException(404, f"采购单 {body.po_id} 不存在")
+
+    result = await cancel_paid_purchase_order(po_id=po.id, user=user, db=db)
+    # HTTP 层返 {"message": "..."}；标准化成 detail 给 agent 看
+    detail = (result.get("message") or result.get("detail")) if isinstance(result, dict) else "已撤销"
+    return {
+        "po_id": po.id,
+        "po_no": po.po_no,
+        "detail": detail,
+        "hint": "已反转账户变动，品牌账户恢复，payment_to_mfr 反扣",
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 57-59. 稽查案件（拆拆审批+归档）
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPCloseInspectionRequest(BaseModel):
+    case_id: str  # UUID / case_no
+
+
+@router.post("/close-inspection-case")
+async def mcp_close_inspection_case(body: MCPCloseInspectionRequest, db: AsyncSession = Depends(get_mcp_db)):
+    """AI 归档稽查案件（薄壳调 HTTP `PUT /inspection-cases/{id}` 设 status='closed'）。
+
+    仅 executed 状态可归档。
+    """
+    from app.api.routes.inspections import update_inspection_case
+    from app.models.inspection import InspectionCase
+    from app.schemas.inspection import InspectionCaseUpdate
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "finance")
+
+    case = await db.get(InspectionCase, body.case_id)
+    if not case:
+        case = (await db.execute(
+            select(InspectionCase).where(InspectionCase.case_no == body.case_id)
+        )).scalar_one_or_none()
+    if not case:
+        raise HTTPException(404, f"稽查案件 {body.case_id} 不存在")
+    if case.status != "executed":
+        raise HTTPException(400, f"案件状态为 {case.status}，只有 executed 可归档")
+
+    result = await update_inspection_case(
+        case_id=case.id,
+        body=InspectionCaseUpdate(status="closed"),
+        user=user, db=db,
+    )
+    return {
+        "case_id": result.id,
+        "case_no": result.case_no,
+        "status": result.status,
+        "hint": "案件已归档，进入利润台账",
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 60. 创建调拨申请（薄壳调 HTTP）
+# 补 Phase 3 的第 12 个，前端 AccountOverview.tsx 调拨按钮常用
+# ═══════════════════════════════════════════════════════════════════
+
+class MCPCreateTransferRequestRequest(BaseModel):
+    from_account_id: str  # UUID / code / name
+    to_account_id: str
+    amount: float
+    notes: Optional[str] = None
+
+
+@router.post("/create-fund-transfer-request")
+async def mcp_create_transfer_request(
+    body: MCPCreateTransferRequestRequest, db: AsyncSession = Depends(get_mcp_db)
+):
+    """AI 发起调拨申请（不立即执行，等 boss 批准）。
+
+    薄壳调 HTTP `POST /api/accounts/transfer`。boss 批准时调 approve-fund-transfer。
+    """
+    from app.mcp._resolvers import resolve_account_id
+    from app.api.routes.accounts import submit_fund_transfer, FundTransferRequest
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "finance")
+
+    from_id = await resolve_account_id(db, body.from_account_id)
+    to_id = await resolve_account_id(db, body.to_account_id)
+
+    http_body = FundTransferRequest(
+        from_account_id=from_id,
+        to_account_id=to_id,
+        amount=Decimal(str(body.amount)),
+        notes=body.notes,
+    )
+    result = await submit_fund_transfer(body=http_body, user=user, db=db)
+    return {
+        "transfer_id": result.get("id") if isinstance(result, dict) else getattr(result, "id", None),
+        "amount": body.amount,
+        "hint": "调拨申请已建，等待 boss 批准（用 approve-fund-transfer）",
+    }

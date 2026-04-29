@@ -184,15 +184,22 @@ ACTION_TOOLS: list[ToolEntry] = [
     {"name": "confirm-subsidy-arrival", "path": "/mcp/confirm-subsidy-arrival",
      "roles": ["boss", "finance"],
      "description": "确认厂家工资补贴到账。批量设置补贴状态为 reimbursed 并记录到账时间。"},
-    {"name": "fulfill-policy-materials", "path": "/mcp/fulfill-policy-materials",
+    # 政策兑付链路（Phase 3 薄壳化，替代旧的 fulfill-policy-materials / confirm-policy-fulfill）
+    {"name": "fulfill-materials", "path": "/mcp/fulfill-materials",
      "roles": ["boss", "finance"],
-     "description": "更新政策物料兑付数量。逐条更新 PolicyRequestItem 的 fulfilled_qty。"},
+     "description": "政策物料出库：从品鉴仓扣库存 + 更新 PolicyRequestItem.fulfilled_qty/fulfill_status。按瓶扣减，支持箱/瓶输入。"},
+    {"name": "fulfill-item-status", "path": "/mcp/fulfill-item-status",
+     "roles": ["boss", "finance"],
+     "description": "更新政策明细项 fulfill_status（applied/fulfilled/settled），可带 actual_cost / scheme_no。"},
+    {"name": "submit-policy-voucher", "path": "/mcp/submit-policy-voucher",
+     "roles": ["boss", "finance", "salesman"],
+     "description": "提交政策兑付凭证：arrived/settled → fulfilled。上传凭证 URL 到 item.voucher_urls。"},
+    {"name": "confirm-fulfill", "path": "/mcp/confirm-fulfill",
+     "roles": ["boss", "finance"],
+     "description": "财务归档政策兑付：fulfilled → settled。进利润台账。幂等。"},
     {"name": "confirm-policy-arrival", "path": "/mcp/confirm-policy-arrival",
      "roles": ["boss", "finance"],
-     "description": "确认政策到账。将政策申请状态设为 approved。"},
-    {"name": "confirm-policy-fulfill", "path": "/mcp/confirm-policy-fulfill",
-     "roles": ["boss", "finance"],
-     "description": "确认政策兑付完成。标记政策申请及所有未兑付项为 fulfilled。"},
+     "description": "批量确认政策到账（item 级）：item.fulfill_status=arrived + F 类账户加钱。幂等：已 arrived 跳过。"},
     {"name": "update-order", "path": "/mcp/update-order",
      "roles": ["boss", "salesman", "sales_manager"],
      "description": "编辑订单（仅 pending 状态）。可修改客户/业务员/备注/仓库。"},
@@ -217,6 +224,19 @@ ACTION_TOOLS: list[ToolEntry] = [
     {"name": "create-market-cleanup-case", "path": "/mcp/create-market-cleanup-case",
      "roles": ["boss", "finance"],
      "description": "创建市场清理案件。状态 pending。"},
+    # Phase 3 新增写入类
+    {"name": "cancel-purchase-order", "path": "/mcp/cancel-purchase-order",
+     "roles": ["boss", "purchase"],
+     "description": "撤销已付款采购单：反转账户变动（品牌 cash/F类/financing 恢复 + payment_to_mfr 反扣）。仅 paid 状态可撤销，已 received 走退货。"},
+    {"name": "close-inspection-case", "path": "/mcp/close-inspection-case",
+     "roles": ["boss", "finance"],
+     "description": "归档稽查案件：executed → closed。进利润台账。"},
+    {"name": "create-fund-transfer-request", "path": "/mcp/create-fund-transfer-request",
+     "roles": ["boss", "finance"],
+     "description": "发起资金调拨申请（不立即执行）。boss 批准时调 approve-fund-transfer。支持账户名/UUID。"},
+    {"name": "upload-payment-voucher", "path": "/mcp/upload-payment-voucher",
+     "roles": ["boss", "salesman", "sales_manager"],
+     "description": "业务员上传收款凭证：建 pending_confirmation Receipt，不动账。等财务审批（confirm-order-payment）才入账 + 生成提成。与 register-payment（财务直录）路径不同。"},
 ]
 
 # ─── 审批类（17）─────────────────────────────────────────────
@@ -272,6 +292,10 @@ APPROVAL_TOOLS: list[ToolEntry] = [
     {"name": "create-policy-claim", "path": "/mcp/create-policy-claim",
      "roles": ["boss", "finance"],
      "description": "创建政策理赔单（PolicyClaim）。自动生成 claim_no，状态 draft。"},
+    # Phase 3 新增审批类
+    {"name": "reject-payment-receipts", "path": "/mcp/reject-payment-receipts",
+     "roles": ["boss", "finance"],
+     "description": "财务驳回订单所有 pending 收款凭证：Receipt.status=rejected + Order.payment_status 回退。需带驳回原因。对应前端 FinanceApproval 驳回按钮。"},
 ]
 
 # ─── Legacy（6，不含 external-approve-and-fill-scheme）──────

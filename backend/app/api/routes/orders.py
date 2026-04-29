@@ -4,6 +4,7 @@ Order API routes — CRUD + policy flow + confirm-delivery + profit.
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -14,10 +15,11 @@ from sqlalchemy.orm import selectinload
 from app.core.database import get_db
 from app.core.permissions import apply_data_scope, require_role
 from app.core.security import CurrentUser
-from app.models.base import CustomerSettlementMode, OrderStatus
+from app.models.base import ApprovalMode, CustomerSettlementMode, OrderStatus, PolicyRequestSource
 from app.models.customer import Customer, Receivable
 from app.models.inventory import StockOutAllocation
 from app.models.order import Order, OrderItem
+from app.models.policy_template import PolicyTemplate
 from app.schemas.order import (
     OrderCreate,
     OrderItemCreate,
@@ -40,6 +42,234 @@ def _generate_receivable_no() -> str:
     ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     short = uuid.uuid4().hex[:6]
     return f"AR-{ts}-{short}"
+
+
+# ── Order build: shared between create + create-with-policy + MCP preview ───
+# 前端 OrderList.tsx createMutation 的业务真相源。MCP 与 HTTP 必须走这个函数。
+
+def _enforce_salesman_binding(body_salesman_id: Optional[str], user: dict[str, Any]) -> str:
+    """salesman 身份硬绑定：非 boss/admin/sales_manager 建单必须挂到自己名下。
+
+    HTTP + MCP 共用。历史上 /api/orders 没这层校验，salesman 能替别人建单 → 提成错配。
+    """
+    roles = user.get("roles") or []
+    privileged = any(r in roles for r in ("admin", "boss", "sales_manager"))
+    if privileged:
+        if not body_salesman_id:
+            raise HTTPException(400, "boss/sales_manager 建单必须指定 salesman_id")
+        return body_salesman_id
+    # salesman（普通）：强制绑定到当前用户 employee_id
+    emp_id = user.get("employee_id")
+    if not emp_id:
+        raise HTTPException(400, "当前用户未绑定员工档案，无法建单")
+    return emp_id
+
+
+async def _resolve_brand_and_products(
+    db: AsyncSession, items: list[OrderItemCreate]
+) -> tuple[str, list[tuple[Any, OrderItemCreate]]]:
+    """校验所有商品同品牌，返回 (brand_id, [(Product, item), ...])。
+
+    用 select().where() 而非 db.get() — 主键直查可能跳过 RLS session 变量，
+    用 select 强制走 RLS，salesman 传别品牌 product_id 会被过滤成 None → 400。
+    """
+    from app.models.product import Product
+
+    brand_id = None
+    resolved: list[tuple[Any, OrderItemCreate]] = []
+    for it in items:
+        product = (await db.execute(
+            select(Product).where(Product.id == it.product_id)
+        )).scalar_one_or_none()
+        if not product:
+            raise HTTPException(400, f"商品 {it.product_id} 不存在或不在你的品牌范围")
+        if brand_id and product.brand_id != brand_id:
+            raise HTTPException(400, "所有商品必须属于同一品牌")
+        if brand_id is None:
+            brand_id = product.brand_id
+        resolved.append((product, it))
+    if brand_id is None:
+        raise HTTPException(400, "订单商品为空")
+    return brand_id, resolved
+
+
+async def _validate_customer_belongs_to_salesman(
+    db: AsyncSession, customer_id: str, salesman_id: str, brand_id: str
+) -> None:
+    """salesman 建单/预览时：customer × brand × salesman 三元组必须在 CBS 存在。
+
+    用 400 而非 403 —— 跟"客户不存在"合并错误消息，不暴露"客户存在但无权访问"这个信息。
+    boss/admin/sales_manager 应在调用方跳过此校验。
+    """
+    from app.models.customer import CustomerBrandSalesman
+
+    exists = (await db.execute(
+        select(CustomerBrandSalesman.id).where(
+            CustomerBrandSalesman.customer_id == customer_id,
+            CustomerBrandSalesman.salesman_id == salesman_id,
+            CustomerBrandSalesman.brand_id == brand_id,
+        )
+    )).scalar_one_or_none()
+    if not exists:
+        raise HTTPException(400, "客户不存在或未绑定到你名下")
+
+
+async def _match_or_load_policy_template(
+    db: AsyncSession,
+    brand_id: str,
+    total_cases: int,
+    policy_template_id: Optional[str] = None,
+) -> PolicyTemplate:
+    """加载或匹配政策模板。业务规则与前端 /policy-templates/templates/match 一致。
+
+    - 有 policy_template_id：校验存在+启用+箱数匹配
+    - 无：按 (brand_id, is_active, min_cases == total_cases) 精确匹配
+    - 任一失败直接 400
+    """
+    if policy_template_id:
+        tmpl = await db.get(PolicyTemplate, policy_template_id)
+        if not tmpl or not tmpl.is_active:
+            raise HTTPException(400, "政策模板不存在或已停用")
+        if tmpl.min_cases and total_cases != tmpl.min_cases:
+            raise HTTPException(400, f"政策模板要求 {tmpl.min_cases} 箱，当前 {total_cases} 箱")
+    else:
+        tmpl = (await db.execute(
+            select(PolicyTemplate).where(
+                PolicyTemplate.brand_id == brand_id,
+                PolicyTemplate.is_active == True,
+                PolicyTemplate.min_cases == total_cases,
+            )
+        )).scalar_one_or_none()
+        if not tmpl:
+            raise HTTPException(
+                400,
+                f"没有匹配的政策模板（品牌={brand_id}，箱数={total_cases}）。"
+                f"请先创建对应箱数的政策模板，或手动指定 policy_template_id",
+            )
+    if tmpl.required_unit_price is None:
+        raise HTTPException(400, "政策模板未配置指导价（required_unit_price）")
+    if tmpl.brand_id and tmpl.brand_id != brand_id:
+        raise HTTPException(400, "政策模板品牌与商品品牌不符")
+    return tmpl
+
+
+def _compute_order_amounts(
+    tmpl: PolicyTemplate,
+    resolved_products: list[tuple[Any, OrderItemCreate]],
+    settlement_mode: str,
+    deal_unit_price_override: Optional[Decimal] = None,
+) -> dict[str, Any]:
+    """计算订单所有金额字段。返回 dict 可直接 set 到 Order 或返给 preview。
+
+    业务真相源（与 frontend/src/pages/orders/OrderList.tsx:106-112 + backend 原实现一致）：
+      total_amount        = sum(guide_price × bottles)        指导价合计（公司应收基准）
+      deal_amount         = sum(customer_price × bottles)     客户到手总额
+      policy_gap          = total_amount - deal_amount        政策差
+      policy_value        = tmpl.total_policy_value
+      policy_surplus      = policy_value - policy_gap
+      customer_paid_amount:
+        customer_pay    → total_amount（客户全额付指导价）
+        employee_pay    → total_amount（客户付到手价 + 业务员垫差）
+        company_pay     → deal_amount（公司让利，只收客户那部分）
+      policy_receivable:
+        customer_pay    → 0
+        employee_pay    → policy_gap（等厂家兑付后返业务员）
+        company_pay     → policy_gap（等厂家兑付后留公司 F 类）
+    """
+    if settlement_mode not in ("customer_pay", "employee_pay", "company_pay"):
+        raise HTTPException(
+            400, f"settlement_mode 必须为 customer_pay/employee_pay/company_pay，收到: {settlement_mode}"
+        )
+
+    guide_price = Decimal(str(tmpl.required_unit_price))
+    customer_price = Decimal(str(tmpl.customer_unit_price or tmpl.required_unit_price))
+    if deal_unit_price_override is not None:
+        customer_price = Decimal(str(deal_unit_price_override))
+
+    total = Decimal("0")
+    total_bottles = 0
+    for prod, it in resolved_products:
+        bpc = prod.bottles_per_case or 6
+        bottles = it.quantity * bpc if it.quantity_unit == "箱" else it.quantity
+        total += guide_price * bottles
+        total_bottles += bottles
+
+    deal_amount = customer_price * total_bottles
+    policy_gap = total - deal_amount
+    policy_value = tmpl.total_policy_value or Decimal("0")
+    policy_surplus = policy_value - policy_gap
+
+    if settlement_mode == "customer_pay":
+        customer_paid_amount = total
+        policy_receivable = Decimal("0")
+    elif settlement_mode == "employee_pay":
+        customer_paid_amount = total
+        policy_receivable = policy_gap
+    else:  # company_pay
+        customer_paid_amount = deal_amount
+        policy_receivable = policy_gap
+
+    return {
+        "guide_price": guide_price,
+        "customer_price": customer_price,
+        "total_bottles": total_bottles,
+        "total_amount": total,
+        "deal_amount": deal_amount,
+        "policy_gap": policy_gap,
+        "policy_value": policy_value,
+        "policy_surplus": policy_surplus,
+        "customer_paid_amount": customer_paid_amount,
+        "policy_receivable": policy_receivable,
+    }
+
+
+async def _build_order_from_computed(
+    db: AsyncSession,
+    body: OrderCreate,
+    user: dict[str, Any],
+    tmpl: PolicyTemplate,
+    resolved_products: list[tuple[Any, OrderItemCreate]],
+    brand_id: str,
+    amounts: dict[str, Any],
+) -> Order:
+    """用 _compute_order_amounts 的结果构造 Order + OrderItem。不 flush，由调用方决定。"""
+    order = Order(
+        id=str(uuid.uuid4()),
+        order_no=_generate_order_no(),
+        customer_id=body.customer_id,
+        salesman_id=body.salesman_id,  # 已经过 _enforce_salesman_binding
+        brand_id=brand_id,
+        settlement_mode_snapshot=body.settlement_mode_snapshot,
+        settlement_mode=body.settlement_mode,
+        advance_payer_id=body.advance_payer_id,
+        warehouse_id=body.warehouse_id,
+        policy_template_id=tmpl.id,
+        notes=body.notes,
+    )
+
+    guide_price = amounts["guide_price"]
+    for prod, it in resolved_products:
+        oi = OrderItem(
+            id=str(uuid.uuid4()),
+            order_id=order.id,
+            product_id=it.product_id,
+            quantity=it.quantity,
+            quantity_unit=it.quantity_unit,
+            unit_price=guide_price,  # 强制政策指导价，不尊重 body.items[].unit_price
+        )
+        order.items.append(oi)
+
+    order.total_amount = amounts["total_amount"]
+    order.deal_unit_price = amounts["customer_price"]
+    order.deal_amount = amounts["deal_amount"]
+    order.policy_gap = amounts["policy_gap"]
+    order.policy_value = amounts["policy_value"]
+    order.policy_surplus = amounts["policy_surplus"]
+    order.customer_paid_amount = amounts["customer_paid_amount"]
+    order.policy_receivable = amounts["policy_receivable"]
+
+    db.add(order)
+    return order
 
 
 async def _ensure_order_receivable(db: AsyncSession, order: Order) -> None:
@@ -77,118 +307,119 @@ async def _ensure_order_receivable(db: AsyncSession, order: Order) -> None:
 # ── CRUD ─────────────────────────────────────────────────────────────
 
 
-@router.post("", response_model=OrderResponse, status_code=201)
-async def create_order(body: OrderCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
-    require_role(user, "boss", "salesman", "sales_manager")
-    from app.models.product import Product
-    from app.models.policy_template import PolicyTemplate
+# ═══════════════════════════════════════════════════════════════════
+# Preview — 建单前拿到指导价 / 客户到手价 / 政策差 / 公司应收
+# 前端表单实时计算时用；MCP 建单前让 agent 展示给用户的金额也走这个
+# ═══════════════════════════════════════════════════════════════════
 
-    # 确定品牌（从商品推断）
-    brand_id = None
-    for it in body.items:
-        product = await db.get(Product, it.product_id)
-        if not product:
-            raise HTTPException(400, f"商品 {it.product_id} 不存在")
-        if brand_id and product.brand_id != brand_id:
-            raise HTTPException(400, "所有商品必须属于同一品牌")
-        if brand_id is None:
-            brand_id = product.brand_id
 
-    # 计算订单总箱数（用于政策匹配）
+class OrderPreviewRequest(BaseModel):
+    items: list[OrderItemCreate]
+    settlement_mode: str  # customer_pay / employee_pay / company_pay
+    policy_template_id: Optional[str] = None
+    deal_unit_price: Optional[Decimal] = None
+    customer_id: Optional[str] = None  # 可选，若传则校验 salesman 归属
+
+
+class OrderPreviewResponse(BaseModel):
+    brand_id: str
+    total_cases: int
+    total_bottles: int
+    guide_price_per_bottle: Decimal
+    customer_price_per_bottle: Decimal
+    total_amount: Decimal  # 指导价合计
+    deal_amount: Decimal  # 到手价合计
+    policy_gap: Decimal
+    policy_value: Decimal
+    policy_surplus: Decimal
+    customer_paid_amount: Decimal  # 公司应收
+    policy_receivable: Decimal
+    settlement_mode: str
+    policy_template_id: str
+    policy_template_name: str
+    policy_template_code: str
+
+
+@router.post("/preview", response_model=OrderPreviewResponse)
+async def preview_order(
+    body: OrderPreviewRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)
+):
+    """不持久化，只返回金额计算结果。与 POST /api/orders 同一个计算函数。
+
+    权限：boss/salesman/sales_manager/finance。
+    - finance：审批时查金额
+    - salesman：只能预览自己名下客户的订单（需传 customer_id 才校验）
+    """
+    require_role(user, "boss", "salesman", "sales_manager", "finance")
+
+    brand_id, resolved = await _resolve_brand_and_products(db, body.items)
     total_cases = sum(it.quantity if it.quantity_unit == "箱" else 0 for it in body.items)
+    tmpl = await _match_or_load_policy_template(db, brand_id, total_cases, body.policy_template_id)
+    amounts = _compute_order_amounts(tmpl, resolved, body.settlement_mode, body.deal_unit_price)
 
-    # 政策模板：手动指定或按品牌+箱数自动匹配
-    if body.policy_template_id:
-        tmpl = await db.get(PolicyTemplate, body.policy_template_id)
-        if not tmpl or not tmpl.is_active:
-            raise HTTPException(400, "政策模板不存在或已停用")
-        if tmpl.min_cases and total_cases != tmpl.min_cases:
-            raise HTTPException(400, f"政策模板要求 {tmpl.min_cases} 箱，当前 {total_cases} 箱")
-    else:
-        # 自动匹配：同品牌 + min_cases 精确等于订单箱数
-        tmpl = (await db.execute(
-            select(PolicyTemplate).where(
-                PolicyTemplate.brand_id == brand_id,
-                PolicyTemplate.is_active == True,
-                PolicyTemplate.min_cases == total_cases,
-            )
-        )).scalar_one_or_none()
-        if not tmpl:
-            raise HTTPException(400, f"没有匹配的政策模板（品牌={brand_id}，箱数={total_cases}）。请先创建对应箱数的政策模板，或手动指定 policy_template_id")
+    # salesman 如果传了 customer_id 要校验归属（防通过 preview 套出别人客户的金额）
+    roles = user.get("roles") or []
+    is_privileged = any(r in roles for r in ("admin", "boss", "sales_manager", "finance"))
+    cust_id = getattr(body, "customer_id", None)
+    if not is_privileged and cust_id:
+        emp_id = user.get("employee_id")
+        if not emp_id:
+            raise HTTPException(400, "当前用户未绑定员工档案")
+        await _validate_customer_belongs_to_salesman(db, cust_id, emp_id, brand_id)
 
-    if tmpl.required_unit_price is None:
-        raise HTTPException(400, "政策模板未配置指导价（required_unit_price）")
-    if tmpl.brand_id and tmpl.brand_id != brand_id:
-        raise HTTPException(400, "政策模板品牌与商品品牌不符")
-
-    guide_price = Decimal(str(tmpl.required_unit_price))
-    customer_price = Decimal(str(tmpl.customer_unit_price or tmpl.required_unit_price))
-    if body.deal_unit_price is not None:
-        customer_price = Decimal(str(body.deal_unit_price))
-
-    order = Order(
-        id=str(uuid.uuid4()),
-        order_no=_generate_order_no(),
-        customer_id=body.customer_id,
-        salesman_id=body.salesman_id,
+    return OrderPreviewResponse(
         brand_id=brand_id,
-        settlement_mode_snapshot=body.settlement_mode_snapshot,
+        total_cases=total_cases,
+        total_bottles=amounts["total_bottles"],
+        guide_price_per_bottle=amounts["guide_price"],
+        customer_price_per_bottle=amounts["customer_price"],
+        total_amount=amounts["total_amount"],
+        deal_amount=amounts["deal_amount"],
+        policy_gap=amounts["policy_gap"],
+        policy_value=amounts["policy_value"],
+        policy_surplus=amounts["policy_surplus"],
+        customer_paid_amount=amounts["customer_paid_amount"],
+        policy_receivable=amounts["policy_receivable"],
         settlement_mode=body.settlement_mode,
-        advance_payer_id=body.advance_payer_id,
-        warehouse_id=body.warehouse_id,
         policy_template_id=tmpl.id,
-        notes=body.notes,
+        policy_template_name=tmpl.name,
+        policy_template_code=tmpl.code,
     )
 
-    total = Decimal("0")  # 按指导价的订单总额（公司应收）
-    total_bottles = 0
-    bpc_map: dict[str, int] = {}
-    for it in body.items:
-        if it.product_id and it.product_id not in bpc_map:
-            prod = await db.get(Product, it.product_id)
-            bpc_map[it.product_id] = prod.bottles_per_case if prod else 6
-        bpc = bpc_map.get(it.product_id or '', 6)
-        bottles = it.quantity * bpc if it.quantity_unit == '箱' else it.quantity
 
-        # unit_price 强制使用政策模板指导价，忽略前端传入
-        oi = OrderItem(
-            id=str(uuid.uuid4()),
-            order_id=order.id,
-            product_id=it.product_id,
-            quantity=it.quantity,
-            quantity_unit=it.quantity_unit,
-            unit_price=guide_price,
+@router.post("", response_model=OrderResponse, status_code=201)
+async def create_order(body: OrderCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    """仅建 Order — 不连带建 PolicyRequest 或 submit-policy。
+
+    前端正常建单走 `/api/orders/create-with-policy`（合并接口，事务化）。
+    此接口保留给"只建单不提审批"的老流程 / 测试用，普通调用方应改用合并接口。
+    """
+    require_role(user, "boss", "salesman", "sales_manager")
+
+    # salesman 身份硬绑定：非 boss/sales_manager 不能替别人建单
+    body.salesman_id = _enforce_salesman_binding(body.salesman_id, user)
+
+    # 商品+品牌解析
+    brand_id, resolved = await _resolve_brand_and_products(db, body.items)
+
+    # 客户归属校验：salesman 只能给自己名下客户建单
+    roles = user.get("roles") or []
+    is_privileged = any(r in roles for r in ("admin", "boss", "sales_manager"))
+    if not is_privileged and body.customer_id:
+        await _validate_customer_belongs_to_salesman(
+            db, body.customer_id, body.salesman_id, brand_id
         )
-        order.items.append(oi)
-        total += guide_price * bottles
-        total_bottles += bottles
 
-    order.total_amount = total
+    # 政策匹配
+    total_cases = sum(it.quantity if it.quantity_unit == "箱" else 0 for it in body.items)
+    tmpl = await _match_or_load_policy_template(db, brand_id, total_cases, body.policy_template_id)
 
-    # 客户到手价与政策差
-    order.deal_unit_price = customer_price
-    order.deal_amount = customer_price * total_bottles
-    order.policy_gap = total - order.deal_amount
-    order.policy_value = tmpl.total_policy_value
-    order.policy_surplus = (tmpl.total_policy_value or Decimal("0")) - order.policy_gap
+    # 金额计算
+    amounts = _compute_order_amounts(tmpl, resolved, body.settlement_mode, body.deal_unit_price)
 
-    # 结算模式：统一 customer_paid_amount 语义 = "公司对该订单期望收到的钱"
-    # customer_pay   客户按指导价全额付 → 公司应收 total（26,550）
-    # employee_pay   业务员垫差额 → 公司应收 total（客户 19,500 + 业务员 7,050 两笔凭证凑齐）
-    # company_pay    公司垫差额 → 公司应收 deal_amount（19,500，公司不向自己要钱）
-    if body.settlement_mode == "customer_pay":
-        order.customer_paid_amount = total
-        order.policy_receivable = Decimal("0")
-    elif body.settlement_mode == "employee_pay":
-        order.customer_paid_amount = total  # 公司按指导价应收；业务员要补足政策差
-        order.policy_receivable = order.policy_gap  # 等厂家兑付后返业务员
-    elif body.settlement_mode == "company_pay":
-        order.customer_paid_amount = order.deal_amount  # 公司让利，只收客户那部分
-        order.policy_receivable = order.policy_gap  # 等厂家兑付后留公司 F 类
-    else:
-        raise HTTPException(400, "settlement_mode 必须为 customer_pay/employee_pay/company_pay")
+    # 构造 Order + Items
+    order = await _build_order_from_computed(db, body, user, tmpl, resolved, brand_id, amounts)
 
-    db.add(order)
     await db.flush()
     # Re-fetch with selectinload to populate customer/salesman/items.product
     refreshed = (await db.execute(
@@ -198,6 +429,177 @@ async def create_order(body: OrderCreate, user: CurrentUser, db: AsyncSession = 
             selectinload(Order.salesman),
         )
     )).scalar_one()
+    return refreshed
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 合并接口：建单 + PolicyRequest + submit-policy 事务化一次完成
+# 对齐前端 OrderList.tsx:148-228 createMutation 的三步串行动作
+# 整体失败回滚，避免"孤儿 Order / 无政策申请" 状态
+# ═══════════════════════════════════════════════════════════════════
+
+
+class OrderCreateWithPolicyRequest(BaseModel):
+    """前端 createMutation 的合并 body。"""
+
+    # Order 部分
+    customer_id: str
+    salesman_id: Optional[str] = None
+    items: list[OrderItemCreate]
+    policy_template_id: Optional[str] = None
+    settlement_mode: str  # customer_pay / employee_pay / company_pay
+    deal_unit_price: Optional[Decimal] = None
+    advance_payer_id: Optional[str] = None
+    warehouse_id: Optional[str] = None
+    notes: Optional[str] = None
+
+    # PolicyRequest 扩展部分（微调暂未支持，approval_mode 固定 internal_only）
+    # 若未来支持微调：新增 adjusted_benefit_rules 字段 → approval_mode=internal_plus_external
+
+
+@router.post("/create-with-policy", response_model=OrderResponse, status_code=201)
+async def create_order_with_policy(
+    body: OrderCreateWithPolicyRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)
+):
+    """原子化建单：Order + PolicyRequest + OrderRequestItem[] + submit-policy（→ policy_pending_internal）。
+
+    业务真相源：前端 frontend/src/pages/orders/OrderList.tsx:148-228 createMutation
+    的三步串行动作，此接口合并为一个事务。
+
+    三步对应：
+      1) POST /api/orders                 (create Order + OrderItem)
+      2) POST /api/policies/requests      (create PolicyRequest + request_items[])
+      3) POST /api/orders/{id}/submit-policy  (pending → policy_pending_internal)
+    """
+    from app.models.policy import PolicyRequest
+    from app.models.policy_request_item import PolicyRequestItem
+
+    require_role(user, "boss", "salesman", "sales_manager")
+
+    # ── Step 0: salesman 身份硬绑定 ───────────────────────────
+    body.salesman_id = _enforce_salesman_binding(body.salesman_id, user)
+
+    # ── Step 1: 建 Order ──────────────────────────────────────
+    brand_id, resolved = await _resolve_brand_and_products(db, body.items)
+
+    # 客户归属校验：salesman 只能给自己名下客户建单
+    roles = user.get("roles") or []
+    is_privileged = any(r in roles for r in ("admin", "boss", "sales_manager"))
+    if not is_privileged:
+        await _validate_customer_belongs_to_salesman(
+            db, body.customer_id, body.salesman_id, brand_id
+        )
+
+    total_cases = sum(it.quantity if it.quantity_unit == "箱" else 0 for it in body.items)
+    tmpl = await _match_or_load_policy_template(db, brand_id, total_cases, body.policy_template_id)
+    amounts = _compute_order_amounts(tmpl, resolved, body.settlement_mode, body.deal_unit_price)
+
+    # 转成 OrderCreate body 复用 _build_order_from_computed
+    order_body = OrderCreate(
+        customer_id=body.customer_id,
+        salesman_id=body.salesman_id,
+        items=body.items,
+        policy_template_id=tmpl.id,
+        settlement_mode=body.settlement_mode,
+        advance_payer_id=body.advance_payer_id,
+        warehouse_id=body.warehouse_id,
+        deal_unit_price=body.deal_unit_price,
+        notes=body.notes,
+    )
+    order = await _build_order_from_computed(db, order_body, user, tmpl, resolved, brand_id, amounts)
+    await db.flush()
+
+    # ── Step 2: 建 PolicyRequest + request_items ─────────────
+    # 对应前端 OrderList.tsx:192-222
+    pr = PolicyRequest(
+        id=str(uuid.uuid4()),
+        request_source=PolicyRequestSource.ORDER,
+        approval_mode=ApprovalMode.INTERNAL_ONLY,  # 非微调固定 internal_only
+        order_id=order.id,
+        customer_id=body.customer_id,
+        brand_id=brand_id,
+        policy_id=tmpl.id,
+        policy_template_id=tmpl.id,
+        scheme_no=tmpl.default_scheme_no,
+        total_policy_value=tmpl.total_policy_value or Decimal("0"),
+        total_gap=amounts["policy_gap"],
+        settlement_mode=body.settlement_mode,
+        usage_purpose=f"{tmpl.name} - 标准政策",
+        policy_snapshot=tmpl.benefit_rules,
+    )
+    db.add(pr)
+
+    # request_items 映射：前端 OrderList.tsx:208-221 对应逻辑
+    # settlement_mode → advance_payer_type 映射
+    if body.settlement_mode == "customer_pay":
+        payer_type = "customer"
+        payer_id = None
+    elif body.settlement_mode == "employee_pay":
+        payer_type = "employee"
+        if not body.advance_payer_id:
+            raise HTTPException(400, "employee_pay 模式必须指定 advance_payer_id（垫付业务员）")
+        payer_id = body.advance_payer_id
+    else:  # company_pay
+        payer_type = "company"
+        payer_id = None
+
+    # 从 PolicyTemplate.benefits 拷到 PolicyRequestItem
+    # 重新加载 benefits 关系，确保数据完整
+    tmpl_with_benefits = (await db.execute(
+        select(PolicyTemplate).where(PolicyTemplate.id == tmpl.id).options(
+            selectinload(PolicyTemplate.benefits)
+        )
+    )).scalar_one()
+    for i, b in enumerate(tmpl_with_benefits.benefits or []):
+        suv = Decimal(str(b.standard_unit_value or 0))
+        st = suv * b.quantity
+        uv = Decimal(str(b.unit_value or 0))
+        tv = uv * b.quantity
+        ri = PolicyRequestItem(
+            id=str(uuid.uuid4()),
+            policy_request_id=pr.id,
+            benefit_type=b.benefit_type,
+            name=b.name,
+            quantity=b.quantity,
+            quantity_unit=b.quantity_unit or "次",
+            standard_unit_value=suv,
+            standard_total=st,
+            unit_value=uv,
+            total_value=tv,
+            product_id=b.product_id,
+            is_material=b.is_material or False,
+            fulfill_mode=b.fulfill_mode or ("material" if b.is_material else "claim"),
+            advance_payer_type=payer_type,
+            advance_payer_id=payer_id,
+            sort_order=i,
+        )
+        pr.request_items.append(ri)
+
+    await db.flush()
+
+    # ── Step 3: submit-policy（pending → policy_pending_internal）──
+    order.status = OrderStatus.POLICY_PENDING_INTERNAL
+    await db.flush()
+
+    # ── 审计 + 通知 ───────────────────────────────────────────
+    await log_audit(db, action="create_order_with_policy", entity_type="Order", entity_id=order.id, user=user)
+
+    # Re-fetch 带完整关系（async session 下不能 lazy-load order.customer）
+    refreshed = (await db.execute(
+        select(Order).where(Order.id == order.id).options(
+            selectinload(Order.items).selectinload(OrderItem.product),
+            selectinload(Order.customer),
+            selectinload(Order.salesman),
+        )
+    )).scalar_one()
+
+    cust_name = refreshed.customer.name if refreshed.customer else ""
+    await notify_roles(
+        db, role_codes=["admin", "boss"],
+        title=f"新政策审批: {refreshed.order_no}",
+        content=f"客户 {cust_name}，订单 {refreshed.order_no}，金额 ¥{refreshed.total_amount}，请审批",
+        entity_type="Order", entity_id=refreshed.id,
+    )
     return refreshed
 
 
@@ -593,6 +995,161 @@ async def reject_policy(
     await log_audit(
         db, action="reject_policy", entity_type="Order", entity_id=order.id,
         changes={"rejection_reason": body.rejection_reason}, user=user)
+    if order.salesman_id:
+        from app.models.user import User
+        salesman_user = (await db.execute(
+            select(User).where(User.employee_id == order.salesman_id)
+        )).scalar_one_or_none()
+        if salesman_user:
+            await notify(
+                db, recipient_id=salesman_user.id,
+                title=f"政策被驳回: {order.order_no}",
+                content=f"订单 {order.order_no} 政策被驳回，原因: {body.rejection_reason}，请重新提交",
+                entity_type="Order", entity_id=order.id,
+            )
+    return order
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 政策审批合并接口：PolicyRequest.status + Order.status 一次事务内更新
+# 对齐前端 PolicyApproval.tsx:72-111 approveMutation / rejectMutation 的两步串行
+# ═══════════════════════════════════════════════════════════════════
+
+
+@router.post("/{order_id}/approve-policy-with-request", response_model=OrderResponse)
+async def approve_policy_with_request(
+    order_id: str,
+    user: CurrentUser,
+    need_external: bool = Query(False, description="是否需要厂家外部审批"),
+    db: AsyncSession = Depends(get_db),
+):
+    """一次批准：把 Order 关联的 PolicyRequest.status=approved + Order 推进到 approved（或 policy_pending_external）。
+
+    对应前端 PolicyApproval.tsx:72-91 approveMutation 两步：
+      1) PUT  /api/policies/requests/{prId}   (status: 'approved')
+      2) POST /api/orders/{order_id}/approve-policy
+    """
+    from app.models.policy import PolicyRequest
+    from app.models.base import PolicyRequestStatus
+
+    require_role(user, "boss")
+
+    # 用 select + RLS 走品牌隔离（admin 除外）。别品牌订单查不出 → 404
+    order = (await db.execute(
+        select(Order).where(Order.id == order_id)
+    )).scalar_one_or_none()
+    if order is None:
+        raise HTTPException(404, "Order not found")
+    # 主动校验 brand 归属（非 admin/boss 的 brand_ids 白名单）
+    roles = user.get("roles") or []
+    if "admin" not in roles:
+        brand_ids = user.get("brand_ids") or []
+        if brand_ids and order.brand_id and order.brand_id not in brand_ids:
+            raise HTTPException(404, "Order not found")  # 统一用 404 不暴露存在性
+    if order.status != OrderStatus.POLICY_PENDING_INTERNAL:
+        raise HTTPException(
+            400, f"Cannot approve: order is in '{order.status}', expected 'policy_pending_internal'"
+        )
+
+    # 找到关联的 pending_internal 状态的 PolicyRequest（通常一个订单一个 PR）
+    pr = (await db.execute(
+        select(PolicyRequest).where(
+            PolicyRequest.order_id == order_id,
+            PolicyRequest.status == PolicyRequestStatus.PENDING_INTERNAL,
+        )
+    )).scalar_one_or_none()
+
+    # Step 1: 更新 PolicyRequest（如有）
+    if pr:
+        pr.status = PolicyRequestStatus.APPROVED
+        pr.internal_approved_by = user.get("employee_id")
+
+    # Step 2: 推进 Order 状态
+    if need_external:
+        order.status = OrderStatus.POLICY_PENDING_EXTERNAL
+    else:
+        order.status = OrderStatus.APPROVED
+
+    await db.flush()
+    await log_audit(
+        db, action="approve_policy_with_request", entity_type="Order",
+        entity_id=order.id, user=user,
+        changes={"policy_request_id": pr.id if pr else None, "need_external": need_external},
+    )
+
+    if order.salesman_id:
+        from app.models.user import User
+        salesman_user = (await db.execute(
+            select(User).where(User.employee_id == order.salesman_id)
+        )).scalar_one_or_none()
+        if salesman_user:
+            await notify(
+                db, recipient_id=salesman_user.id,
+                title=f"政策已通过: {order.order_no}",
+                content=f"订单 {order.order_no} 政策审批已通过，请扫码出库",
+                entity_type="Order", entity_id=order.id,
+            )
+    return order
+
+
+@router.post("/{order_id}/reject-policy-with-request", response_model=OrderResponse)
+async def reject_policy_with_request(
+    order_id: str,
+    body: RejectPolicyBody,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """一次驳回：PolicyRequest.status=rejected + Order.status=policy_rejected。
+
+    对应前端 PolicyApproval.tsx:93-111 rejectMutation 两步：
+      1) PUT  /api/policies/requests/{id}                  (status: 'rejected')
+      2) POST /api/orders/{order_id}/reject-policy          (rejection_reason)
+    """
+    from app.models.policy import PolicyRequest
+    from app.models.base import PolicyRequestStatus
+
+    require_role(user, "boss")
+
+    # RLS + brand 白名单兜底，同 approve-policy-with-request
+    order = (await db.execute(
+        select(Order).where(Order.id == order_id)
+    )).scalar_one_or_none()
+    if order is None:
+        raise HTTPException(404, "Order not found")
+    roles = user.get("roles") or []
+    if "admin" not in roles:
+        brand_ids = user.get("brand_ids") or []
+        if brand_ids and order.brand_id and order.brand_id not in brand_ids:
+            raise HTTPException(404, "Order not found")
+    if order.status not in (
+        OrderStatus.POLICY_PENDING_INTERNAL,
+        OrderStatus.POLICY_PENDING_EXTERNAL,
+    ):
+        raise HTTPException(400, f"Cannot reject: order is in '{order.status}'")
+
+    pr = (await db.execute(
+        select(PolicyRequest).where(
+            PolicyRequest.order_id == order_id,
+            PolicyRequest.status.in_([
+                PolicyRequestStatus.PENDING_INTERNAL,
+                PolicyRequestStatus.PENDING_EXTERNAL,
+            ]),
+        )
+    )).scalar_one_or_none()
+
+    if pr:
+        pr.status = PolicyRequestStatus.REJECTED
+
+    order.status = OrderStatus.REJECTED  # enum value = 'policy_rejected'
+    order.rejection_reason = body.rejection_reason
+
+    await db.flush()
+    await log_audit(
+        db, action="reject_policy_with_request", entity_type="Order",
+        entity_id=order.id, user=user,
+        changes={"rejection_reason": body.rejection_reason, "policy_request_id": pr.id if pr else None},
+    )
+
     if order.salesman_id:
         from app.models.user import User
         salesman_user = (await db.execute(

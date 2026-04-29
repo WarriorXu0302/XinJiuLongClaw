@@ -1,13 +1,15 @@
 """
 MCP 审批类工具 — 仅 boss/admin 可操作。
 
-⚠️ 本模块与前端业务逻辑不对齐，正在重写中。
+薄壳化改造（2026-04-29）：
+所有审批类 tool 都改为薄壳调 HTTP 真身 handler 函数（app/api/routes/*），
+不再复刻 Order.status / PolicyRequest.status / 动账 逻辑。
 
-审批类工具涉及资金和状态流转，出错不可逆。在重写完成前，
-建议用户改到 ERP 前端审批中心人工审批。
+审批涉及资金和状态流转，出错不可逆。薄壳化后：
+  - HTTP 层和 MCP 走同一代码路径，行为完全一致
+  - 前端审批中心的权限 / 校验 / 事务也复用同一处
 
 新改动别加到这里：业务逻辑只应存在于 app/api/routes/* 和 app/services/*。
-MCP 应该改为薄壳子调那些 endpoint，不再复刻一份业务计算。
 """
 import uuid
 from datetime import datetime, timezone
@@ -19,6 +21,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.mcp._resolvers import resolve_order_by_no
 from app.mcp.auth import require_mcp_role
 from app.mcp.deps import get_mcp_db
 from app.services.audit_service import log_audit
@@ -27,81 +30,65 @@ router = APIRouter()
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 28. 订单审批（pending → approved，一步完成提交+审批）
+# 28. 订单政策审批（合并 PolicyRequest.status + Order.status 一次事务）
 # ═══════════════════════════════════════════════════════════════════
 
 class MCPApproveOrderRequest(BaseModel):
     order_no: str
     action: str = "approve"  # approve / reject
     reject_reason: Optional[str] = None
-    need_external: bool = False
+    need_external: bool = False  # approve 时是否推到 policy_pending_external
 
 
 @router.post("/approve-order")
 async def mcp_approve_order(body: MCPApproveOrderRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 审批订单。pending 自动先提交再审批；policy_pending_internal 直接审批。"""
-    from app.models.order import Order
-    from app.models.base import OrderStatus
-    user = db.info.get("mcp_user", {})
-    require_mcp_role(user, 'boss')
+    """AI 政策审批订单（通过/驳回）。
 
-    order = (await db.execute(select(Order).where(Order.order_no == body.order_no))).scalar_one_or_none()
-    if not order:
-        raise HTTPException(404, f"订单 {body.order_no} 不存在")
+    薄壳调 HTTP 合并接口：
+      - approve → POST /api/orders/{id}/approve-policy-with-request
+        （同步更新 PolicyRequest.status='approved' + Order → approved/policy_pending_external）
+      - reject  → POST /api/orders/{id}/reject-policy-with-request
+
+    与前端 PolicyApproval.tsx approveMutation / rejectMutation 行为完全一致。
+    """
+    from app.api.routes.orders import (
+        approve_policy_with_request,
+        reject_policy_with_request,
+        RejectPolicyBody,
+    )
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss")
+
+    order = await resolve_order_by_no(db, body.order_no)
 
     if body.action == "reject":
-        if order.status not in (OrderStatus.PENDING, OrderStatus.POLICY_PENDING_INTERNAL, OrderStatus.POLICY_PENDING_EXTERNAL):
-            raise HTTPException(400, f"订单状态为 {order.status}，无法驳回")
-        order.status = OrderStatus.REJECTED
-        order.rejection_reason = body.reject_reason or "已驳回"
-        await db.flush()
-        await log_audit(db, action="reject_order", entity_type="Order", entity_id=order.id, user=user)
-        await db.refresh(order, ["customer"])
-        return {"order_no": order.order_no, "status": order.status,
-                "customer": order.customer.name if order.customer else None,
-                "total_amount": float(order.total_amount) if order.total_amount else 0,
-                "settlement_mode": order.settlement_mode}
-
-    # approve flow
-    if order.status == OrderStatus.PENDING:
-        order.status = OrderStatus.POLICY_PENDING_INTERNAL
-        await db.flush()
-    if order.status == OrderStatus.POLICY_PENDING_INTERNAL:
-        order.status = OrderStatus.POLICY_PENDING_EXTERNAL if body.need_external else OrderStatus.APPROVED
-        await db.flush()
-    elif order.status == OrderStatus.POLICY_PENDING_EXTERNAL:
-        order.status = OrderStatus.APPROVED
-        await db.flush()
+        http_body = RejectPolicyBody(rejection_reason=body.reject_reason or "政策审批驳回")
+        result = await reject_policy_with_request(
+            order_id=order.id, body=http_body, user=user, db=db,
+        )
     else:
-        raise HTTPException(400, f"订单状态为 {order.status}，无法审批（需要 pending/policy_pending_internal/policy_pending_external）")
+        result = await approve_policy_with_request(
+            order_id=order.id, user=user, need_external=body.need_external, db=db,
+        )
 
-    # 审批通过后自动创建+审批政策申请（发货前必须有 approved 的 PolicyRequest）
-    if order.status == OrderStatus.APPROVED:
-        from app.models.policy import PolicyRequest
-        existing_pr = (await db.execute(
-            select(PolicyRequest).where(PolicyRequest.order_id == order.id)
-        )).scalar_one_or_none()
-        if not existing_pr:
-            pr = PolicyRequest(
-                id=str(uuid.uuid4()),
-                brand_id=order.brand_id,
-                order_id=order.id,
-                policy_template_id=order.policy_template_id,
-                settlement_mode=order.settlement_mode,
-                total_policy_value=order.policy_value,
-                total_gap=order.policy_gap,
-                request_source="order",
-                status="approved",
+    return {
+        "order_no": result.order_no,
+        "status": result.status,
+        "customer": result.customer.name if result.customer else None,
+        "total_amount": float(result.total_amount) if result.total_amount else 0,
+        "settlement_mode": result.settlement_mode,
+        "rejection_reason": result.rejection_reason,
+        "hint": (
+            "订单已批准，salesman 可扫码出库"
+            if body.action == "approve" and result.status == "approved"
+            else (
+                "订单进入厂家外审，等厂家确认"
+                if result.status == "policy_pending_external"
+                else ("订单已驳回，salesman 可修改后重新提交" if body.action == "reject" else "")
             )
-            db.add(pr)
-            await db.flush()
-
-    await log_audit(db, action="approve_order", entity_type="Order", entity_id=order.id, user=user)
-    await db.refresh(order, ["customer"])
-    return {"order_no": order.order_no, "status": order.status,
-            "customer": order.customer.name if order.customer else None,
-            "total_amount": float(order.total_amount) if order.total_amount else 0,
-            "settlement_mode": order.settlement_mode}
+        ),
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -111,103 +98,73 @@ async def mcp_approve_order(body: MCPApproveOrderRequest, db: AsyncSession = Dep
 class ConfirmPaymentRequest(BaseModel):
     order_no: str
 
+class RejectReceiptsRequest(BaseModel):
+    order_no: str
+    reason: str
+
+
+@router.post("/reject-payment-receipts")
+async def mcp_reject_payment_receipts(
+    body: RejectReceiptsRequest, db: AsyncSession = Depends(get_mcp_db)
+):
+    """AI 驳回订单所有 pending 收款凭证（薄壳调 HTTP）。
+
+    HTTP `POST /api/orders/{id}/reject-payment-receipts`：
+      - 订单所有 pending_confirmation Receipt → rejected
+      - Order.payment_status 回退到 unpaid / partially_paid
+      - 通知业务员"凭证被驳回，请重传"
+
+    与前端 FinanceApproval.tsx rejectOrderPayMut 对齐。
+    """
+    from app.api.routes.orders import reject_payment_receipts, RejectReceiptsBody
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "finance")
+
+    order = await resolve_order_by_no(db, body.order_no)
+    http_body = RejectReceiptsBody(reason=body.reason)
+    result = await reject_payment_receipts(
+        order_id=order.id, body=http_body, user=user, db=db,
+    )
+    return {
+        "order_no": result.order_no,
+        "status": result.status,
+        "payment_status": result.payment_status,
+        "rejection_reason": body.reason,
+        "hint": "所有 pending 凭证已驳回，已通知业务员重新上传",
+    }
+
+
 @router.post("/confirm-order-payment")
 async def mcp_confirm_order_payment(body: ConfirmPaymentRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 审批该订单所有 pending 收款凭证（等价于 HTTP 层 POST /orders/{id}/confirm-payment）。
-    - 将 pending_confirmation 的 Receipt 转 confirmed + 动账
-    - 应收账款分摊 (apply_per_receipt_effects)
-    - 若跃升到 fully_paid：生成 Commission / 刷新 KPI / 推销售目标里程碑 (apply_post_confirmation_effects)
-    历史 bug：只置 status=completed，跳过所有副作用，Commission 不生成、KPI 不刷新。
+    """AI 审批该订单所有 pending 收款凭证。
+
+    薄壳调 HTTP `POST /api/orders/{id}/confirm-payment`，该接口完整实现：
+      - 所有 pending_confirmation Receipt 转 confirmed + 动 master 账户
+      - 应收账款分摊（apply_per_receipt_effects）
+      - 若跃升到 fully_paid：生成 Commission / 刷 KPI / 推销售目标里程碑
+      - 订单状态 delivered → completed
+
+    与前端 FinanceApproval.tsx confirmOrderPayMut 行为完全一致。
     """
-    from datetime import datetime, timezone
-    from decimal import Decimal
-    from sqlalchemy import func
-    from app.models.order import Order
-    from app.models.finance import Receipt
-    from app.models.product import Account
-    from app.models.base import OrderStatus, PaymentStatus
-    from app.api.routes.accounts import record_fund_flow
-    from app.services.receipt_service import (
-        apply_per_receipt_effects, apply_post_confirmation_effects,
-    )
+    from app.api.routes.orders import confirm_payment
+
     user = db.info.get("mcp_user", {})
-    require_mcp_role(user, 'boss', 'finance')
+    require_mcp_role(user, "boss", "finance")
 
-    order = (await db.execute(select(Order).where(Order.order_no == body.order_no))).scalar_one_or_none()
-    if not order:
-        raise HTTPException(404, f"订单 {body.order_no} 不存在")
-
-    # 拉所有 pending 的 Receipt
-    pending_receipts = (await db.execute(
-        select(Receipt).where(
-            Receipt.order_id == order.id,
-            Receipt.status == 'pending_confirmation',
-        )
-    )).scalars().all()
-    if not pending_receipts:
-        raise HTTPException(400, "订单没有待确认的收款凭证")
-
-    master_cash = (await db.execute(
-        select(Account).where(Account.level == 'master', Account.account_type == 'cash')
-    )).scalar_one_or_none()
-    if not master_cash:
-        raise HTTPException(400, "未配置公司总资金池（master 现金账户）")
-
-    prev_payment_status = order.payment_status
-    now = datetime.now(timezone.utc)
-    emp_id = user.get("employee_id")
-
-    # 每条 Receipt 动账 + 应收分摊（与 HTTP 层 confirm_payment 一致）
-    for r in pending_receipts:
-        master_cash.balance += Decimal(str(r.amount))
-        await record_fund_flow(
-            db, account_id=master_cash.id, flow_type='credit', amount=r.amount,
-            balance_after=master_cash.balance, related_type='receipt', related_id=r.id,
-            notes=f"MCP 订单收款 {order.order_no}（审批确认）", created_by=emp_id,
-            brand_id=order.brand_id,
-        )
-        if r.account_id is None:
-            r.account_id = master_cash.id
-        r.status = 'confirmed'
-        r.confirmed_at = now
-        r.confirmed_by = emp_id
-        await apply_per_receipt_effects(db, r, order)
-    await db.flush()
-
-    # 重算 payment_status
-    total_confirmed = (await db.execute(
-        select(func.coalesce(func.sum(Receipt.amount), 0)).where(
-            Receipt.order_id == order.id,
-            Receipt.status == 'confirmed',
-        )
-    )).scalar_one()
-    target_amount = order.customer_paid_amount or order.total_amount
-    if Decimal(str(total_confirmed)) >= target_amount:
-        order.payment_status = PaymentStatus.FULLY_PAID
-        order.status = OrderStatus.COMPLETED
-        order.completed_at = now
-    elif total_confirmed > 0:
-        order.payment_status = PaymentStatus.PARTIALLY_PAID
-    await db.flush()
-
-    # 订单层副作用：Commission / KPI / 里程碑（首次 FULLY_PAID 时生成一次 Commission）
-    newly_confirmed = sum((Decimal(str(r.amount)) for r in pending_receipts), Decimal("0"))
-    await apply_post_confirmation_effects(
-        db, order, user, prev_payment_status, newly_confirmed_amount=newly_confirmed,
-    )
-
-    await log_audit(
-        db, action="confirm_payment", entity_type="Order", entity_id=order.id,
-        changes={"confirmed_receipt_count": len(pending_receipts),
-                 "confirmed_amount": float(sum(Decimal(str(r.amount)) for r in pending_receipts))},
-        user=user,
-    )
-    await db.refresh(order, ["customer"])
-    return {"order_no": order.order_no, "status": order.status,
-            "payment_status": order.payment_status,
-            "customer": order.customer.name if order.customer else None,
-            "confirmed_count": len(pending_receipts),
-            "total_confirmed": float(total_confirmed)}
+    order = await resolve_order_by_no(db, body.order_no)
+    result = await confirm_payment(order_id=order.id, user=user, db=db)
+    return {
+        "order_no": result.order_no,
+        "status": result.status,
+        "payment_status": result.payment_status,
+        "customer": result.customer.name if result.customer else None,
+        "customer_paid_amount": float(result.customer_paid_amount) if result.customer_paid_amount else 0,
+        "hint": (
+            "订单已全款 + 已完成 + 提成已生成"
+            if result.status == "completed" else f"已确认部分收款，当前状态: {result.payment_status}"
+        ),
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -350,34 +307,48 @@ class MCPApprovePurchaseOrderRequest(BaseModel):
 
 @router.post("/approve-purchase-order")
 async def mcp_approve_purchase_order(body: MCPApprovePurchaseOrderRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 审批采购单。approve → approved；reject → cancelled。"""
-    from app.models.purchase import PurchaseOrder
-    from datetime import datetime, timezone
-    user = db.info.get("mcp_user", {})
-    require_mcp_role(user, 'boss', 'finance')
+    """AI 审批采购单（薄壳调 HTTP）。
 
+    approve → `POST /api/purchase-orders/{id}/approve`（完整动账：扣品牌 cash/F类/financing + payment_to_mfr 记账）
+    reject  → `POST /api/purchase-orders/{id}/reject`（仅改状态，无账务影响）
+
+    与前端 FinanceApproval.tsx approvePOMut / rejectPOMut 行为一致。
+    """
+    from app.api.routes.purchase import approve_purchase_order, reject_purchase_order
+    from app.models.purchase import PurchaseOrder
+
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "finance")
+
+    # 解析 po_id（UUID 或 po_no）
     po = await db.get(PurchaseOrder, body.po_id)
     if not po:
-        po = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.po_no == body.po_id))).scalar_one_or_none()
+        po = (await db.execute(
+            select(PurchaseOrder).where(PurchaseOrder.po_no == body.po_id)
+        )).scalar_one_or_none()
     if not po:
         raise HTTPException(404, f"采购单 {body.po_id} 不存在")
-    if po.status != "pending":
-        raise HTTPException(400, f"采购单状态为 {po.status}，只有 pending 可审批")
 
     if body.action == "approve":
-        po.status = "approved"
-        po.approved_by = user.get("employee_id")
+        result = await approve_purchase_order(po_id=po.id, user=user, db=db)
     elif body.action == "reject":
-        po.status = "cancelled"
-        po.notes = (po.notes or "") + f"\n驳回原因: {body.reject_reason or '已驳回'}"
+        result = await reject_purchase_order(po_id=po.id, user=user, db=db)
     else:
         raise HTTPException(400, f"不支持的 action: {body.action}，可选: approve / reject")
-    await db.flush()
-    await log_audit(db, action=f"{body.action}_purchase_order", entity_type="PurchaseOrder", entity_id=po.id, user=user)
+
     await db.refresh(po, ["supplier"])
-    return {"po_id": po.id, "po_no": po.po_no, "status": po.status,
-            "supplier": po.supplier.name if po.supplier else None,
-            "total_amount": float(po.total_amount) if po.total_amount else 0}
+    return {
+        "po_id": po.id,
+        "po_no": po.po_no,
+        "status": po.status,
+        "supplier": po.supplier.name if po.supplier else None,
+        "total_amount": float(po.total_amount) if po.total_amount else 0,
+        "hint": (
+            "采购单已审批通过，已扣账户，等仓库收货"
+            if body.action == "approve"
+            else "采购单已驳回，未动账"
+        ),
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -459,210 +430,98 @@ async def mcp_approve_expense(body: MCPApproveExpenseRequest, db: AsyncSession =
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 24. 执行稽查案件
+# 24. 稽查案件审批 / 执行（拆两步，对齐前端 InspectionList.tsx）
 # ═══════════════════════════════════════════════════════════════════
 
 class MCPApproveInspectionRequest(BaseModel):
-    case_id: str
-    action: str = "execute"  # execute
+    case_id: str  # 支持 UUID 或 case_no
+    action: str = "execute"  # 'approve'：pending → approved；'execute'：approved → executed
+    barcode: Optional[str] = None  # B1 回售时从备用库出库用
+    barcodes: Optional[list[str]] = None  # A1/A2/B2 入库时绑定的条码
+    voucher_urls: Optional[list[str]] = None
 
 
 @router.post("/approve-inspection")
 async def mcp_approve_inspection(body: MCPApproveInspectionRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 执行稽查案件。pending → approved → executed（完整执行含扣款+库存）。
+    """AI 稽查案件审批 / 执行（薄壳调 HTTP 层）。
 
-    执行阶段完成（与 inspections.py execute_inspection_case 一致）：
-      A1/A2: 扣品牌现金(回收款+罚款) + 入库
-      A3: 扣品牌现金(罚款)
-      B1: 备用库出库 + 品牌现金收款
-      B2: 入主仓 + 扣品牌现金(买入款)
+    前端 InspectionList.tsx 分两步：
+      1) PUT /api/inspection-cases/{id}  {status: 'approved'}    → pending → approved
+      2) POST /api/inspection-cases/{id}/execute                  → approved → executed（动账+动库存）
+
+    MCP 通过 action 参数选择：
+      - action='approve': 仅推 status=approved（pending → approved）
+      - action='execute': 执行（approved → executed，含账务处理）
+
+    业务逻辑（扣款+库存）100% 复用 HTTP execute_inspection_case，
+    含 SELECT FOR UPDATE 锁 + 余额预校验。
     """
     from app.models.inspection import InspectionCase
-    from datetime import datetime, timezone
-    user = db.info.get("mcp_user", {})
-    require_mcp_role(user, 'boss', 'finance')
+    from app.schemas.inspection import InspectionCaseUpdate
+    from app.api.routes.inspections import (
+        execute_inspection_case,
+        ExecuteInspectionRequest,
+        update_inspection_case,
+    )
 
+    user = db.info.get("mcp_user", {})
+    require_mcp_role(user, "boss", "finance")
+
+    # 解析 case_id（UUID 或 case_no）
     case = await db.get(InspectionCase, body.case_id)
     if not case:
-        case = (await db.execute(select(InspectionCase).where(InspectionCase.case_no == body.case_id))).scalar_one_or_none()
+        case = (await db.execute(
+            select(InspectionCase).where(InspectionCase.case_no == body.case_id)
+        )).scalar_one_or_none()
     if not case:
         raise HTTPException(404, f"稽查案件 {body.case_id} 不存在")
 
-    if body.action != "execute":
-        raise HTTPException(400, f"不支持的 action: {body.action}，可选: execute")
-
-    now = datetime.now(timezone.utc)
-
-    if case.status == "pending":
-        # 第一步：审批通过 pending → approved
-        case.status = "approved"
-        await db.flush()
-        await log_audit(db, action="approve_inspection", entity_type="InspectionCase", entity_id=case.id, user=user)
-        # fall through 到执行阶段
-
-    if case.status == "approved":
-        # 第二步：执行完整的账务处理（与 inspections.py execute_inspection_case 一致）
-        from decimal import Decimal
-        from app.models.product import Account, Product, Warehouse
-        from app.models.inventory import Inventory, StockFlow
-        from app.api.routes.accounts import record_fund_flow
-        import uuid as _uuid
-
-        if not case.brand_id or not case.product_id:
-            # 缺少必要信息，仅更新状态 + 警告
-            case.status = "executed"
-            case.closed_at = now
-            await db.flush()
-            await log_audit(db, action="execute_inspection", entity_type="InspectionCase", entity_id=case.id, user=user)
-            return {
-                "case_id": case.id, "case_no": case.case_no,
-                "status": case.status, "profit_loss": float(case.profit_loss or 0),
-                "warning": "案件缺少品牌或商品信息，仅更新状态，未执行账务处理",
-            }
-
-        # 瓶数换算
-        prod = await db.get(Product, case.product_id)
-        bpc = prod.bottles_per_case if prod and prod.bottles_per_case else 1
-        bottles = case.quantity * bpc if case.quantity_unit == '箱' else case.quantity
-        if bottles <= 0:
-            raise HTTPException(400, "案件数量为 0，无法执行")
-
-        # 品牌现金账户
-        brand_cash_acc = (await db.execute(
-            select(Account).where(
-                Account.brand_id == case.brand_id,
-                Account.account_type == 'cash',
-                Account.level == 'project',
+    if body.action == "approve":
+        # 状态更新：pending → approved
+        if case.status != "pending":
+            raise HTTPException(
+                400, f"案件状态为 {case.status}，只有 pending 可 approve"
             )
-        )).scalar_one_or_none()
-        if not brand_cash_acc:
-            raise HTTPException(400, "该品牌未配置现金账户，无法执行稽查扣款")
-
-        # 预算总支出，校验余额
-        total_debit = Decimal("0")
-        if case.case_type in ('outflow_malicious', 'outflow_nonmalicious'):
-            total_debit += (case.purchase_price or Decimal("0")) * bottles
-        if case.case_type in ('outflow_malicious', 'outflow_nonmalicious', 'outflow_transfer'):
-            total_debit += case.penalty_amount or Decimal("0")
-        if case.case_type == 'inflow_transfer':
-            total_debit += (case.purchase_price or Decimal("0")) * bottles
-        if total_debit > 0 and brand_cash_acc.balance < total_debit:
-            raise HTTPException(400,
-                f"品牌现金账户余额不足：¥{brand_cash_acc.balance} < 需付 ¥{total_debit}。请先调拨到品牌现金账户。")
-
-        # 1. 付款/收款
-        if case.case_type in ('outflow_malicious', 'outflow_nonmalicious'):
-            pay_amt = (case.purchase_price or Decimal("0")) * bottles
-            if pay_amt > 0:
-                brand_cash_acc.balance -= pay_amt
-                await record_fund_flow(db, account_id=brand_cash_acc.id, flow_type='debit', amount=pay_amt,
-                    balance_after=brand_cash_acc.balance, related_type='inspection_payment', related_id=case.id,
-                    notes=f"稽查回收付款 {case.case_no} ({bottles}瓶)")
-        if case.case_type in ('outflow_malicious', 'outflow_nonmalicious', 'outflow_transfer') and (case.penalty_amount or 0) > 0:
-            brand_cash_acc.balance -= case.penalty_amount
-            await record_fund_flow(db, account_id=brand_cash_acc.id, flow_type='debit', amount=case.penalty_amount,
-                balance_after=brand_cash_acc.balance, related_type='inspection_penalty', related_id=case.id,
-                notes=f"稽查罚款 {case.case_no}")
-        if case.case_type == 'inflow_transfer':
-            pay_amt = (case.purchase_price or Decimal("0")) * bottles
-            if pay_amt > 0:
-                brand_cash_acc.balance -= pay_amt
-                await record_fund_flow(db, account_id=brand_cash_acc.id, flow_type='debit', amount=pay_amt,
-                    balance_after=brand_cash_acc.balance, related_type='inspection_payment', related_id=case.id,
-                    notes=f"转码入库付款 {case.case_no} ({bottles}瓶)")
-        if case.case_type == 'inflow_resell':
-            income = (case.resell_price or Decimal("0")) * bottles
-            if income > 0:
-                brand_cash_acc.balance += income
-                await record_fund_flow(db, account_id=brand_cash_acc.id, flow_type='credit', amount=income,
-                    balance_after=brand_cash_acc.balance, related_type='inspection_income', related_id=case.id,
-                    notes=f"清理回售收款 {case.case_no} ({bottles}瓶)")
-
-        # 2. 入库/出库
-        main_wh = (await db.execute(
-            select(Warehouse).where(Warehouse.brand_id == case.brand_id, Warehouse.warehouse_type == 'main', Warehouse.is_active == True)
-        )).scalar_one_or_none()
-        backup_wh = (await db.execute(
-            select(Warehouse).where(Warehouse.brand_id == case.brand_id, Warehouse.warehouse_type == 'backup', Warehouse.is_active == True)
-        )).scalar_one_or_none()
-
-        def _gen_flow_no():
-            _ts = now.strftime("%Y%m%d%H%M%S")
-            return f"SF-{_ts}-{_uuid.uuid4().hex[:6]}"
-
-        batch_no = f"IC-{case.case_no}"
-        target_wh = None
-        cost_price = None
-        if case.case_type == 'outflow_malicious':
-            target_wh = backup_wh
-            cost_price = case.purchase_price
-        elif case.case_type == 'outflow_nonmalicious':
-            target_wh = main_wh
-            cost_price = case.original_sale_price or case.purchase_price
-        elif case.case_type == 'inflow_transfer':
-            target_wh = main_wh
-            cost_price = case.original_sale_price or case.purchase_price
-
-        if target_wh and cost_price is not None:
-            existing_inv = (await db.execute(
-                select(Inventory).where(
-                    Inventory.product_id == case.product_id,
-                    Inventory.warehouse_id == target_wh.id,
-                    Inventory.batch_no == batch_no,
-                )
-            )).scalar_one_or_none()
-            if existing_inv:
-                existing_inv.quantity += bottles
-            else:
-                db.add(Inventory(
-                    product_id=case.product_id, warehouse_id=target_wh.id,
-                    batch_no=batch_no, quantity=bottles, cost_price=cost_price,
-                    stock_in_date=now,
-                ))
-            db.add(StockFlow(
-                id=str(_uuid.uuid4()), flow_no=_gen_flow_no(),
-                flow_type="inbound", product_id=case.product_id, warehouse_id=target_wh.id,
-                batch_no=batch_no, cost_price=cost_price, quantity=bottles,
-                reference_no=case.case_no, notes=f"稽查入库 {case.case_no} ({bottles}瓶)",
-            ))
-        elif case.case_type == 'inflow_resell' and backup_wh:
-            # B1 从备用库出库
-            inv_rows = (await db.execute(
-                select(Inventory).where(
-                    Inventory.product_id == case.product_id,
-                    Inventory.warehouse_id == backup_wh.id,
-                    Inventory.quantity > 0,
-                ).order_by(Inventory.stock_in_date.asc())
-            )).scalars().all()
-            available = sum(r.quantity for r in inv_rows)
-            if available < bottles:
-                raise HTTPException(400, f"备用库库存不足：需要{bottles}瓶，可用{available}瓶")
-            remaining = bottles
-            for inv in inv_rows:
-                if remaining <= 0:
-                    break
-                deduct = min(inv.quantity, remaining)
-                inv.quantity -= deduct
-                remaining -= deduct
-            db.add(StockFlow(
-                id=str(_uuid.uuid4()), flow_no=_gen_flow_no(),
-                flow_type="outbound", product_id=case.product_id, warehouse_id=backup_wh.id,
-                batch_no=inv_rows[0].batch_no if inv_rows else "fallback", quantity=bottles,
-                reference_no=case.case_no, notes=f"稽查回售出库 {case.case_no} ({bottles}瓶)",
-            ))
-
-        # 3. 更新状态
-        case.status = 'executed'
-        case.closed_at = now
-        await db.flush()
-        await log_audit(db, action="execute_inspection", entity_type="InspectionCase", entity_id=case.id, user=user)
+        update_body = InspectionCaseUpdate(status="approved")
+        result = await update_inspection_case(
+            case_id=case.id, body=update_body, user=user, db=db
+        )
         return {
-            "case_id": case.id, "case_no": case.case_no,
-            "status": case.status, "profit_loss": float(case.profit_loss or 0),
-            "bottles": bottles,
+            "case_id": result.id,
+            "case_no": result.case_no,
+            "status": result.status,
+            "profit_loss": float(result.profit_loss) if result.profit_loss else 0,
+            "hint": "审批通过，调 action='execute' 执行扣款+库存动账",
         }
-
-    raise HTTPException(400, f"案件状态为 {case.status}，只有 pending 或 approved 可执行")
+    elif body.action == "execute":
+        if case.status != "approved":
+            raise HTTPException(
+                400,
+                f"案件状态为 {case.status}，只有 approved 可 execute（先用 action='approve' 审批）"
+            )
+        exec_body = ExecuteInspectionRequest(
+            barcode=body.barcode,
+            barcodes=body.barcodes,
+            voucher_urls=body.voucher_urls,
+        )
+        result = await execute_inspection_case(
+            case_id=case.id, body=exec_body, user=user, db=db
+        )
+        # HTTP execute_inspection_case 返回 dict 或 model，按实际结构展开
+        if isinstance(result, dict):
+            return {
+                **result,
+                "hint": "案件已执行：账户扣款 + 库存动账完成",
+            }
+        return {
+            "case_id": getattr(result, "id", case.id),
+            "case_no": getattr(result, "case_no", case.case_no),
+            "status": getattr(result, "status", "executed"),
+            "profit_loss": float(getattr(result, "profit_loss", 0) or 0),
+            "hint": "案件已执行：账户扣款 + 库存动账完成",
+        }
+    else:
+        raise HTTPException(400, f"不支持的 action: {body.action}，可选: approve / execute")
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -715,24 +574,8 @@ async def mcp_approve_financing_repayment(body: MCPApproveFinancingRepaymentRequ
         from app.api.routes.financing import approve_repayment
         return await approve_repayment(repayment_id=body.repayment_id, user=user, db=db)
     elif body.action == "reject":
-        from app.models.financing import FinancingRepayment
-        rep = await db.get(FinancingRepayment, body.repayment_id)
-        if not rep:
-            raise HTTPException(404, "还款申请不存在")
-        if rep.status != "pending":
-            raise HTTPException(400, f"状态为 '{rep.status}'，不是待审批")
-        rep.status = "rejected"
-        rep.reject_reason = body.reject_reason or "已驳回"
-        rep.approved_by = user.get("employee_id")
-        # Cancel linked PO if exists
-        if rep.purchase_order_id:
-            from app.models.purchase import PurchaseOrder
-            po = await db.get(PurchaseOrder, rep.purchase_order_id)
-            if po:
-                po.status = "cancelled"
-        await db.flush()
-        await log_audit(db, action="reject_financing_repayment", entity_type="FinancingRepayment", entity_id=rep.id, user=user)
-        return {"repayment_id": rep.id, "status": "rejected"}
+        from app.api.routes.financing import reject_repayment
+        return await reject_repayment(repayment_id=body.repayment_id, user=user, db=db)
     else:
         raise HTTPException(400, f"不支持的 action: {body.action}，可选: approve / reject")
 
@@ -749,66 +592,70 @@ class MCPApproveExpenseClaimRequest(BaseModel):
 
 @router.post("/approve-expense-claim")
 async def mcp_approve_expense_claim(body: MCPApproveExpenseClaimRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 审批报销理赔。approve（通过）/ reject（驳回）/ pay（标记已付）。"""
+    """AI 审批报销理赔（薄壳调 HTTP）。
+
+    approve / reject / pay 三个动作分别对应：
+      - POST /api/expense-claims/{id}/approve
+      - POST /api/expense-claims/{id}/reject
+      - POST /api/expense-claims/{id}/pay?account_id=X  （扣账户；daily 类型才可调）
+
+    其中 pay 需要账户 ID（通常由 HTTP 层根据 claim.brand_id 找到品牌 cash 账户）。
+    薄壳 MCP 这里不自己选账户，让 HTTP 的 pay_daily_claim 决定。
+    """
+    from app.api.routes.expense_claims import (
+        approve_claim,
+        reject_claim,
+        pay_daily_claim,
+    )
     from app.models.expense_claim import ExpenseClaim
+    from app.models.product import Account
+
     user = db.info.get("mcp_user", {})
-    require_mcp_role(user, 'boss', 'finance')
+    require_mcp_role(user, "boss", "finance")
 
     claim = await db.get(ExpenseClaim, body.claim_id)
     if not claim:
-        claim = (await db.execute(select(ExpenseClaim).where(ExpenseClaim.claim_no == body.claim_id))).scalar_one_or_none()
+        claim = (await db.execute(
+            select(ExpenseClaim).where(ExpenseClaim.claim_no == body.claim_id)
+        )).scalar_one_or_none()
     if not claim:
         raise HTTPException(404, f"报销理赔 {body.claim_id} 不存在")
 
     if body.action == "approve":
-        if claim.status != "pending":
-            raise HTTPException(400, f"状态为 {claim.status}，只有 pending 可审批通过")
-        claim.status = "approved"
-        claim.approved_by = user.get("employee_id")
+        result = await approve_claim(claim_id=claim.id, user=user, db=db)
     elif body.action == "reject":
-        if claim.status != "pending":
-            raise HTTPException(400, f"状态为 {claim.status}，只有 pending 可驳回")
-        claim.status = "rejected"
-        claim.notes = (claim.notes or "") + f"\n驳回原因: {body.reject_reason or '已驳回'}"
+        result = await reject_claim(claim_id=claim.id, user=user, db=db)
     elif body.action == "pay":
-        if claim.status != "approved":
-            raise HTTPException(400, f"状态为 {claim.status}，只有 approved 可标记已付")
-        # ── 扣款逻辑（与 finance.py pay_expense 一致）──
-        from decimal import Decimal
-        from app.models.product import Account
-        from app.api.routes.accounts import record_fund_flow
-        account = None
-        if claim.paid_account_id:
-            account = await db.get(Account, claim.paid_account_id)
-        if not account and claim.brand_id:
-            account = (await db.execute(
-                select(Account).where(
-                    Account.brand_id == claim.brand_id,
-                    Account.account_type == 'cash',
-                    Account.level == 'project',
-                )
-            )).scalar_one_or_none()
-        if account:
-            amt = Decimal(str(claim.amount))
-            if account.balance < amt:
-                raise HTTPException(400, f"账户余额不足（{account.name} 余额 ¥{account.balance}，需付 ¥{amt}）")
-            account.balance -= amt
-            claim.paid_account_id = account.id
-            await record_fund_flow(
-                db, account_id=account.id, flow_type='debit',
-                amount=amt, balance_after=account.balance,
-                related_type='expense_claim', related_id=claim.id,
-                notes=f"报销付款 {claim.claim_no}",
-                created_by=user.get("employee_id"),
-                brand_id=claim.brand_id,
+        # 找品牌 cash 账户当 account_id
+        if not claim.brand_id:
+            raise HTTPException(400, "该报销单缺少 brand_id，无法自动选择付款账户")
+        account = (await db.execute(
+            select(Account).where(
+                Account.brand_id == claim.brand_id,
+                Account.account_type == "cash",
+                Account.level == "project",
             )
-        claim.status = "paid"
+        )).scalar_one_or_none()
+        if not account:
+            raise HTTPException(400, f"品牌 {claim.brand_id} 未配置现金账户")
+        result = await pay_daily_claim(
+            claim_id=claim.id, user=user, account_id=account.id, db=db,
+        )
     else:
         raise HTTPException(400, f"不支持的 action: {body.action}，可选: approve / reject / pay")
 
-    await db.flush()
-    await log_audit(db, action=f"{body.action}_expense_claim", entity_type="ExpenseClaim", entity_id=claim.id, user=user)
-    return {"claim_id": claim.id, "claim_no": claim.claim_no, "status": claim.status}
+    await db.refresh(claim, [])
+    return {
+        "claim_id": claim.id,
+        "claim_no": claim.claim_no,
+        "status": claim.status,
+        "amount": float(claim.amount) if claim.amount else 0,
+        "hint": {
+            "approve": "审批通过，可调 action='pay' 付款（仅 daily 类型）",
+            "reject": "已驳回",
+            "pay": "已付款，账户已扣款",
+        }.get(body.action, ""),
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -821,31 +668,24 @@ class MCPCompleteOrderRequest(BaseModel):
 
 @router.post("/complete-order")
 async def mcp_complete_order(body: MCPCompleteOrderRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 完成订单。将 delivered 状态的订单标记为 completed。
-    与 confirm-order-payment 不同：本工具不要求 fully_paid。
+    """AI 完成订单（薄壳调 HTTP `POST /api/orders/{id}/complete`）。
+
+    delivered → completed，与 confirm-order-payment 不同：本工具不要求 fully_paid。
     """
-    from app.models.order import Order
-    from app.models.base import OrderStatus
-    from datetime import datetime, timezone
+    from app.api.routes.orders import complete_order
 
     user = db.info.get("mcp_user", {})
-    require_mcp_role(user, 'boss', 'finance')
+    require_mcp_role(user, "boss", "finance")
 
-    order = (await db.execute(select(Order).where(Order.order_no == body.order_no))).scalar_one_or_none()
-    if not order:
-        raise HTTPException(404, f"订单 {body.order_no} 不存在")
-    if order.status != OrderStatus.DELIVERED:
-        raise HTTPException(400, f"订单状态为 {order.status}，需要 delivered 才能完成")
-
-    now = datetime.now(timezone.utc)
-    order.status = OrderStatus.COMPLETED
-    order.completed_at = now
-    await db.flush()
-    await log_audit(db, action="complete_order", entity_type="Order", entity_id=order.id, user=user)
-    await db.refresh(order, ["customer"])
-    return {"order_no": order.order_no, "status": order.status, "completed_at": str(now),
-            "customer": order.customer.name if order.customer else None,
-            "total_amount": float(order.total_amount) if order.total_amount else 0}
+    order = await resolve_order_by_no(db, body.order_no)
+    result = await complete_order(order_id=order.id, user=user, db=db)
+    return {
+        "order_no": result.order_no,
+        "status": result.status,
+        "completed_at": str(result.completed_at) if result.completed_at else None,
+        "customer": result.customer.name if result.customer else None,
+        "total_amount": float(result.total_amount) if result.total_amount else 0,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -907,28 +747,28 @@ class MCPRejectOrderPolicyRequest(BaseModel):
 
 @router.post("/reject-order-policy")
 async def mcp_reject_order_policy(body: MCPRejectOrderPolicyRequest, db: AsyncSession = Depends(get_mcp_db)):
-    """AI 驳回订单政策审批。policy_pending_internal/policy_pending_external → policy_rejected。"""
-    from app.models.order import Order
-    from app.models.base import OrderStatus
+    """AI 驳回订单政策审批。policy_pending_internal/policy_pending_external → policy_rejected。
+
+    薄壳调 POST /api/orders/{id}/reject-policy-with-request（同步更新 PolicyRequest.status）。
+    """
+    from app.api.routes.orders import reject_policy_with_request, RejectPolicyBody
 
     user = db.info.get("mcp_user", {})
-    require_mcp_role(user, 'boss')
+    require_mcp_role(user, "boss")
 
-    order = (await db.execute(select(Order).where(Order.order_no == body.order_no))).scalar_one_or_none()
-    if not order:
-        raise HTTPException(404, f"订单 {body.order_no} 不存在")
-    if order.status not in (OrderStatus.POLICY_PENDING_INTERNAL, OrderStatus.POLICY_PENDING_EXTERNAL):
-        raise HTTPException(400, f"订单状态为 {order.status}，需要 policy_pending_internal 或 policy_pending_external 才能驳回")
-
-    order.status = OrderStatus.REJECTED
-    reason = body.reject_reason or "政策审批驳回"
-    order.rejection_reason = reason
-    await db.flush()
-    await log_audit(db, action="reject_order_policy", entity_type="Order", entity_id=order.id, user=user)
-    await db.refresh(order, ["customer"])
-    return {"order_no": order.order_no, "status": order.status,
-            "customer": order.customer.name if order.customer else None,
-            "total_amount": float(order.total_amount) if order.total_amount else 0}
+    order = await resolve_order_by_no(db, body.order_no)
+    result = await reject_policy_with_request(
+        order_id=order.id,
+        body=RejectPolicyBody(rejection_reason=body.reject_reason or "政策审批驳回"),
+        user=user, db=db,
+    )
+    return {
+        "order_no": result.order_no,
+        "status": result.status,
+        "customer": result.customer.name if result.customer else None,
+        "total_amount": float(result.total_amount) if result.total_amount else 0,
+        "rejection_reason": result.rejection_reason,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════

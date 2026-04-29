@@ -77,23 +77,45 @@ async def _get_user_jwt(open_id: str, loopback: str) -> tuple[str, list[str]]:
 # ─────────────────────────────────────────────────────────────────────
 
 _MCP_INSTRUCTIONS = """\
-⚠️ 重要告警：本 MCP 工具集当前**与前端业务逻辑不对齐**，尚未验证通过。
+鑫久隆 ERP MCP 工具集 — 多品牌白酒经销 ERP。
 
-请按以下策略使用：
+✅ **Phase 1-3 薄壳化完成（2026-04-29）**：所有写入类工具现在薄壳调 HTTP 真身 handler，
+   业务逻辑 / 校验 / 事务 / 权限 100% 与前端一致。可用于生产动作。
 
-1. 查询类工具（query-*）：可用于读取数据，但返回字段口径可能与前端显示不一致。
-   建议交叉核对，不要作为最终决策依据。
+### 工具分组
 
-2. 操作类工具（action-* / register-* / create-*）：不建议用于生产动作。
-   已知问题：
-   - customer_paid_amount 在三种结算模式下的计算与前端可能不一致
-   - 金额预览（preview-order）对非标准 settlement_mode 的默认返回值不正确
-   - 部分工具的副作用链（建 Receipt → 更新 payment_status → 推提成）可能不完整
+1. **查询类**（query-*，24 个）：只读查询，RLS 自动按 role / brand_ids 过滤。
+   - query-orders / query-customers / query-inventory / query-account-balances / ...
 
-3. 审批类工具（approve-*）：同上，涉及资金/状态流转，出错不可逆。
-   建议改为到 ERP 前端审批中心人工操作。
+2. **业务写入**（create- / update- 共 34 个）：建 Order / Customer / Employee / PurchaseOrder 等。
+   - 写入前必须推飞书卡片让用户按按钮确认（不依赖打字"确认"）
+   - 金额字段必须用 preview-order 返回，不要自己算
+   - **create-order 原子化**：一次完成 Order + PolicyRequest + submit-policy
 
-前端 /api/* 仍是业务逻辑的唯一真相源。本工具集正在重写中，不要依赖它做严肃业务。
+3. **审批类**（approve- / reject- / confirm- 共 19 个）：
+   - approve-order 合并 Order.status + PolicyRequest.status 一事务
+   - confirm-order-payment 批 pending Receipt → 动 master 账户 + 生成 Commission + 刷 KPI
+
+4. **政策兑付链路**（fulfill-materials / submit-policy-voucher / confirm-fulfill /
+   confirm-policy-arrival）：完整链路可用，对齐前端 PolicyRequestList / ArrivalReconcile。
+
+### 身份隔离（铁律）
+
+Agent 调 tool 必须带 `_open_id`（飞书用户 open_id）。Bridge 自动用它换**该员工本人**的
+短期 JWT（15 分钟 TTL），所有 RBAC / RLS 按本人 role / brand_ids 生效。
+
+- ❌ 禁止跨用户复用 JWT
+- ❌ 禁止用 admin 万能 token 代 salesman 查数据
+- ✅ salesman 建单时硬绑定到本人，传别人 salesman_id 会被覆盖
+- ✅ CBS 归属校验：salesman 用未绑定的客户建单 → 400
+
+### 废弃工具（catalog 已移除，Agent 别再调）
+
+- `fulfill-policy-materials`（只改字段不扣库存）→ 用 `fulfill-materials`
+- 旧版 `confirm-policy-arrival`（只改 PR.status）→ 用新版 confirm-policy-arrival（item 级）
+- 旧版 `confirm-policy-fulfill`（跳过凭证步骤）→ 用 `confirm-fulfill`（单个 item）
+
+前端 /api/* 仍是业务逻辑的唯一真相源，MCP 只是它的薄壳转发层。
 """
 
 mcp_server = Server("xjl-erp-mcp", instructions=_MCP_INSTRUCTIONS)
@@ -166,9 +188,8 @@ async def _list_tools() -> list[types.Tool]:
             "properties": props,
             "required": required,
         }
+        # Phase 1-3 薄壳化完成后，写入类工具已与 HTTP 层对齐，不再加"业务不对齐"警告。
         desc = t["description"]
-        if t["name"] in WRITE_TOOL_NAMES:
-            desc = "⚠️ [业务不对齐，建议走前端] " + desc
         tools.append(types.Tool(
             name=t["name"],
             description=desc,

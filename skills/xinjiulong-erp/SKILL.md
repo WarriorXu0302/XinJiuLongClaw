@@ -70,17 +70,27 @@ pending → policy_pending_internal → approved → shipped → delivered → c
 
 Agent 根据用户意图加载对应模块。**不要一次加载全部**。
 
-### 总览类（每次会话都该扫读一遍）
+### MCP 工具视角（Agent 通过 openclaw / MCP 客户端操作 ERP 首选看这些）
+
+**Phase 1-3 薄壳化完成（2026-04-29）**：所有 MCP 写入类 tool 现在薄壳调 HTTP 真身 handler，跟前端行为 100% 一致。新 Agent **优先走 MCP 视角文档**。
 
 | 文件 | 作用 |
 |---|---|
-| `references/agent-playbook.md` | **30 个场景剧本**：员工说什么 → Agent 怎么做（API 调用序列） |
+| `references/mcp-tools-catalog.md` | **94 个 MCP tool 清单**，按业务场景分组 + 中文参数说明 + 角色要求 |
+| `references/mcp-agent-playbook.md` | **MCP 视角剧本**：员工话术 → MCP tool 调用序列（14 个典型场景，精简版） |
+| `references/mcp-alignment-changelog.md` | Phase 1-3 薄壳化施工记录 + 5 个 review bug + smoke test + 对 Agent 的影响 |
+
+### 总览类（所有场景共用知识）
+
+| 文件 | 作用 |
+|---|---|
 | `references/business-rules.md` | **硬性业务规则速查**：权限 / 幂等 / 锁 / 校验 / 红线（19 节 + §零 身份隔离） |
 | `references/pitfalls.md` | **坑位总结**：过去犯过的 43 个 bug 分类，Agent 绝不能重复 |
 | `references/state-machines.md` | 所有业务实体的状态机（Order/Receipt/InspectionCase 等 13 种） |
 | `references/field-semantics.md` | 关键字段语义精确定义（customer_paid_amount / comm_base / 等） |
 | `references/fund-flows-catalog.md` | 22 个资金流场景（触发 / 金额 / 动账 / 反向 / 幂等） |
 | `references/miniprogram-status.md` | **小程序端现状**：哪些 `/api/mall/*` 已接通 / 哪些仍 404，避免盲调 |
+| `references/agent-playbook.md` | **30 个场景剧本（HTTP 视角 legacy）** —— 新 Agent 优先看 mcp-agent-playbook.md |
 
 ### 按业务模块查
 

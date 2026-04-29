@@ -55,6 +55,7 @@
 
 ### Changed
 
+- **MCP Phase 4 skill 文档改造 + bridge 清理**：新增 3 份 MCP 视角文档到 `skills/xinjiulong-erp/references/`：`mcp-tools-catalog.md`（94 个 tool 按场景分组 + 中文参数说明）、`mcp-agent-playbook.md`（14 个典型场景的 MCP tool 调用序列）、`mcp-alignment-changelog.md`（Phase 1-3 施工记录 + 5 个 review bug + smoke test）；SKILL.md 顶部索引把 MCP 视角文档标为首选，旧 `agent-playbook.md` 降级为 legacy；`bridge.py _MCP_INSTRUCTIONS` 从"业务不对齐告警"改为"薄壳化完成 + 分组说明 + 身份隔离铁律 + 废弃工具清单"；list_tools 删除 `⚠️ [业务不对齐，建议走前端]` description 前缀（47 个写入 tool 不再标警告）
 - **MCP 薄壳化对齐前端业务（Phase 1-3）**：MCP 写入类 tool 全部改为"薄壳 → 调 HTTP 真身 handler"，不再复刻 customer_paid_amount / 政策匹配 / 动账 逻辑
   - **Phase 1**：`app/api/routes/orders.py` 抽出 6 个公共函数（`_enforce_salesman_binding` / `_resolve_brand_and_products` / `_validate_customer_belongs_to_salesman` / `_match_or_load_policy_template` / `_compute_order_amounts` / `_build_order_from_computed`），HTTP 和 MCP 共用。新增 4 个合并接口：`POST /api/orders/preview`（金额实时计算）、`POST /api/orders/create-with-policy`（建单 + PolicyRequest + submit-policy 事务化三步合一）、`POST /api/orders/{id}/approve-policy-with-request`（合并 PR.status=approved + Order.approve-policy）、`POST /api/orders/{id}/reject-policy-with-request`
   - **Phase 1.5 权限补丁**：全修 5 个缺陷 —— HTTP `POST /api/orders` 补 salesman 身份硬绑定；`_resolve_brand_and_products` 用 `select()` 而非 `db.get()` 走 RLS；新增 `_validate_customer_belongs_to_salesman` 对 salesman 做 CBS 三元组校验（400 "客户不存在或未绑定到你名下"，不暴露存在性）；approve/reject-policy-with-request 加品牌白名单兜底；preview 补 finance 角色

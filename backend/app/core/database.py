@@ -143,6 +143,27 @@ async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
+async def get_mall_db() -> AsyncGenerator[AsyncSession, None]:
+    """Mall (小程序) 请求 DB 依赖。
+
+    设计（见 plan "鉴权/授权加固" + "数据隔离"）：
+      - mall_* 表第一版不走 RLS（应用层严格按 mall_user_id 过滤即可）
+      - 用 admin engine 绕过 ERP RLS —— mall 端点不受 brand_ids 限制
+      - 鉴权由 CurrentMallUser 依赖单独处理；本函数不依赖 JWT，纯给业务
+        session，方便注册/登录等匿名场景也能复用同一入口
+      - 避免和 get_db 混用：ERP CurrentUser 不能调 get_mall_db，反之亦然
+    """
+    async with admin_session_factory() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
 async def init_db() -> None:
     """Create all tables. 仅开发启动辅助；生产用 Alembic。"""
     from app.models.base import Base
@@ -151,6 +172,13 @@ async def init_db() -> None:
         policy_template, inspection, finance, financing, purchase, tasting,
         expense_claim, notification_log, audit_log, fund_flow, payroll, sales_target,
         attendance,
+    )
+    from app.models.mall import (  # noqa: F401  [M1+M2+M3]
+        user as mall_user,
+        product as mall_product,
+        inventory as mall_inventory,
+        content as mall_content,
+        order as mall_order,
     )
 
     async with engine.begin() as conn:

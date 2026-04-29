@@ -121,6 +121,30 @@ def create_app() -> FastAPI:
     from app.feishu.routes import router as feishu_router
     app.include_router(feishu_router, prefix="/api/feishu", tags=["Feishu"])
 
+    # Mall (小程序) routes — 按 milestone 逐个解开
+    from app.api.routes.mall import (
+        auth as mall_auth,
+        addresses as mall_addresses,
+        cart as mall_cart,
+        categories as mall_categories,
+        notices as mall_notices,
+        orders as mall_orders,
+        products as mall_products,
+        regions as mall_regions,
+        search as mall_search,
+    )
+    app.include_router(mall_auth.router, prefix="/api/mall/auth", tags=["Mall-Auth"])
+    app.include_router(mall_products.router, prefix="/api/mall/products", tags=["Mall-Products"])
+    app.include_router(mall_categories.router, prefix="/api/mall/categories", tags=["Mall-Categories"])
+    app.include_router(mall_notices.router, prefix="/api/mall/notices", tags=["Mall-Notices"])
+    app.include_router(mall_regions.router, prefix="/api/mall/regions", tags=["Mall-Regions"])
+    app.include_router(mall_search.router, prefix="/api/mall/search", tags=["Mall-Search"])
+    app.include_router(mall_cart.router, prefix="/api/mall/cart", tags=["Mall-Cart"])
+    app.include_router(mall_addresses.router, prefix="/api/mall/addresses", tags=["Mall-Addresses"])
+    app.include_router(mall_orders.router, prefix="/api/mall/orders", tags=["Mall-Orders"])
+
+    # TODO(M4-M5): 履约闭环 / 工作台 / 管理后台 / 定时任务后续里程碑解开
+
     return app
 
 

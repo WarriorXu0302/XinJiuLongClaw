@@ -21,6 +21,22 @@ from app.models import (
     ManufacturerExternalIdentity,
 )
 
+# Mall models（小程序）
+from app.models.mall.user import (  # noqa: F401
+    MallUser, MallAddress, MallRegion, MallInviteCode, MallLoginLog,
+)
+from app.models.mall.product import (  # noqa: F401
+    MallCategory, MallProductTag, MallProductTagRel,
+    MallProduct, MallProductSku, MallCollection,
+)
+from app.models.mall.inventory import (  # noqa: F401
+    MallWarehouse, MallInventory, MallInventoryFlow,
+)
+from app.models.mall.content import MallNotice  # noqa: F401
+from app.models.mall.order import (  # noqa: F401
+    MallCartItem, MallOrder, MallOrderItem, MallOrderClaimLog,
+)
+
 # Import settings to get database URL
 from app.core.config import settings
 

@@ -7,6 +7,12 @@ from app.models.mall.inventory import (
     MallInventoryFlow,
     MallWarehouse,
 )
+from app.models.mall.order import (
+    MallCartItem,
+    MallOrder,
+    MallOrderClaimLog,
+    MallOrderItem,
+)
 from app.models.mall.product import (
     MallCategory,
     MallCollection,
@@ -33,4 +39,6 @@ __all__ = [
     "MallWarehouse", "MallInventory", "MallInventoryFlow",
     # content (M2)
     "MallNotice",
+    # order (M3)
+    "MallCartItem", "MallOrder", "MallOrderItem", "MallOrderClaimLog",
 ]

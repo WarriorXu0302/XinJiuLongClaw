@@ -1,0 +1,52 @@
+"""
+Mall 业务校验工具（应用层）。
+
+三层防御的第二层（JWT 第一层 / DB trigger 第三层）。
+返回业务友好的 400/403 错误，避免用户直接撞到 CHECK 约束的 500 级错误。
+"""
+from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.mall.base import MallUserStatus, MallUserType
+from app.models.mall.user import MallUser
+
+
+async def assert_is_salesman(
+    db: AsyncSession, user_id: str, field_name: str = "user_id"
+) -> MallUser:
+    """给引用"业务员"的字段写入前调用。
+
+    典型场景：设 mall_warehouses.manager_user_id / mall_orders.assigned_salesman_id 前。
+    """
+    user = (
+        await db.execute(select(MallUser).where(MallUser.id == user_id))
+    ).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"{field_name} 指向的用户不存在")
+    if user.user_type != MallUserType.SALESMAN.value:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field_name} 必须是业务员，当前为 {user.user_type}",
+        )
+    return user
+
+
+def assert_mall_user_active(user: MallUser) -> None:
+    """登录/下单前检查 status='active'。disabled/inactive_archived 都拒绝。"""
+    if user.status != MallUserStatus.ACTIVE.value:
+        raise HTTPException(
+            status_code=403, detail="账号已停用，请联系管理员"
+        )
+
+
+def assert_salesman_linked_to_employee(user: MallUser) -> None:
+    """salesman 必须有 linked_employee_id（CHECK 约束会拒绝空值，此处更早地给出人话错误）。"""
+    if (
+        user.user_type == MallUserType.SALESMAN.value
+        and not user.linked_employee_id
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="业务员账号必须绑定 ERP 员工（linked_employee_id）",
+        )

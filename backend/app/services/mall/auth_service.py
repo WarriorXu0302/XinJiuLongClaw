@@ -1,0 +1,298 @@
+"""
+Mall 鉴权服务。
+
+核心职责：
+  - 账密登录（复用 bcrypt）
+  - 微信 code2session（MP_APPID 为空走 mock，方便开发）
+  - 注册：原子消费 invite_code + 建 MallUser + 绑 referrer
+  - 登录拦截：status='active' + token_version 一致
+  - 登录日志落库
+  - bump_token_version：封禁/换绑时 +1 吊销所有在途 token
+"""
+import httpx
+from datetime import datetime, timezone
+from typing import Any, Optional
+
+from fastapi import HTTPException, Request, status
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.core.security import (
+    create_mall_access_token,
+    create_mall_refresh_token,
+    decode_mall_token,
+    get_password_hash,
+    verify_password,
+)
+from app.models.mall.base import (
+    MallLoginMethod,
+    MallUserStatus,
+    MallUserType,
+)
+from app.models.mall.user import MallLoginLog, MallUser
+from app.services.mall.invite_service import (
+    consume_invite_code,
+    mark_invite_used,
+)
+from app.services.mall.validators import (
+    assert_mall_user_active,
+    assert_salesman_linked_to_employee,
+)
+
+
+# =============================================================================
+# 查询 helpers
+# =============================================================================
+
+async def get_mall_user_by_id(db: AsyncSession, user_id: str) -> Optional[MallUser]:
+    return (
+        await db.execute(select(MallUser).where(MallUser.id == user_id))
+    ).scalar_one_or_none()
+
+
+async def get_mall_user_by_username(db: AsyncSession, username: str) -> Optional[MallUser]:
+    return (
+        await db.execute(select(MallUser).where(MallUser.username == username))
+    ).scalar_one_or_none()
+
+
+async def get_mall_user_by_openid(db: AsyncSession, openid: str) -> Optional[MallUser]:
+    return (
+        await db.execute(select(MallUser).where(MallUser.openid == openid))
+    ).scalar_one_or_none()
+
+
+# =============================================================================
+# 账密登录
+# =============================================================================
+
+async def authenticate_by_password(
+    db: AsyncSession, username: str, password: str
+) -> MallUser:
+    """账密登录。失败返回 401，账号停用 403。"""
+    user = await get_mall_user_by_username(db, username)
+    if user is None or not user.hashed_password:
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    if not verify_password(password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    assert_mall_user_active(user)
+    return user
+
+
+# =============================================================================
+# 微信登录（未配 MP_APPID 时走 mock）
+# =============================================================================
+
+async def wechat_code2session(code: str) -> dict[str, Any]:
+    """调 https://api.weixin.qq.com/sns/jscode2session。
+
+    开发环境下未配 MP_APPID/MP_SECRET 时返回 mock openid，方便本地测试。
+    """
+    if not settings.MP_APPID or not settings.MP_SECRET:
+        # dev mock：用 code 前 8 位当 openid 前缀
+        return {
+            "openid": f"mock_openid_{code[:12]}",
+            "session_key": "mock_session_key",
+            "unionid": None,
+        }
+
+    async with httpx.AsyncClient(timeout=8.0) as client:
+        r = await client.get(
+            "https://api.weixin.qq.com/sns/jscode2session",
+            params={
+                "appid": settings.MP_APPID,
+                "secret": settings.MP_SECRET,
+                "js_code": code,
+                "grant_type": "authorization_code",
+            },
+        )
+        data = r.json()
+        if "errcode" in data and data["errcode"] != 0:
+            raise HTTPException(
+                status_code=400, detail=f"微信登录失败：{data.get('errmsg')}"
+            )
+        return data
+
+
+# =============================================================================
+# 注册
+# =============================================================================
+
+async def register_mall_user(
+    db: AsyncSession,
+    *,
+    invite_code: str,
+    username: Optional[str] = None,
+    password: Optional[str] = None,
+    openid: Optional[str] = None,
+    unionid: Optional[str] = None,
+    phone: Optional[str] = None,
+    nickname: Optional[str] = None,
+    avatar_url: Optional[str] = None,
+) -> MallUser:
+    """事务内原子：消费邀请码 + 建 MallUser + 绑定 referrer_salesman_id。
+
+    username / openid 必须至少一个；有 username 时 password 必传。
+    """
+    if not invite_code:
+        raise HTTPException(status_code=400, detail="邀请码必填")
+    if not (username or openid):
+        raise HTTPException(status_code=400, detail="必须提供账号或微信 openid")
+    if username and not password:
+        raise HTTPException(status_code=400, detail="账密注册必须带密码")
+
+    # 1. 前置软查（友好错误提示，不作为并发保护，并发保护靠 DB 唯一约束）
+    if username and await get_mall_user_by_username(db, username):
+        raise HTTPException(status_code=409, detail="账号已存在")
+    if openid and await get_mall_user_by_openid(db, openid):
+        raise HTTPException(status_code=409, detail="该微信已注册")
+
+    # 2. 锁定邀请码（FOR UPDATE），校验合法性
+    invite = await consume_invite_code(db, invite_code)
+
+    # 3. 建用户。并发场景下两个请求用同一 username 同时通过软查 → 同时插入，
+    # 依赖 DB 唯一约束兜底：第二个 flush 会抛 IntegrityError → 转 409
+    user = MallUser(
+        username=username,
+        hashed_password=get_password_hash(password) if password else None,
+        openid=openid,
+        unionid=unionid,
+        phone=phone,
+        nickname=nickname or username or "新用户",
+        avatar_url=avatar_url,
+        status=MallUserStatus.ACTIVE.value,
+        user_type=MallUserType.CONSUMER.value,
+        token_version=1,
+        referrer_salesman_id=invite.issuer_salesman_id,
+        referrer_bound_at=datetime.now(timezone.utc),
+    )
+    db.add(user)
+    try:
+        await db.flush()  # 拿 id；并发唯一撞库在这里抛
+    except IntegrityError as e:
+        await db.rollback()
+        msg = str(e.orig) if e.orig else str(e)
+        if "uq_mall_users_username" in msg or "mall_users_username" in msg:
+            raise HTTPException(status_code=409, detail="账号已存在") from e
+        if "ix_mall_users_openid" in msg or "mall_users_openid" in msg:
+            raise HTTPException(status_code=409, detail="该微信已注册") from e
+        raise HTTPException(status_code=409, detail="注册冲突，请稍后重试") from e
+
+    # 4. 回填邀请码 used 状态
+    await mark_invite_used(db, invite, user.id)
+
+    return user
+
+
+# =============================================================================
+# Token 签发（带 version 校验）
+# =============================================================================
+
+def issue_tokens(user: MallUser) -> dict[str, Any]:
+    """签发 access + refresh，返回响应字典。"""
+    return {
+        "token": create_mall_access_token(user),
+        "refresh_token": create_mall_refresh_token(user),
+        "expires_in": settings.MALL_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        "user_type": user.user_type,
+        "user_id": user.id,
+        "nickname": user.nickname,
+        "must_change_password": user.must_change_password,
+    }
+
+
+async def verify_token_and_load_user(
+    db: AsyncSession, payload: dict[str, Any]
+) -> MallUser:
+    """从 payload（已 decode_mall_token 校验过 JWT 本身）加载 user 并校验 token_version / status。
+
+    注意：业务路由里从 CurrentMallUser payload 拿 sub 后调用此函数获取"新鲜"的 user 对象。
+    """
+    user = await get_mall_user_by_id(db, payload["sub"])
+    if user is None:
+        raise HTTPException(status_code=401, detail="账号不存在")
+    if user.token_version != payload.get("token_version"):
+        raise HTTPException(
+            status_code=401, detail="Token 已失效，请重新登录"
+        )
+    assert_mall_user_active(user)
+    return user
+
+
+async def refresh_tokens(db: AsyncSession, refresh_token: str) -> dict[str, Any]:
+    """用 refresh_token 换新一对 token。"""
+    payload = decode_mall_token(refresh_token, expected_type="mall_refresh")
+    user = await verify_token_and_load_user(db, payload)
+    # 业务员额外校验 linked_employee
+    assert_salesman_linked_to_employee(user)
+    return issue_tokens(user)
+
+
+async def bump_token_version(db: AsyncSession, user_id: str) -> None:
+    """封禁/换绑/停用时 +1。所有在途 JWT 下一次解码立即失效。"""
+    user = await get_mall_user_by_id(db, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    user.token_version = (user.token_version or 0) + 1
+    await db.flush()
+
+
+# =============================================================================
+# 登录日志
+# =============================================================================
+
+def _extract_client_app(request: Optional[Request], explicit: Optional[str]) -> str:
+    if explicit:
+        return explicit
+    if request is None:
+        return "h5"
+    ua = (request.headers.get("user-agent") or "").lower()
+    if "micromessenger" in ua:
+        return "mp_weixin"
+    if "android" in ua:
+        return "app_android"
+    if "iphone" in ua or "ios" in ua:
+        return "app_ios"
+    return "h5"
+
+
+async def record_login_log(
+    db: AsyncSession,
+    *,
+    user: MallUser,
+    request: Optional[Request] = None,
+    login_method: str = MallLoginMethod.PASSWORD.value,
+    client_app: Optional[str] = None,
+    device_info: Optional[dict] = None,
+) -> None:
+    """登录日志 + last_active_at 更新。
+
+    日志写入失败**不阻塞登录**：任何异常都被吞掉 + 打 warn 日志。
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    ip = None
+    ua = None
+    if request is not None:
+        ip = request.client.host if request.client else None
+        ua = request.headers.get("user-agent")
+
+    # 用 SAVEPOINT 包住，日志/last_active_at 出错只回滚这一段，不影响登录主流程
+    try:
+        async with db.begin_nested():
+            log = MallLoginLog(
+                user_id=user.id,
+                login_method=login_method,
+                client_app=_extract_client_app(request, client_app),
+                ip_address=ip,
+                user_agent=(ua or "")[:500] or None,
+                device_info=device_info,
+            )
+            db.add(log)
+            user.last_active_at = datetime.now(timezone.utc)
+            # begin_nested 退出时自动 flush + release savepoint
+    except Exception as exc:
+        logger.warning("mall_login_log 写入失败，忽略不阻塞登录: %s", exc)

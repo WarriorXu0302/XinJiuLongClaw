@@ -80,6 +80,44 @@ class Settings(BaseSettings):
     FEISHU_AGENT_SERVICE_KEY: str = ""
     FEISHU_AGENT_TOKEN_TTL_MIN: int = 15
 
+    # --- Mall (小程序) TODO(M1): 在 M1 阶段实现 ---
+    # 全局开关，关闭后采购页/ERP 前端不显示 mall 仓选项
+    MALL_INTEGRATION_ENABLED: bool = True
+    # 微信小程序
+    MP_APPID: str = ""
+    MP_SECRET: str = ""
+    # JWT（独立于 ERP SECRET_KEY，泄漏互不影响）
+    MALL_JWT_SECRET: str = "change-me-mall-in-production"
+    MALL_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
+    MALL_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # 邀请码
+    MALL_INVITE_CODE_TTL_MINUTES: int = 120  # 2 小时
+    MALL_INVITE_CODE_DAILY_LIMIT: int = 20
+    MALL_INVITE_CODE_EXHIBITION_LIMIT: int = 100
+    # 用户停用策略（3 级）
+    MALL_INACTIVE_DAYS_NEW_USER: int = 30     # 注册未下单
+    MALL_INACTIVE_DAYS_FEW_ORDERS: int = 90   # 1-2 次下单
+    MALL_INACTIVE_DAYS_LOYAL: int = 180       # 3+ 次下单老客户
+    MALL_INACTIVE_PRE_NOTICE_DAYS: int = 7    # 停用前多少天发预告
+    # 订单折损
+    MALL_PARTIAL_CLOSE_DAYS: int = 60         # delivered 后多久未全款自动折损
+    # 提成
+    MALL_DEFAULT_COMMISSION_RATE: str = "0.03"  # 无 BrandSalaryScheme 时兜底
+    # 跳单告警
+    MALL_UNCLAIMED_TIMEOUT_MINUTES: int = 30
+    MALL_SKIP_ALERT_THRESHOLD: int = 3
+    MALL_SKIP_ALERT_WINDOW_DAYS: int = 30
+    # 日志保留
+    MALL_LOGIN_LOG_RETENTION_DAYS: int = 90
+    # 限流
+    MALL_MAX_LOGIN_ATTEMPTS_PER_IP_PER_MIN: int = 10
+    MALL_MAX_PRICE_VIEW_PER_USER_PER_HOUR: int = 200
+    # 上传
+    MALL_UPLOAD_MAX_SIZE_MB: int = 5
+    MALL_UPLOAD_ALLOWED_MIMES: list[str] = [
+        "image/jpeg", "image/png", "image/webp"
+    ]
+
     @property
     def database_url(self) -> str:
         """Admin/superuser URL — 给 Alembic / seed / 启动钩子用，绕过 RLS。"""

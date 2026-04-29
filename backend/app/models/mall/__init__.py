@@ -8,10 +8,15 @@ from app.models.mall.inventory import (
     MallWarehouse,
 )
 from app.models.mall.order import (
+    MallAttachment,
     MallCartItem,
+    MallCustomerSkipLog,
     MallOrder,
     MallOrderClaimLog,
     MallOrderItem,
+    MallPayment,
+    MallShipment,
+    MallSkipAlert,
 )
 from app.models.mall.product import (
     MallCategory,
@@ -41,4 +46,7 @@ __all__ = [
     "MallNotice",
     # order (M3)
     "MallCartItem", "MallOrder", "MallOrderItem", "MallOrderClaimLog",
+    # fulfilment (M4a)
+    "MallPayment", "MallShipment", "MallAttachment",
+    "MallCustomerSkipLog", "MallSkipAlert",
 ]

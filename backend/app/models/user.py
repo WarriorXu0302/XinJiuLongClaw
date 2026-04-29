@@ -199,7 +199,14 @@ class KPI(Base):
 
 
 class Commission(Base):
-    """Sales commission record."""
+    """Sales commission record.
+
+    TODO(M4): 扩展 mall_order_id（plan "ERP 后端改造清单"）
+      - mall_order_id: Mapped[Optional[str]] = mapped_column(
+            String(36), ForeignKey("mall_orders.id"), nullable=True, index=True)
+      - employee_id 保持 NOT NULL（mall 业务员必须 linked_employee_id）
+      - 月结 SalaryRecord 汇总时 WHERE mall_order_id IS NOT NULL 区分商城提成
+    """
 
     __tablename__ = "commissions"
 
@@ -214,6 +221,12 @@ class Commission(Base):
     )
     order_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("orders.id"), nullable=True
+    )
+    # Mall 订单提成（M4a 加）。mall_order_id 和 order_id 互斥：
+    #   - 传统 B2B 订单 → order_id 非空、mall_order_id 为空
+    #   - 小程序商城订单 → mall_order_id 非空、order_id 为空
+    mall_order_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("mall_orders.id"), nullable=True
     )
     commission_amount: Mapped[Decimal] = mapped_column(
         Numeric(15, 2), nullable=False

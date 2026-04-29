@@ -35,6 +35,8 @@ from app.models.mall.inventory import (  # noqa: F401
 from app.models.mall.content import MallNotice  # noqa: F401
 from app.models.mall.order import (  # noqa: F401
     MallCartItem, MallOrder, MallOrderItem, MallOrderClaimLog,
+    MallPayment, MallShipment, MallAttachment,
+    MallCustomerSkipLog, MallSkipAlert,
 )
 
 # Import settings to get database URL

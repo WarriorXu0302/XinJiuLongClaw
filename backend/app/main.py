@@ -143,7 +143,27 @@ def create_app() -> FastAPI:
     app.include_router(mall_addresses.router, prefix="/api/mall/addresses", tags=["Mall-Addresses"])
     app.include_router(mall_orders.router, prefix="/api/mall/orders", tags=["Mall-Orders"])
 
-    # TODO(M4-M5): 履约闭环 / 工作台 / 管理后台 / 定时任务后续里程碑解开
+    # M4a: 履约闭环（抢单/出库/送达/凭证/财务确认/跳单告警）
+    from app.api.routes.mall import attachments as mall_attachments
+    from app.api.routes.mall.salesman import (
+        alerts as ms_alerts,
+        orders as ms_orders,
+    )
+    from app.api.routes.mall.admin import (
+        orders as ma_orders,
+        skip_alerts as ma_skip_alerts,
+    )
+    app.include_router(
+        mall_attachments.router,
+        prefix="/api/mall/salesman/attachments",
+        tags=["Mall-Salesman-Attachments"],
+    )
+    app.include_router(ms_orders.router, prefix="/api/mall/salesman/orders", tags=["Mall-Salesman"])
+    app.include_router(ms_alerts.router, prefix="/api/mall/salesman/skip-alerts", tags=["Mall-Salesman"])
+    app.include_router(ma_orders.router, prefix="/api/mall/admin/orders", tags=["Mall-Admin"])
+    app.include_router(ma_skip_alerts.router, prefix="/api/mall/admin/skip-alerts", tags=["Mall-Admin"])
+
+    # TODO(M4c-M5): workspace 薄转发 / admin housekeeping / salesman profile 等后续解开
 
     return app
 

@@ -12,6 +12,12 @@ node_modules
 dist
 *.local
 
+# 环境变量（含微信 AppID / 后端 API 域名等），一律不进仓库
+# 生产部署靠 CI/CD 注入，本地靠 .env.example 手工拷贝后改
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 *.suo
 *.ntvs*

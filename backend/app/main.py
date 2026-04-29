@@ -20,6 +20,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_db()
     logger.info("Database tables initialized")
 
+    # APScheduler（mall housekeeping 定时任务）
+    from app.core.scheduler import start_scheduler, stop_scheduler
+    start_scheduler()
+    logger.info("APScheduler started (mall housekeeping jobs)")
+
     # MCP bridge 的 StreamableHTTPSessionManager 必须在 app lifespan 内运行
     from app.mcp.bridge import bridge_lifespan
     async with bridge_lifespan():
@@ -27,6 +32,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         yield
 
     logger.info("Shutting down...")
+    await stop_scheduler()
     await close_db()
     logger.info("Database connections closed")
 
@@ -163,7 +169,11 @@ def create_app() -> FastAPI:
     app.include_router(ma_orders.router, prefix="/api/mall/admin/orders", tags=["Mall-Admin"])
     app.include_router(ma_skip_alerts.router, prefix="/api/mall/admin/skip-alerts", tags=["Mall-Admin"])
 
-    # TODO(M4c-M5): workspace 薄转发 / admin housekeeping / salesman profile 等后续解开
+    # M4s: 管理员手动触发定时任务（housekeeping）
+    from app.api.routes.mall.admin import housekeeping as ma_housekeeping
+    app.include_router(ma_housekeeping.router, prefix="/api/mall/admin/housekeeping", tags=["Mall-Admin"])
+
+    # TODO(M4c-M5): workspace 薄转发 / admin users/payments/salesmen / salesman profile 等后续解开
 
     return app
 

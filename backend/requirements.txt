@@ -37,3 +37,6 @@ mcp>=1.0.0
 
 # Policy Excel 两轮对账
 openpyxl>=3.1.0
+
+# 定时任务（mall housekeeping：超时未接单扫描 / 用户归档 / 订单折损 / 日志清理）
+apscheduler>=3.10.0

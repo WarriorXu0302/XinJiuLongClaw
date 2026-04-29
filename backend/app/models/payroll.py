@@ -12,7 +12,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional, TYPE_CHECKING
 
-from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, CheckConstraint, Date, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -197,20 +197,32 @@ class SalaryRecord(Base):
 class SalaryOrderLink(Base):
     """工资记录对应的订单明细（这月哪些订单算了提成）
 
-    唯一约束 (order_id, is_manager_share)：一个订单最多挂两次——员工本人提成
+    唯一约束 (order_id, is_manager_share)：一个 B2B 订单最多挂两次——员工本人提成
     一次 + 经理分成一次。并发生成工资单时约束兜底避免双发。
+
+    M4d 扩展：`mall_order_id` 字段用于商城订单归集。order_id 和 mall_order_id
+    二选一非空；两者都 NULL 不合法（CHECK 约束保证）。
     """
     __tablename__ = "salary_order_links"
     __table_args__ = (
         UniqueConstraint("order_id", "is_manager_share", name="uq_order_commission_once"),
+        UniqueConstraint("mall_order_id", "is_manager_share", name="uq_mall_order_commission_once"),
+        # 二选一非空
+        CheckConstraint(
+            "(order_id IS NOT NULL AND mall_order_id IS NULL) OR (order_id IS NULL AND mall_order_id IS NOT NULL)",
+            name="ck_salary_order_link_exclusive_ref",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     salary_record_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("salary_records.id", ondelete="CASCADE"), nullable=False, index=True,
     )
-    order_id: Mapped[str] = mapped_column(String(36), ForeignKey("orders.id"), nullable=False)
-    brand_id: Mapped[str] = mapped_column(String(36), ForeignKey("brands.id"), nullable=False)
+    order_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("orders.id"), nullable=True)
+    mall_order_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("mall_orders.id"), nullable=True,
+    )
+    brand_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("brands.id"), nullable=True)
     receipt_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
     commission_rate_used: Mapped[Decimal] = mapped_column(Numeric(6, 4), default=Decimal("0.0000"))
     kpi_coefficient: Mapped[Decimal] = mapped_column(Numeric(5, 4), default=Decimal("1.0000"))

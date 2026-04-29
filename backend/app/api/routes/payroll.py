@@ -24,7 +24,7 @@ from app.models.payroll import (
     ManufacturerSalarySubsidy,
     KpiCoefficientRule,
 )
-from app.models.user import Employee
+from app.models.user import Commission, Employee
 from app.models.product import Brand, Account
 from app.services.audit_service import log_audit
 
@@ -769,6 +769,24 @@ async def pay_salary(rec_id: str, body: PaySalaryRequest, user: CurrentUser, db:
     rec.paid_by = user.get('employee_id')
     rec.payment_voucher_urls = body.voucher_urls
 
+    # 把本工资单挂的所有 mall_order 的 commission 标记为 settled
+    # （B2B 订单的 commission 已经在原有 finance 确认流程中处理；mall 是额外分支）
+    from sqlalchemy import update as _sql_update
+    mall_order_ids = (await db.execute(
+        select(SalaryOrderLink.mall_order_id)
+        .where(SalaryOrderLink.salary_record_id == rec.id)
+        .where(SalaryOrderLink.mall_order_id.is_not(None))
+        .where(SalaryOrderLink.is_manager_share.is_(False))
+    )).scalars().all()
+    if mall_order_ids:
+        await db.execute(
+            _sql_update(Commission)
+            .where(Commission.mall_order_id.in_(mall_order_ids))
+            .where(Commission.employee_id == rec.employee_id)
+            .where(Commission.status == "pending")
+            .values(status="settled", settled_at=now)
+        )
+
     # 推送工资到账通知给员工本人
     from app.models.user import User
     from app.services.notification_service import notify
@@ -783,9 +801,24 @@ async def pay_salary(rec_id: str, body: PaySalaryRequest, user: CurrentUser, db:
             entity_type="SalaryRecord", entity_id=rec.id,
         )
 
+    # mall 端业务员如果有对应账号 → 同步推通知（和 ERP 通知区分）
+    from app.models.mall.user import MallUser
+    from app.services.notification_service import notify_mall_user
+    mall_sm = (await db.execute(
+        select(MallUser).where(MallUser.linked_employee_id == rec.employee_id)
+    )).scalar_one_or_none()
+    if mall_sm:
+        await notify_mall_user(
+            db, mall_user_id=mall_sm.id,
+            title=f"{rec.period} 工资已发放",
+            content=f"本月实发工资 ¥{rec.actual_pay}，其中包含 {len(mall_order_ids)} 单商城提成。",
+            entity_type="SalaryRecord", entity_id=rec.id,
+        )
+
     await db.flush()
     await log_audit(db, action="pay_salary", entity_type="SalaryRecord", entity_id=rec.id,
-                    changes={"employee": emp_name, "period": rec.period, "amount": float(rec.actual_pay)},
+                    changes={"employee": emp_name, "period": rec.period, "amount": float(rec.actual_pay),
+                             "mall_order_count": len(mall_order_ids)},
                     user=user)
     return {"detail": f"{emp_name} {rec.period} 工资 ¥{rec.actual_pay} 已发放"}
 
@@ -1164,6 +1197,9 @@ async def generate_salary_records(
             skipped.append({"employee_id": emp.id, "name": emp.name, "reason": "已发放无法覆盖"})
             continue
 
+        # 本员工工资单的注记（提前初始化，便于各阶段追加说明）
+        bonus_notes: list[str] = []
+
         # 员工所有品牌×岗位
         ebps = (await db.execute(
             select(EmployeeBrandPosition).where(EmployeeBrandPosition.employee_id == emp.id)
@@ -1256,6 +1292,47 @@ async def generate_salary_records(
                             "coef": Decimal("1"), "amount": share, "is_manager": True,
                         })
 
+        # =====================================================================
+        # Mall 提成（M4d）：Commission.mall_order_id IS NOT NULL 的待结算条目
+        # =====================================================================
+        mall_commission_rows = (await db.execute(
+            select(Commission)
+            .where(Commission.employee_id == emp.id)
+            .where(Commission.mall_order_id.is_not(None))
+            .where(Commission.status == "pending")
+        )).scalars().all()
+
+        if mall_commission_rows:
+            # 排除已被其他 SalaryOrderLink 关联过的 mall 订单（幂等）
+            mall_order_ids = [c.mall_order_id for c in mall_commission_rows]
+            already_mall = (await db.execute(
+                select(SalaryOrderLink.mall_order_id)
+                .where(SalaryOrderLink.mall_order_id.in_(mall_order_ids))
+                .where(SalaryOrderLink.is_manager_share.is_(False))
+            )).scalars().all()
+            already_mall_set = set(already_mall)
+
+            from app.models.mall.order import MallOrder
+            for c in mall_commission_rows:
+                if c.mall_order_id in already_mall_set:
+                    continue
+                mall_order = await db.get(MallOrder, c.mall_order_id)
+                if mall_order is None:
+                    continue
+                receipt = Decimal(str(mall_order.received_amount or 0))
+                amount = Decimal(str(c.commission_amount or 0))
+                commission_total += amount
+                order_links.append({
+                    "mall_order_id": c.mall_order_id,
+                    "brand_id": c.brand_id,  # 可能 None
+                    "receipt_amount": receipt,
+                    "rate": receipt and (amount / receipt) or Decimal("0"),
+                    "coef": Decimal("1"),
+                    "amount": amount,
+                    "is_manager": False,
+                })
+                total_receipt += receipt
+
         # 考勤汇总（用于判全勤 + 迟到扣款）
         from app.models.attendance import CheckinRecord, LeaveRequest
         from datetime import date as _d
@@ -1286,24 +1363,32 @@ async def generate_salary_records(
         late_deduction = Decimal(late_times) * Decimal("10") + Decimal(late_over30) * Decimal("50")
 
         # 底薪与全勤奖：按主属品牌×岗位的 BrandSalaryScheme 取
+        # 特例（M4d）：纯 mall 业务员可能没配主属品牌 / 没 scheme；此时仅发 mall 提成，
+        # 底薪 / 全勤奖为 0，注记里说明。
         primary = next((e for e in ebps if e.is_primary), None)
-        if primary is None:
-            skipped.append({"employee_id": emp.id, "name": emp.name, "reason": "未设置主属品牌，无法生成底薪"})
-            continue
-        scheme = (await db.execute(
-            select(BrandSalaryScheme).where(
-                BrandSalaryScheme.brand_id == primary.brand_id,
-                BrandSalaryScheme.position_code == primary.position_code,
-            )
-        )).scalar_one_or_none()
-        if scheme is None:
-            skipped.append({
-                "employee_id": emp.id, "name": emp.name,
-                "reason": f"主属品牌×岗位（{primary.brand_id[:8]}/{primary.position_code}）未配置薪酬方案",
-            })
-            continue
-        fixed = Decimal(str(scheme.fixed_salary))
-        full_amount = Decimal(str(scheme.attendance_bonus_full))
+        scheme = None
+        if primary is not None:
+            scheme = (await db.execute(
+                select(BrandSalaryScheme).where(
+                    BrandSalaryScheme.brand_id == primary.brand_id,
+                    BrandSalaryScheme.position_code == primary.position_code,
+                )
+            )).scalar_one_or_none()
+
+        if primary is None or scheme is None:
+            if commission_total == 0 and not order_links:
+                # 既没 B2B 单又没 mall 单，连提成都没，没必要生成工资单
+                skipped.append({
+                    "employee_id": emp.id, "name": emp.name,
+                    "reason": "未设主属品牌/薪酬方案且本月无提成" ,
+                })
+                continue
+            fixed = Decimal("0")
+            full_amount = Decimal("0")
+            bonus_notes.append("无主属品牌薪酬方案：底薪/全勤为 0，仅发提成")
+        else:
+            fixed = Decimal(str(scheme.fixed_salary))
+            full_amount = Decimal(str(scheme.attendance_bonus_full))
 
         # 全勤奖：按请假天数阶梯扣（公司统一规则）
         #   0天=100% / 1天=80% / 2天=60% / 3天=40% / 4天=20% / ≥5天=0
@@ -1326,7 +1411,6 @@ async def generate_salary_records(
         from app.models.finance import Receipt as _Rc
         from sqlalchemy import extract as _ext
         bonus_other = Decimal("0")
-        bonus_notes = []
         targets = (await db.execute(
             select(SalesTarget).where(
                 SalesTarget.target_level == 'employee',
@@ -1421,13 +1505,14 @@ async def generate_salary_records(
         db.add(rec)
         await db.flush()
 
-        # 订单明细
+        # 订单明细（B2B order_id 或 mall_order_id 二选一）
         for link in order_links:
             db.add(SalaryOrderLink(
                 id=str(uuid.uuid4()),
                 salary_record_id=rec.id,
-                order_id=link["order_id"],
-                brand_id=link["brand_id"],
+                order_id=link.get("order_id"),
+                mall_order_id=link.get("mall_order_id"),
+                brand_id=link.get("brand_id"),
                 receipt_amount=link["receipt_amount"],
                 commission_rate_used=link["rate"],
                 kpi_coefficient=link["coef"],
@@ -1576,6 +1661,23 @@ async def batch_pay_salary(
         rec.paid_by = user.get('employee_id')
         rec.payment_voucher_urls = body.voucher_urls
         paid_count += 1
+
+        # 同步标记 mall commission settled（批量发放路径）
+        from sqlalchemy import update as _su
+        mall_ids = (await db.execute(
+            select(SalaryOrderLink.mall_order_id)
+            .where(SalaryOrderLink.salary_record_id == rec.id)
+            .where(SalaryOrderLink.mall_order_id.is_not(None))
+            .where(SalaryOrderLink.is_manager_share.is_(False))
+        )).scalars().all()
+        if mall_ids:
+            await db.execute(
+                _su(Commission)
+                .where(Commission.mall_order_id.in_(mall_ids))
+                .where(Commission.employee_id == rec.employee_id)
+                .where(Commission.status == "pending")
+                .values(status="settled", settled_at=now)
+            )
 
         # 推送给员工本人
         from app.models.user import User as _U

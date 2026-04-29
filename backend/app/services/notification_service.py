@@ -18,12 +18,20 @@ async def notify(
     content: str,
     entity_type: str | None = None,
     entity_id: str | None = None,
+    recipient_type: str = "erp_user",
+    mall_user_id: str | None = None,
 ) -> None:
-    """Create a single in-app notification."""
+    """Create a single in-app notification.
+
+    recipient_type='erp_user'（默认）→ recipient 存 ERP user_id
+    recipient_type='mall_user' → recipient 存 mall_user_id + mall_user_id 字段同步
+    """
     n = NotificationLog(
         id=str(uuid.uuid4()),
         channel="in_app",
         recipient=recipient_id,
+        recipient_type=recipient_type,
+        mall_user_id=mall_user_id or (recipient_id if recipient_type == "mall_user" else None),
         title=title,
         content=content,
         related_entity_type=entity_type,
@@ -31,6 +39,28 @@ async def notify(
         status="unread",
     )
     db.add(n)
+
+
+async def notify_mall_user(
+    db: AsyncSession,
+    *,
+    mall_user_id: str,
+    title: str,
+    content: str,
+    entity_type: str | None = None,
+    entity_id: str | None = None,
+) -> None:
+    """Mall 专用 shortcut：给指定 mall_user_id 推一条 in-app 通知。"""
+    await notify(
+        db,
+        recipient_id=mall_user_id,
+        recipient_type="mall_user",
+        mall_user_id=mall_user_id,
+        title=title,
+        content=content,
+        entity_type=entity_type,
+        entity_id=entity_id,
+    )
 
 
 async def notify_roles(

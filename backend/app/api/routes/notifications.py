@@ -22,6 +22,7 @@ async def get_unread_count(user: CurrentUser, db: AsyncSession = Depends(get_db)
         await db.execute(
             select(func.count(NotificationLog.id)).where(
                 NotificationLog.recipient == user_id,
+                NotificationLog.recipient_type == "erp_user",
                 NotificationLog.channel == "in_app",
                 NotificationLog.status == "unread",
             )
@@ -41,6 +42,7 @@ async def list_notifications(
     user_id = user["sub"]
     base = select(NotificationLog).where(
         NotificationLog.recipient == user_id,
+        NotificationLog.recipient_type == "erp_user",
         NotificationLog.channel == "in_app",
     )
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
@@ -70,7 +72,7 @@ async def mark_read(
     notification_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)
 ):
     n = await db.get(NotificationLog, notification_id)
-    if n is None or n.recipient != user["sub"]:
+    if n is None or n.recipient != user["sub"] or n.recipient_type != "erp_user":
         raise HTTPException(404, "通知不存在")
     n.status = "read"
     n.read_at = datetime.now(timezone.utc)

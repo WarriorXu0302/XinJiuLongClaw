@@ -173,7 +173,23 @@ def create_app() -> FastAPI:
     from app.api.routes.mall.admin import housekeeping as ma_housekeeping
     app.include_router(ma_housekeeping.router, prefix="/api/mall/admin/housekeeping", tags=["Mall-Admin"])
 
-    # TODO(M4c-M5): workspace 薄转发 / admin users/payments/salesmen / salesman profile 等后续解开
+    # M4c: workspace 薄转发（ERP 复用模块 — 通知 / 打卡 / 拜访）
+    from app.api.routes.mall.workspace import (
+        attendance as mw_attendance,
+        notifications as mw_notifications,
+    )
+    app.include_router(
+        mw_notifications.router,
+        prefix="/api/mall/workspace/notifications",
+        tags=["Mall-Workspace"],
+    )
+    app.include_router(
+        mw_attendance.router,
+        prefix="/api/mall/workspace/attendance",
+        tags=["Mall-Workspace"],
+    )
+
+    # TODO(M5): admin users/payments/salesmen / salesman profile 等后续解开
 
     return app
 

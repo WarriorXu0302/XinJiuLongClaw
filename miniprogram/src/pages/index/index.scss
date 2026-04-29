@@ -1,0 +1,426 @@
+/* ===== 首页 — 极简黑金 ===== */
+
+.page {
+  min-height: 100vh;
+  background: #FAF8F5;
+  padding-bottom: 160rpx;
+}
+
+/* ═══════ 顶部栏 ═══════ */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(250, 248, 245, 0.92);
+  backdrop-filter: blur(20rpx);
+  -webkit-backdrop-filter: blur(20rpx);
+  padding: 20rpx 24rpx 16rpx;
+  display: flex;
+  align-items: center;
+}
+
+.topbar__brand {
+  margin-right: 16rpx;
+  flex-shrink: 0;
+  position: relative;
+  padding-right: 16rpx;
+}
+.topbar__brand::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 10rpx;
+  bottom: 10rpx;
+  width: 1rpx;
+  background: #ECE8E1;
+}
+
+.topbar__logo {
+  font-size: 32rpx;
+  font-weight: 700;
+  letter-spacing: 2rpx;
+  color: #0E0E0E;
+  background: linear-gradient(135deg, #0E0E0E 0%, #2A2A2A 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.topbar__search {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  height: 68rpx;
+  background: #FFFFFF;
+  border: 1rpx solid #ECE8E1;
+  border-radius: 48rpx;
+  padding: 0 22rpx;
+  box-sizing: border-box;
+  box-shadow: 0 2rpx 12rpx rgba(14, 14, 14, .03);
+  overflow: hidden;
+}
+
+.topbar__searchIcon {
+  width: 26rpx;
+  height: 26rpx;
+  opacity: 0.4;
+  flex-shrink: 0;
+}
+
+.topbar__searchText {
+  margin-left: 10rpx;
+  font-size: 24rpx;
+  color: #9A9A9A;
+  letter-spacing: 0.5rpx;
+}
+
+.topbar__searchInput {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  margin-left: 12rpx;
+  font-size: 26rpx;
+  color: #1A1A1A;
+  height: 100%;
+  letter-spacing: 0.5rpx;
+  background: transparent;
+}
+
+.topbar__searchPlaceholder {
+  font-size: 24rpx;
+  color: #9A9A9A;
+  letter-spacing: 0.5rpx;
+}
+
+.topbar__searchClear {
+  flex-shrink: 0;
+  margin-left: 10rpx;
+  width: 34rpx;
+  height: 34rpx;
+  line-height: 34rpx;
+  text-align: center;
+  border-radius: 50%;
+  background: #ECE8E1;
+  color: #6B6B6B;
+  font-size: 22rpx;
+}
+
+/* ═══════ Banner 轮播 ═══════ */
+.banner {
+  padding: 12rpx 24rpx 8rpx;
+}
+
+.banner__swiper {
+  width: 100%;
+  height: 320rpx;
+  border-radius: 20rpx;
+  overflow: hidden;
+  box-shadow: 0 12rpx 32rpx rgba(14, 14, 14, 0.12);
+}
+
+.banner__item {
+  width: 100%;
+  height: 100%;
+}
+
+.banner__card {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 20rpx;
+}
+
+.banner__img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: .55;
+}
+
+.banner__mask {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, rgba(14, 14, 14, 0.78) 0%, rgba(14, 14, 14, 0.45) 55%, rgba(14, 14, 14, 0.15) 100%);
+}
+
+.banner__text {
+  position: absolute;
+  left: 40rpx;
+  top: 50%;
+  transform: translateY(-50%);
+  right: 40rpx;
+  display: flex;
+  flex-direction: column;
+  z-index: 2;
+}
+
+.banner__tag {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 6rpx 18rpx;
+  font-size: 20rpx;
+  letter-spacing: 2rpx;
+  color: #0E0E0E;
+  background: linear-gradient(135deg, #D9BE7A 0%, #C9A961 55%, #A88847 100%);
+  border-radius: 999rpx;
+  font-weight: 600;
+  margin-bottom: 16rpx;
+  box-shadow: 0 4rpx 14rpx rgba(201, 169, 97, 0.35);
+}
+
+.banner__title {
+  font-size: 38rpx;
+  font-weight: 700;
+  color: #FAF8F5;
+  letter-spacing: 3rpx;
+  line-height: 1.25;
+  text-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.4);
+}
+
+.banner__sub {
+  margin-top: 10rpx;
+  font-size: 22rpx;
+  color: #C9A961;
+  letter-spacing: 2rpx;
+  opacity: .95;
+}
+
+/* ═══════ 品类胶囊 ═══════ */
+.nav {
+  white-space: nowrap;
+  background: transparent;
+  padding: 12rpx 28rpx 20rpx;
+}
+
+.nav__inner {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+}
+
+.nav__item {
+  display: inline-block;
+  padding: 14rpx 32rpx;
+  border-radius: 48rpx;
+  background: #FFFFFF;
+  border: 1rpx solid #ECE8E1;
+  font-size: 24rpx;
+  color: #6B6B6B;
+  white-space: nowrap;
+  margin-right: 16rpx;
+  flex-shrink: 0;
+  letter-spacing: 1rpx;
+  transition: all 0.2s;
+}
+
+.nav__item--active {
+  background: linear-gradient(135deg, #0E0E0E 0%, #1F1F1F 100%);
+  color: #C9A961;
+  border-color: #0E0E0E;
+  font-weight: 600;
+  letter-spacing: 3rpx;
+  box-shadow: 0 6rpx 20rpx rgba(14,14,14,.18);
+}
+
+/* ═══════ 搜索结果 ═══════ */
+.search-result {
+  padding: 20rpx 28rpx;
+}
+
+.search-result__head {
+  display: flex;
+  align-items: baseline;
+  padding: 16rpx 0 20rpx;
+  margin-bottom: 20rpx;
+  border-bottom: 1rpx solid #ECE8E1;
+}
+
+.search-result__title {
+  font-size: 32rpx;
+  font-weight: 600;
+  color: #0E0E0E;
+  letter-spacing: 2rpx;
+  position: relative;
+  padding-left: 20rpx;
+}
+.search-result__title::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6rpx;
+  height: 24rpx;
+  background: linear-gradient(180deg, #D9BE7A, #A88847);
+  border-radius: 2rpx;
+}
+
+.search-result__count {
+  margin-left: 14rpx;
+  font-size: 22rpx;
+  color: #A88847;
+  letter-spacing: 1rpx;
+}
+
+.search-result__empty {
+  text-align: center;
+  padding: 120rpx 0;
+  color: #9A9A9A;
+  font-size: 26rpx;
+  letter-spacing: 2rpx;
+}
+
+.search-result__list {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+/* ═══════ 商品板块 ═══════ */
+.goods {
+  padding: 8rpx 28rpx 0;
+}
+
+.goods__section {
+  margin-top: 36rpx;
+}
+
+.goods__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 20rpx;
+}
+
+.goods__title {
+  font-size: 34rpx;
+  font-weight: 600;
+  color: #0E0E0E;
+  letter-spacing: 4rpx;
+  position: relative;
+  padding-left: 22rpx;
+}
+.goods__title::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6rpx;
+  height: 30rpx;
+  background: linear-gradient(180deg, #D9BE7A, #A88847);
+  border-radius: 2rpx;
+}
+
+.goods__more {
+  font-size: 22rpx;
+  color: #A88847;
+  letter-spacing: 1rpx;
+  border: 1rpx solid #C9A961;
+  padding: 4rpx 20rpx;
+  border-radius: 48rpx;
+  background: rgba(201,169,97,.04);
+}
+
+.goods__grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+.goods__card {
+  width: 48.5%;
+  background: #FFFFFF;
+  border-radius: 12rpx;
+  overflow: hidden;
+  margin-bottom: 18rpx;
+  box-shadow: 0 4rpx 20rpx rgba(14,14,14,.04);
+  transition: transform 0.2s;
+}
+.goods__card:active {
+  transform: scale(0.98);
+}
+
+.goods__img {
+  width: 100%;
+  height: 320rpx;
+  background: #F5F3F0;
+  overflow: hidden;
+}
+
+.goods__imgInner {
+  width: 100%;
+  height: 100%;
+}
+
+.goods__info {
+  padding: 20rpx 18rpx 22rpx;
+}
+
+.goods__name {
+  font-size: 26rpx;
+  color: #1A1A1A;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  min-height: 78rpx;
+  letter-spacing: 0.5rpx;
+}
+
+.goods__price {
+  margin-top: 14rpx;
+  display: flex;
+  align-items: baseline;
+}
+
+.goods__priceSymbol {
+  font-size: 22rpx;
+  color: #0E0E0E;
+  font-weight: 500;
+  font-family: "DIN Alternate", "SF Pro Display", Helvetica, Arial, sans-serif;
+}
+
+.goods__priceNum {
+  font-size: 36rpx;
+  color: #0E0E0E;
+  font-weight: 600;
+  margin-left: 4rpx;
+  font-family: "DIN Alternate", "SF Pro Display", Helvetica, Arial, sans-serif;
+  letter-spacing: 1rpx;
+}
+
+.goods__priceDec {
+  font-size: 22rpx;
+  color: #0E0E0E;
+  font-weight: 500;
+  font-family: "DIN Alternate", "SF Pro Display", Helvetica, Arial, sans-serif;
+}
+
+.goods__stock {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 20rpx;
+  color: #9A9A9A;
+  letter-spacing: 1rpx;
+}
+
+.goods__empty {
+  text-align: center;
+  padding: 140rpx 0;
+}
+
+.goods__emptyText {
+  font-size: 26rpx;
+  color: #9A9A9A;
+  letter-spacing: 2rpx;
+}

@@ -1,0 +1,222 @@
+/* ===== 编辑收货地址 — 极简黑金 ===== */
+
+.container {
+  background: #FAF8F5;
+  min-height: 100vh;
+}
+
+.input-box {
+  margin: 20rpx 24rpx 40rpx;
+  background: #FFFFFF;
+  padding: 0 28rpx;
+  border-radius: 16rpx;
+  box-shadow: 0 4rpx 20rpx rgba(14, 14, 14, 0.04);
+
+  .section {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    font-size: 28rpx;
+    padding: 28rpx 0;
+    line-height: 48rpx;
+    box-sizing: border-box;
+    border-bottom: 1rpx solid #F2EFE9;
+
+    &:last-child { border-bottom: none; }
+
+    text {
+      width: 22%;
+      color: #6B6B6B;
+      font-size: 26rpx;
+      letter-spacing: 1rpx;
+    }
+
+    input {
+      width: 70%;
+      padding: 0 20rpx;
+      color: #0E0E0E;
+      font-size: 28rpx;
+      letter-spacing: 0.5rpx;
+    }
+
+    picker {
+      width: 70%;
+      padding: 0 20rpx;
+      color: #0E0E0E;
+    }
+
+    .pca {
+      width: 70%;
+      padding: 0 20rpx;
+      color: #0E0E0E;
+    }
+
+    .arrow {
+      width: 28rpx;
+      height: 28rpx;
+      opacity: .45;
+
+      image {
+        width: 100%;
+        height: 100%;
+        vertical-align: top;
+      }
+    }
+  }
+}
+
+/* ═══════ 按钮 ═══════ */
+.btn-box {
+  padding: 20rpx 24rpx;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: center;
+  margin: auto;
+
+  text {
+    font-size: 28rpx;
+  }
+
+  .clear.btn {
+    width: 100%;
+    height: 88rpx;
+    line-height: 88rpx;
+    margin: auto;
+    text-align: center;
+    border: 1rpx solid #0E0E0E;
+    border-radius: 999rpx;
+    margin-top: 24rpx;
+    color: #1A1A1A;
+    background-color: #FFFFFF;
+    letter-spacing: 3rpx;
+    font-weight: 500;
+    box-shadow: none;
+    transition: background .2s, color .2s;
+
+    &:active {
+      background: #0E0E0E;
+      color: #C9A961;
+    }
+  }
+
+  .keep {
+    color: #0E0E0E;
+    background: linear-gradient(135deg, #D9BE7A 0%, #C9A961 55%, #A88847 100%);
+    border: none;
+    font-weight: 600;
+    letter-spacing: 4rpx;
+    box-shadow: 0 6rpx 20rpx rgba(201, 169, 97, 0.3);
+
+    &:active {
+      box-shadow: 0 3rpx 10rpx rgba(201, 169, 97, 0.24);
+      transform: translateY(1rpx);
+    }
+  }
+}
+
+.keep.btn {
+  width: 100%;
+  height: 88rpx;
+  line-height: 88rpx;
+  margin: auto;
+  text-align: center;
+  border: none;
+  border-radius: 999rpx;
+}
+
+.infoText {
+  margin-top: 20rpx;
+  text-align: center;
+  width: 100%;
+  justify-content: center;
+}
+
+/* ═══════ picker（城市选择）═══════ */
+picker-view {
+  background-color: #FFFFFF;
+  padding: 0;
+  width: 100%;
+  height: 380rpx;
+  bottom: 0;
+  position: fixed;
+
+  text {
+    color: #9A9A9A;
+    display: inline-flex;
+    position: fixed;
+    margin-top: 20rpx;
+    height: 50rpx;
+    text-align: center;
+    line-height: 50rpx;
+    font-size: 28rpx;
+    font-family: "DIN Alternate", Helvetica, Arial, sans-serif;
+  }
+}
+
+picker-view-column view {
+  vertical-align: middle;
+  font-size: 28rpx;
+  line-height: 28rpx;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #1A1A1A;
+}
+
+.animation-element-wrapper {
+  display: flex;
+  position: fixed;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: 100%;
+  background-color: rgba(14, 14, 14, 0.45);
+  backdrop-filter: blur(8rpx);
+  -webkit-backdrop-filter: blur(8rpx);
+  z-index: 999;
+}
+
+.animation-element {
+  display: flex;
+  position: fixed;
+  width: 100%;
+  height: 470rpx;
+  bottom: 0;
+  background-color: #FFFFFF;
+  border-top-left-radius: 24rpx;
+  border-top-right-radius: 24rpx;
+}
+
+.animation-button {
+  top: 20rpx;
+  width: 290rpx;
+  height: 100rpx;
+  align-items: center;
+  font-size: 28rpx;
+  color: #A88847;
+  font-weight: 600;
+  letter-spacing: 2rpx;
+}
+
+.left-bt {
+  left: 30rpx;
+  color: #6B6B6B;
+  font-weight: 500;
+}
+
+.right-bt {
+  right: 20rpx;
+  top: 20rpx;
+  position: absolute;
+  width: 80rpx !important;
+}
+
+.line {
+  display: block;
+  position: fixed;
+  height: 1rpx;
+  width: 100%;
+  margin-top: 89rpx;
+  background-color: #ECE8E1;
+}

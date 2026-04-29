@@ -43,6 +43,14 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# ── Miniprogram (uni-app) ────────────────────────
+miniprogram/node_modules/
+miniprogram/dist/
+miniprogram/unpackage/
+miniprogram/.eslintrc-auto-import.json
+miniprogram/src/auto-imports.d.ts
+miniprogram/src/components.d.ts
+
 # ── Uploads / Runtime data ───────────────────────
 backend/uploads/
 *.db

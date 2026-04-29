@@ -1,0 +1,227 @@
+/* ===== 注册 — 极简黑金 ===== */
+
+.con {
+  min-height: 100vh;
+  padding: 140rpx 40rpx 64rpx;
+  box-sizing: border-box;
+  position: relative;
+  background:
+    radial-gradient(1200rpx 700rpx at 10% -6%, rgba(201, 169, 97, 0.18), transparent 55%),
+    radial-gradient(1000rpx 600rpx at 100% 8%, rgba(201, 169, 97, 0.06), transparent 60%),
+    linear-gradient(180deg, #FAF8F5 0%, #F5F1E9 55%, #ECE8E1 100%);
+  overflow: hidden;
+}
+
+.con::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 160rpx;
+  height: 3rpx;
+  background: linear-gradient(90deg, transparent, #C9A961, transparent);
+}
+
+/* ═══════ 品牌标识 ═══════ */
+.brand {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 30rpx;
+}
+
+.brand__mark {
+  width: 130rpx;
+  height: 130rpx;
+  line-height: 130rpx;
+  text-align: center;
+  font-size: 72rpx;
+  font-weight: 700;
+  color: #0E0E0E;
+  background: linear-gradient(135deg, #D9BE7A 0%, #C9A961 55%, #A88847 100%);
+  border-radius: 30rpx;
+  box-shadow: 0 14rpx 40rpx rgba(201, 169, 97, 0.35);
+  letter-spacing: 0;
+  font-family: -apple-system, "PingFang SC", "STSong", serif;
+}
+
+.brand__name {
+  margin-top: 24rpx;
+  font-size: 44rpx;
+  font-weight: 700;
+  color: #0E0E0E;
+  letter-spacing: 12rpx;
+  padding-left: 12rpx;
+  line-height: 1.1;
+}
+
+.brand__sub {
+  margin-top: 10rpx;
+  font-size: 20rpx;
+  font-weight: 500;
+  color: #A88847;
+  letter-spacing: 4rpx;
+  font-family: "DIN Alternate", Helvetica, Arial, sans-serif;
+  opacity: .85;
+}
+
+.login-form {
+  width: 100%;
+  margin: 40rpx auto 0;
+  padding: 40rpx 28rpx 28rpx;
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1rpx solid rgba(201, 169, 97, 0.25);
+  border-radius: 24rpx;
+  box-shadow: 0 20rpx 60rpx rgba(14, 14, 14, 0.08);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  position: relative;
+  z-index: 1;
+}
+
+.login-form::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 28rpx;
+  right: 28rpx;
+  height: 1rpx;
+  background: linear-gradient(90deg, transparent, rgba(201, 169, 97, 0.5), transparent);
+}
+
+.item {
+  display: block;
+  margin-bottom: 24rpx;
+  &:last-of-type { margin-bottom: 8rpx; }
+}
+
+.account {
+  display: block;
+  width: 100%;
+  background: #FFFFFF;
+  border: 1rpx solid #ECE8E1;
+  border-radius: 14rpx;
+  box-sizing: border-box;
+  overflow: hidden;
+  transition: border-color .2s, box-shadow .2s;
+
+  input {
+    display: block;
+    width: 100%;
+    height: 96rpx;
+    line-height: 96rpx;
+    box-sizing: border-box;
+    padding: 0 28rpx;
+    font-size: 28rpx;
+    color: #0E0E0E;
+    letter-spacing: 0.5rpx;
+    background: transparent;
+  }
+}
+
+.item {
+  margin-bottom: 28rpx;
+}
+
+.operate {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding-top: 8rpx;
+}
+
+.to-register {
+  font-size: 24rpx;
+  color: #6B6B6B;
+  letter-spacing: 1rpx;
+
+  text {
+    color: #A88847;
+    font-weight: 600;
+    margin-left: 4rpx;
+  }
+}
+
+.authorized-btn {
+  width: 100%;
+  margin: 48rpx auto 0;
+  text-align: center;
+  background: linear-gradient(135deg, #D9BE7A 0%, #C9A961 55%, #A88847 100%);
+  color: #0E0E0E;
+  border-radius: 999rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+  letter-spacing: 6rpx;
+  padding: 26rpx 16rpx;
+  box-shadow: 0 14rpx 36rpx rgba(201, 169, 97, 0.35);
+  position: relative;
+  z-index: 1;
+  transition: transform .2s, box-shadow .2s;
+
+  &:active {
+    transform: translateY(1rpx);
+    box-shadow: 0 6rpx 18rpx rgba(201, 169, 97, 0.28);
+  }
+}
+
+.to-idx-btn {
+  width: 100%;
+  margin: 20rpx auto 0;
+  text-align: center;
+  background: transparent;
+  border: 1rpx solid #0E0E0E;
+  color: #1A1A1A;
+  border-radius: 999rpx;
+  font-size: 28rpx;
+  letter-spacing: 4rpx;
+  padding: 24rpx 16rpx;
+  position: relative;
+  z-index: 1;
+  transition: background .2s, color .2s;
+
+  &:active {
+    background: #0E0E0E;
+    color: #C9A961;
+  }
+}
+
+button {
+  &::after { border: 0 !important; }
+}
+
+.error {
+  .account {
+    border-color: rgba(181, 75, 75, 0.5);
+    box-shadow: 0 0 0 4rpx rgba(181, 75, 75, 0.08);
+  }
+
+  .error-text {
+    display: block;
+    width: 100%;
+    font-size: 22rpx;
+    color: #B54B4B;
+    text-align: left;
+    margin-top: 12rpx;
+    padding-left: 4rpx;
+    letter-spacing: 1rpx;
+
+    .warning-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #FFFFFF;
+      width: 26rpx;
+      height: 26rpx;
+      line-height: 26rpx;
+      background: #B54B4B;
+      border-radius: 50%;
+      margin-right: 10rpx;
+      font-size: 18rpx;
+      font-weight: 700;
+    }
+  }
+}

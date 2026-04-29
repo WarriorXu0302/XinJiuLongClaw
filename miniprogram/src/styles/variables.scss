@@ -1,0 +1,170 @@
+/* ===== 全局设计系统 — 极简黑金（与 uni.scss 对齐） ===== */
+
+/* 颜色 — 品牌 */
+$color-ink:            #0E0E0E;     // 墨黑
+$color-ink-soft:       #1A1A1A;     // 正文黑
+$color-gold:           #C9A961;     // 香槟金
+$color-gold-soft:      #D9BE7A;     // 浅金
+$color-gold-deep:      #A88847;     // 深金
+$color-cream:          #FAF8F5;     // 奶白（页底）
+$color-card:           #FFFFFF;
+$color-line:           #ECE8E1;
+$color-line-soft:      #F2EFE9;
+$color-muted:          #6B6B6B;
+$color-hint:           #9A9A9A;
+$color-placeholder:    #B8B8B8;
+$color-err:            #B54B4B;     // 低饱和错误色（弃用 #eb2444/#e43130 的高饱和红）
+
+/* 金色渐变（全局唯一来源） */
+$gold-gradient:        linear-gradient(135deg, #D9BE7A 0%, #C9A961 55%, #A88847 100%);
+$gold-gradient-soft:   linear-gradient(135deg, rgba(217,190,122,.18) 0%, rgba(201,169,97,.1) 100%);
+$ink-gradient:         linear-gradient(180deg, #0E0E0E 0%, #1C1C1C 100%);
+
+/* 旧变量别名（保持向后兼容） */
+$color-primary:        $color-ink;
+$color-secondary:      #2A211B;
+$color-accent:         $color-gold;
+$color-bg:             $color-cream;
+$color-text:           $color-ink-soft;
+$color-text-secondary: $color-muted;
+$color-text-muted:     $color-hint;
+$color-text-placeholder: $color-placeholder;
+$color-border:         $color-line;
+$color-border-light:   $color-line-soft;
+$color-danger:         $color-err;
+$color-success:        #6B8E6B;
+
+/* 字号 */
+$font-size-xs:   22rpx;
+$font-size-sm:   24rpx;
+$font-size-base: 26rpx;
+$font-size-md:   28rpx;
+$font-size-lg:   32rpx;
+$font-size-xl:   36rpx;
+$font-size-xxl:  48rpx;
+
+/* 字重 */
+$font-weight-regular:   400;
+$font-weight-medium:    500;
+$font-weight-semibold:  600;
+$font-weight-bold:      700;
+$font-weight-extrabold: 800;
+$font-weight-black:     900;
+
+/* 间距 */
+$spacing-xs:   8rpx;
+$spacing-sm:   12rpx;
+$spacing-base: 16rpx;
+$spacing-md:   20rpx;
+$spacing-lg:   24rpx;
+$spacing-xl:   32rpx;
+$spacing-xxl:  48rpx;
+
+/* 圆角 */
+$radius-sm:   6rpx;
+$radius-base: 8rpx;
+$radius-md:   12rpx;
+$radius-lg:   16rpx;
+$radius-xl:   24rpx;
+$radius-full: 999rpx;
+
+/* 阴影 */
+$shadow-xs:  0 2rpx 8rpx  rgba(14, 14, 14, 0.03);
+$shadow-sm:  0 4rpx 20rpx rgba(14, 14, 14, 0.04);
+$shadow-md:  0 8rpx 32rpx rgba(14, 14, 14, 0.08);
+$shadow-lg:  0 12rpx 40rpx rgba(14, 14, 14, 0.12);
+$shadow-gold: 0 6rpx 20rpx rgba(201, 169, 97, 0.3);
+
+/* 字体族 */
+$font-num: "DIN Alternate", "SF Pro Display", Helvetica, Arial, sans-serif;
+
+/* ========= Mixin ========= */
+@mixin text-ellipsis($lines: 1) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  @if $lines == 1 {
+    white-space: nowrap;
+  } @else {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: $lines;
+  }
+}
+
+@mixin flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@mixin flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+@mixin card {
+  background: $color-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-sm;
+  overflow: hidden;
+}
+
+@mixin card-elev {
+  background: $color-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-md;
+  overflow: hidden;
+}
+
+@mixin btn-primary {
+  background: $gold-gradient;
+  color: $color-ink;
+  font-weight: $font-weight-semibold;
+  letter-spacing: 3rpx;
+  border-radius: $radius-full;
+  box-shadow: $shadow-gold;
+  transition: transform .2s, box-shadow .2s;
+  &:active {
+    transform: translateY(1rpx);
+    box-shadow: 0 3rpx 10rpx rgba(201, 169, 97, 0.25);
+  }
+}
+
+@mixin btn-ink {
+  background: $color-ink;
+  color: $color-gold;
+  font-weight: $font-weight-semibold;
+  letter-spacing: 3rpx;
+  border-radius: $radius-full;
+  transition: transform .2s, background .2s;
+  &:active {
+    transform: translateY(1rpx);
+    background: #1A1A1A;
+  }
+}
+
+@mixin btn-ghost {
+  background: transparent;
+  border: 1rpx solid $color-ink;
+  color: $color-ink-soft;
+  letter-spacing: 3rpx;
+  border-radius: $radius-full;
+  transition: background .2s, color .2s;
+  &:active {
+    background: $color-ink;
+    color: $color-gold;
+  }
+}
+
+@mixin gold-accent-bar($w: 6rpx, $h: 26rpx) {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: $w;
+  height: $h;
+  background: linear-gradient(180deg, $color-gold-soft, $color-gold-deep);
+  border-radius: 2rpx;
+}

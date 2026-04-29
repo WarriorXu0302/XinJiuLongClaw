@@ -4,7 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-NewERP System (新鑫久隆 ERP) — 多品牌白酒经销 ERP。一个公司下多个品牌事业部（青花郎/五粮液/汾酒/珍十五）独立核算。FastAPI + React/TypeScript。
+NewERP System (新鑫久隆 ERP) — 多品牌白酒经销 ERP。一个公司下多个品牌事业部（青花郎/五粮液/汾酒/珍十五）独立核算。FastAPI + React/TypeScript + uni-app 小程序。
+
+### 部署拓扑（monorepo, 独立部署）
+
+- **`backend/`** = 所有端的统一后端。ERP 管理台、小程序 C 端、小程序业务员工作台共用一个 FastAPI 进程 + 同一个 PostgreSQL + 同一套 JWT 工具
+- **`frontend/`** = React ERP 管理台，独立 npm、独立打包（Nginx 托管），只调 `/api/*`
+- **`miniprogram/`** = uni-app Vue 3 小程序，独立 pnpm、独立打包（H5 / 微信小程序 / App），只调 `/api/mall/*`
+
+frontend 和 miniprogram **不共享包管理**，也**不做 pnpm workspace**（Vue 和 React 生态差异大，统一反而麻烦）。后端新功能按端分路由前缀即可：
+- ERP 管理台专属 → `backend/app/api/routes/xxx.py`，前缀 `/api/`
+- 小程序专属 → `backend/app/api/routes/mall/xxx.py`，前缀 `/api/mall/`
+- 共享 service 层（如 attendance / expense_claims）通过 `ActorContext` 对象承接两端调用
 
 ### 新 Agent 上手必读
 
@@ -55,6 +66,18 @@ npm run dev        # Dev server (port 5175, proxies /api and /mcp to localhost:8
 npm run build      # Type-check then build (tsc -b && vite build)
 npm run lint       # ESLint
 ```
+
+### Miniprogram (uni-app · Vue 3, from `miniprogram/`)
+```bash
+pnpm install              # 包管理强制 pnpm（preinstall 校验）
+pnpm run dev:h5           # H5 开发，浏览器预览（默认 :5173；和 frontend 冲突时按端口依次递增）
+pnpm run dev:mp-weixin    # 微信小程序开发编译（输出 dist/dev/mp-weixin，用微信开发者工具打开）
+pnpm run build:h5         # H5 生产构建
+pnpm run build:mp-weixin  # 微信小程序生产构建
+pnpm run lint             # ESLint
+```
+
+小程序同一套代码既跑 C 端商城也跑业务员工作台，按 `user_type` 分流。M1–M5 里程碑（plan `rustling-floating-treehouse`）目前只完成了业务员工作台前端骨架（17 个 salesman-* 页），后端 mall_* 路由/表尚未落地。
 
 **Note:** 后端默认跑在 **8002**（`uvicorn app.main:app --port 8002 --reload`）。Vite 代理也默认指向 8002。
 不用 8001 是因为常被 SSH 端口转发 / VS Code Plugin Host 占用，会导致前端请求 502 且难以排查。

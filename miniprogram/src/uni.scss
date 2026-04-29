@@ -1,0 +1,76 @@
+/**
+ * 极简黑金设计令牌（Design Tokens）
+ * 墨黑 + 香槟金 + 奶白，围绕名酒/奢品调性
+ */
+
+/* ── 品牌色 ── */
+$brand-ink:       #0E0E0E;   // 墨黑：主色
+$brand-ink-soft:  #1A1A1A;   // 正文黑
+$brand-gold:      #C9A961;   // 香槟金：强调
+$brand-gold-soft: #D9BE7A;   // 浅金：渐变高光
+$brand-gold-deep: #A88847;   // 深金：点缀
+$brand-cream:     #FAF8F5;   // 奶白：页面底
+$brand-card:      #FFFFFF;   // 卡面
+$brand-line:      #ECE8E1;   // 分割线
+$brand-muted:     #6B6B6B;   // 次要文字
+$brand-hint:      #9A9A9A;   // 弱化文字
+$brand-err:       #B54B4B;   // 低饱和错误色
+
+/* ── 行为色（兼容 uni-app 默认变量名）── */
+$uni-color-primary: $brand-gold;
+$uni-color-success: #6B8E6B;
+$uni-color-warning: $brand-gold-deep;
+$uni-color-error:   $brand-err;
+
+/* ── 文字 ── */
+$uni-text-color:             $brand-ink-soft;
+$uni-text-color-inverse:     #fff;
+$uni-text-color-grey:        $brand-hint;
+$uni-text-color-placeholder: #B8B8B8;
+$uni-text-color-disable:     #C0C0C0;
+
+/* ── 背景 ── */
+$uni-bg-color:         $brand-card;
+$uni-bg-color-grey:    $brand-cream;
+$uni-bg-color-hover:   #F2EFE9;
+$uni-bg-color-mask:    rgba(14, 14, 14, 0.4);
+
+/* ── 边框 ── */
+$uni-border-color: $brand-line;
+
+/* ── 字号 ── */
+$uni-font-size-sm:   12px;
+$uni-font-size-base: 14px;
+$uni-font-size-lg:   16px;
+
+/* ── 图片尺寸 ── */
+$uni-img-size-sm:   20px;
+$uni-img-size-base: 26px;
+$uni-img-size-lg:   40px;
+
+/* ── 圆角 ── */
+$uni-border-radius-sm:     4rpx;
+$uni-border-radius-base:   8rpx;
+$uni-border-radius-lg:     12rpx;
+$uni-border-radius-circle: 50%;
+
+/* ── 间距 ── */
+$uni-spacing-row-sm:   5px;
+$uni-spacing-row-base: 10px;
+$uni-spacing-row-lg:   15px;
+$uni-spacing-col-sm:   4px;
+$uni-spacing-col-base: 8px;
+$uni-spacing-col-lg:   12px;
+
+$uni-opacity-disabled: 0.3;
+
+/* ── 文章排版（保留给文档型页面）── */
+$uni-color-title:       $brand-ink;
+$uni-font-size-title:   20px;
+$uni-color-subtitle:    $brand-ink-soft;
+$uni-font-size-subtitle: 18px;
+$uni-color-paragraph:   $brand-ink-soft;
+$uni-font-size-paragraph: 15px;
+
+/* ── 金色渐变（提供给需要的地方使用）── */
+$gold-gradient: linear-gradient(135deg, #D9BE7A 0%, #C9A961 55%, #A88847 100%);

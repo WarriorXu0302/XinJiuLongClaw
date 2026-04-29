@@ -87,7 +87,17 @@ class PurchaseOrder(Base):
 
 
 class PurchaseOrderItem(Base):
-    """Line item of a purchase order."""
+    """Line item of a purchase order.
+
+    TODO(M2): 跨仓采购（plan "ERP 后端改造清单" § purchase）
+      - target_warehouse_type: String(20), default='erp_warehouse', NOT NULL
+          enum: 'erp_warehouse' | 'mall_warehouse'
+      - warehouse_id 仍指向 ERP warehouses（erp 仓场景用）
+      - mall_warehouse_id: Optional[str], FK mall_warehouses.id, nullable（mall 仓场景用）
+      - 验收入库 service 根据 target_warehouse_type 分支到 inventory_service 或 mall/inventory_service
+      - 老数据 migration 默认 target_warehouse_type='erp_warehouse'
+      - ERP 前端下拉"目标仓库"仅在 settings.MALL_INTEGRATION_ENABLED=True 时显示 mall 仓选项
+    """
 
     __tablename__ = "purchase_order_items"
 

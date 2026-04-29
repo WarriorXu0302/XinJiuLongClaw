@@ -1,0 +1,254 @@
+{
+  "pages": [
+    {
+      "path": "pages/index/index",
+      "style": {
+        "backgroundTextStyle": "dark",
+        "navigationBarBackgroundColor": "#FAF8F5",
+        "navigationBarTextStyle": "black",
+        "enablePullDownRefresh": true,
+        "navigationBarTitleText": "鑫久隆批发商城"
+      }
+    },
+    {
+      "path": "pages/accountLogin/accountLogin"
+    },
+    {
+      "path": "pages/user/user",
+      "style": {
+        "navigationBarTitleText": "个人中心"
+      }
+    },
+    {
+      "path": "pages/basket/basket",
+      "style": {
+        "backgroundTextStyle": "light",
+        "navigationBarBackgroundColor": "#FAF8F5",
+        "navigationBarTitleText": "购物车",
+        "navigationBarTextStyle": "black"
+      }
+    },
+    {
+      "path": "pages/sub-category/sub-category"
+    },
+    {
+      "path": "pages/search-page/search-page",
+      "style": {
+        "backgroundTextStyle": "light",
+        "navigationBarBackgroundColor": "#FAF8F5",
+        "navigationBarTitleText": "搜索",
+        "navigationBarTextStyle": "black"
+      }
+    },
+    {
+      "path": "pages/delivery-address/delivery-address",
+      "style": {
+        "backgroundTextStyle": "light",
+        "navigationBarBackgroundColor": "#FAF8F5",
+        "navigationBarTitleText": "收货地址",
+        "navigationBarTextStyle": "black"
+      }
+    },
+    {
+      "path": "pages/editAddress/editAddress",
+      "style": {
+        "backgroundTextStyle": "light",
+        "navigationBarBackgroundColor": "#FAF8F5",
+        "navigationBarTitleText": "编辑收货地址",
+        "navigationBarTextStyle": "black"
+      }
+    },
+    {
+      "path": "pages/orderList/orderList",
+      "style": {
+        "backgroundTextStyle": "light",
+        "navigationBarTitleText": "订单列表",
+        "navigationBarTextStyle": "black",
+        "navigationBarBackgroundColor": "#FAF8F5"
+      }
+    },
+    {
+      "path": "pages/order-detail/order-detail",
+      "style": {
+        "backgroundTextStyle": "light",
+        "navigationBarBackgroundColor": "#FAF8F5",
+        "navigationBarTitleText": "订单详情",
+        "navigationBarTextStyle": "black"
+      }
+    },
+    {
+      "path": "pages/submit-order/submit-order",
+      "style": {
+        "backgroundTextStyle": "light",
+        "navigationBarBackgroundColor": "#FAF8F5",
+        "navigationBarTitleText": "提交订单",
+        "navigationBarTextStyle": "black"
+      }
+    },
+    {
+      "path": "pages/express-delivery/express-delivery",
+      "style": {
+        "backgroundTextStyle": "light",
+        "navigationBarBackgroundColor": "#FAF8F5",
+        "navigationBarTitleText": "物流查询",
+        "navigationBarTextStyle": "black"
+      }
+    },
+    {
+      "path": "pages/pay-result/pay-result",
+      "style": {
+        "backgroundTextStyle": "light",
+        "navigationBarBackgroundColor": "#FAF8F5",
+        "navigationBarTitleText": "支付结果",
+        "navigationBarTextStyle": "black"
+      }
+    },
+    {
+      "path": "pages/search-prod-show/search-prod-show",
+      "style": {
+        "backgroundTextStyle": "light",
+        "navigationBarBackgroundColor": "#FAF8F5",
+        "navigationBarTitleText": "搜索结果",
+        "navigationBarTextStyle": "black"
+      }
+    },
+    {
+      "path": "pages/prod/prod",
+      "style": {
+        "navigationBarTitleText": "商品详情"
+      }
+    },
+    {
+      "path": "pages/prod-classify/prod-classify",
+      "style": {
+        "onReachBottomDistance": 0
+      }
+    },
+    {
+      "path": "pages/recent-news/recent-news",
+      "style": {
+        "backgroundTextStyle": "light",
+        "navigationBarTitleText": "最新公告",
+        "navigationBarTextStyle": "black",
+        "navigationBarBackgroundColor": "#FAF8F5"
+      }
+    },
+    {
+      "path": "pages/news-detail/news-detail",
+      "style": {
+        "backgroundTextStyle": "light",
+        "navigationBarTitleText": "最新公告",
+        "navigationBarTextStyle": "black",
+        "navigationBarBackgroundColor": "#FAF8F5"
+      }
+    },
+    {
+      "path": "pages/register/register"
+    },
+    {
+      "path": "pages/salesman-home/salesman-home",
+      "style": {
+        "navigationBarTitleText": "接单池",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/salesman-orders/salesman-orders",
+      "style": { "navigationBarTitleText": "我的订单" }
+    },
+    {
+      "path": "pages/salesman-order-detail/salesman-order-detail",
+      "style": { "navigationBarTitleText": "订单详情" }
+    },
+    {
+      "path": "pages/salesman-workspace/salesman-workspace",
+      "style": { "navigationBarTitleText": "工作" }
+    },
+    {
+      "path": "pages/salesman-profile/salesman-profile",
+      "style": { "navigationBarTitleText": "我的" }
+    },
+    {
+      "path": "pages/salesman-invite/salesman-invite",
+      "style": { "navigationBarTitleText": "生成邀请码" }
+    },
+    {
+      "path": "pages/salesman-my-customers/salesman-my-customers",
+      "style": { "navigationBarTitleText": "我的客户" }
+    },
+    {
+      "path": "pages/salesman-alerts/salesman-alerts",
+      "style": { "navigationBarTitleText": "跳单告警" }
+    },
+    {
+      "path": "pages/salesman-checkin/salesman-checkin",
+      "style": { "navigationBarTitleText": "打卡" }
+    },
+    {
+      "path": "pages/salesman-attendance/salesman-attendance",
+      "style": { "navigationBarTitleText": "我的考勤" }
+    },
+    {
+      "path": "pages/salesman-visit/salesman-visit",
+      "style": { "navigationBarTitleText": "客户拜访" }
+    },
+    {
+      "path": "pages/salesman-leave/salesman-leave",
+      "style": { "navigationBarTitleText": "请假申请" }
+    },
+    {
+      "path": "pages/salesman-expense/salesman-expense",
+      "style": { "navigationBarTitleText": "报销申请" }
+    },
+    {
+      "path": "pages/salesman-inspection/salesman-inspection",
+      "style": { "navigationBarTitleText": "扫码稽查" }
+    },
+    {
+      "path": "pages/salesman-kpi/salesman-kpi",
+      "style": { "navigationBarTitleText": "销售目标" }
+    },
+    {
+      "path": "pages/salesman-notifications/salesman-notifications",
+      "style": { "navigationBarTitleText": "通知中心" }
+    },
+    {
+      "path": "pages/salesman-upload-voucher/salesman-upload-voucher",
+      "style": { "navigationBarTitleText": "上传收款凭证" }
+    }
+  ],
+  "tabBar": {
+    "backgroundColor": "#FFFFFF",
+    "borderStyle": "white",
+    "selectedColor": "#C9A961",
+    "color": "#9A9A9A",
+    "list": [
+      {
+        "pagePath": "pages/index/index",
+        "text": "首页",
+        "iconPath": "/static/images/tabbar/homepage.png",
+        "selectedIconPath": "/static/images/tabbar/homepage-sel.png"
+      },
+      {
+        "pagePath": "pages/basket/basket",
+        "text": "购物车",
+        "iconPath": "/static/images/tabbar/basket.png",
+        "selectedIconPath": "/static/images/tabbar/basket-sel.png"
+      },
+      {
+        "pagePath": "pages/user/user",
+        "text": "我的",
+        "iconPath": "/static/images/tabbar/user.png",
+        "selectedIconPath": "/static/images/tabbar/user-sel.png"
+      }
+    ]
+  },
+  "sitemapLocation": "sitemap.json",
+  "globalStyle": {
+    "backgroundTextStyle": "light",
+    "backgroundColor": "#FAF8F5",
+    "navigationBarBackgroundColor": "#FAF8F5",
+    "navigationBarTitleText": "鑫久隆",
+    "navigationBarTextStyle": "black"
+  }
+}

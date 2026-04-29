@@ -1,0 +1,270 @@
+/* ===== 物流查询 — 极简黑金 ===== */
+
+page {
+  background: #FAF8F5;
+}
+
+.container {
+  height: 100%;
+  min-height: 100vh;
+}
+
+.padding20 {
+  padding-top: 100rpx;
+}
+
+.f-fl { float: left; }
+.f-fr { float: right; }
+
+/* ═══════ 顶部 Tab ═══════ */
+.navWrap {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  overflow: hidden;
+  width: 100%;
+  background: rgba(250, 248, 245, 0.92);
+  backdrop-filter: blur(20rpx);
+  -webkit-backdrop-filter: blur(20rpx);
+  border-bottom: 1rpx solid #ECE8E1;
+  height: 96rpx;
+  box-sizing: border-box;
+}
+
+.nav {
+  display: flex;
+  flex-flow: row nowrap;
+}
+
+.nav-slider {
+  left: 0;
+  bottom: 0;
+  height: 3rpx;
+  background: linear-gradient(90deg, #D9BE7A, #A88847);
+  transition: transform 0.3s;
+  box-sizing: border-box;
+  border-radius: 2rpx;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  height: 92rpx;
+  padding: 0 16rpx;
+  font-size: 26rpx;
+
+  text {
+    box-sizing: border-box;
+    color: #6B6B6B;
+    padding: 28rpx 16rpx 24rpx;
+    line-height: 34rpx;
+    letter-spacing: 2rpx;
+    transition: color .2s;
+  }
+}
+
+.nav-item.active {
+  text {
+    color: #0E0E0E;
+    font-weight: 600;
+  }
+}
+
+.u-icon {
+  vertical-align: middle;
+}
+
+/* ═══════ 物流头信息卡 ═══════ */
+.deliveryInfo {
+  height: 200rpx;
+  width: calc(100% - 48rpx);
+  vertical-align: middle;
+  padding-left: 156rpx;
+  padding-right: 30rpx;
+  display: table;
+  position: relative;
+  box-sizing: border-box;
+  margin: 24rpx;
+  background: linear-gradient(180deg, #0E0E0E 0%, #1C1C1C 100%);
+  border-radius: 16rpx;
+  overflow: hidden;
+  box-shadow: 0 8rpx 32rpx rgba(14, 14, 14, 0.14);
+
+  &::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2rpx;
+    background: linear-gradient(90deg, transparent, #C9A961, transparent);
+  }
+
+  .companyname {
+    line-height: 1;
+    font-size: 28rpx;
+    color: #FAF8F5;
+    font-weight: 600;
+    letter-spacing: 1rpx;
+
+    .key {
+      color: #C9A961;
+      font-weight: 400;
+      letter-spacing: 2rpx;
+    }
+  }
+
+  .expno {
+    line-height: 1;
+    font-size: 24rpx;
+    margin-top: 18rpx;
+    color: rgba(250, 248, 245, 0.8);
+    font-family: "DIN Alternate", Helvetica, Arial, sans-serif;
+    letter-spacing: 1rpx;
+
+    .key {
+      color: #C9A961;
+      font-family: -apple-system, "PingFang SC", sans-serif;
+      font-weight: 400;
+      letter-spacing: 2rpx;
+      margin-right: 6rpx;
+    }
+  }
+}
+
+.icon-express {
+  width: 96rpx;
+  height: 96rpx;
+  background-size: 100% 100%;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  left: 34rpx;
+  filter: brightness(0) invert(1) sepia(1) saturate(2) hue-rotate(10deg);
+  opacity: .85;
+}
+
+.infoWarp {
+  display: table-cell;
+  vertical-align: middle;
+}
+
+/* ═══════ 物流详情时间轴 ═══════ */
+.deliveryDetail {
+  padding: 40rpx 0 20rpx;
+  background: #FFFFFF;
+  margin: 0 24rpx;
+  border-radius: 16rpx;
+  box-shadow: 0 4rpx 20rpx rgba(14, 14, 14, 0.04);
+  min-height: 600rpx;
+  box-sizing: border-box;
+}
+
+.detailItem {
+  border-left: 1rpx dashed #ECE8E1;
+  margin-left: 46rpx;
+  position: relative;
+  margin-bottom: 2rpx;
+}
+
+.dot {
+  image {
+    width: 32rpx;
+    height: 32rpx;
+    background-size: 100%;
+    position: absolute;
+    top: 40rpx;
+    left: -16rpx;
+    filter: grayscale(1) brightness(.5);
+    opacity: .8;
+  }
+}
+
+.lastest {
+  .dot image {
+    top: -2rpx;
+    filter: none;
+    opacity: 1;
+  }
+
+  .detail {
+    .desc {
+      color: #0E0E0E;
+      font-weight: 600;
+      margin-top: 0;
+    }
+    .time {
+      color: #A88847;
+      font-weight: 500;
+    }
+    border-top: 0;
+
+    &::before {
+      content: "";
+      position: absolute;
+      left: -14rpx;
+      top: 0;
+      width: 28rpx;
+      height: 28rpx;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #D9BE7A, #A88847);
+      box-shadow: 0 0 0 4rpx rgba(201, 169, 97, 0.18);
+    }
+  }
+}
+
+.detail {
+  position: relative;
+  border-top: 1rpx solid #F2EFE9;
+  margin-left: 28rpx;
+  overflow: hidden;
+  padding-right: 30rpx;
+
+  .desc {
+    font-size: 24rpx;
+    line-height: 34rpx;
+    margin-top: 40rpx;
+    color: #1A1A1A;
+    letter-spacing: 0.5rpx;
+  }
+
+  .time {
+    font-size: 22rpx;
+    line-height: 30rpx;
+    color: #9A9A9A;
+    margin-top: 12rpx;
+    margin-bottom: 36rpx;
+    font-family: "DIN Alternate", Helvetica, Arial, sans-serif;
+    letter-spacing: 0.5rpx;
+  }
+}
+
+/* ═══════ 提示条 ═══════ */
+.deliveryTip {
+  height: 80rpx;
+  background: rgba(201, 169, 97, 0.08);
+  border: 1rpx solid rgba(201, 169, 97, 0.3);
+  padding-left: 30rpx;
+  color: #A88847;
+  font-size: 24rpx;
+  line-height: 80rpx;
+  margin: 24rpx;
+  border-radius: 12rpx;
+  letter-spacing: 0.5rpx;
+  font-weight: 500;
+}
+
+.empty-space {
+  margin: 24rpx;
+  background: #FFFFFF;
+  font-size: 24rpx;
+  color: #9A9A9A;
+  padding: 40rpx 0;
+  text-align: center;
+  letter-spacing: 2rpx;
+  border-radius: 16rpx;
+  box-shadow: 0 4rpx 20rpx rgba(14, 14, 14, 0.04);
+}

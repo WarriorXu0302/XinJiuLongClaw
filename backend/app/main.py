@@ -189,7 +189,27 @@ def create_app() -> FastAPI:
         tags=["Mall-Workspace"],
     )
 
-    # TODO(M5): admin users/payments/salesmen / salesman profile 等后续解开
+    # M5: 管理后台（users / salesmen / payments）+ 业务员工作台剩余页
+    from app.api.routes.mall.admin import (
+        payments as ma_payments,
+        salesmen as ma_salesmen,
+        users as ma_users,
+    )
+    from app.api.routes.mall.salesman import (
+        invite as ms_invite,
+        my_customers as ms_customers,
+        profile as ms_profile,
+        stats as ms_stats,
+    )
+    app.include_router(ma_users.router, prefix="/api/mall/admin/users", tags=["Mall-Admin"])
+    app.include_router(ma_payments.router, prefix="/api/mall/admin/payments", tags=["Mall-Admin"])
+    app.include_router(ma_salesmen.router, prefix="/api/mall/admin/salesmen", tags=["Mall-Admin"])
+    app.include_router(ms_invite.router, prefix="/api/mall/salesman/invite-codes", tags=["Mall-Salesman"])
+    app.include_router(ms_customers.router, prefix="/api/mall/salesman/my-customers", tags=["Mall-Salesman"])
+    app.include_router(ms_stats.router, prefix="/api/mall/salesman/stats", tags=["Mall-Salesman"])
+    app.include_router(ms_profile.router, prefix="/api/mall/salesman/profile", tags=["Mall-Salesman"])
+
+    # TODO(M5 后续): collections / admin audit-logs / login-logs / dashboard / products / warehouses / categories / inventory / invite-codes / notices 等
 
     return app
 

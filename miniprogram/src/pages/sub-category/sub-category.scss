@@ -1,0 +1,181 @@
+/* ===== 分类（旧路由 sub-category）— 极简黑金 ===== */
+
+.container {
+  background: #FAF8F5;
+  min-height: 100vh;
+}
+
+.category-tit {
+  width: 100%;
+  white-space: nowrap;
+  position: fixed;
+  top: 0;
+  z-index: 999;
+  background: rgba(250, 248, 245, 0.92);
+  backdrop-filter: blur(20rpx);
+  -webkit-backdrop-filter: blur(20rpx);
+  border-bottom: 1rpx solid #ECE8E1;
+  font-size: 26rpx;
+  padding: 4rpx 0;
+
+  .category-item {
+    display: inline-block;
+    padding: 18rpx 10rpx;
+    margin: 0 22rpx;
+    box-sizing: border-box;
+    font-size: 26rpx;
+    color: #6B6B6B;
+    letter-spacing: 2rpx;
+    position: relative;
+    transition: color .2s;
+  }
+}
+
+.prod-item {
+  padding-top: 100rpx;
+  height: calc(100vh - 100rpx);
+}
+
+.on {
+  color: #0E0E0E;
+  font-weight: 600;
+  border-bottom: none !important;
+
+  &::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: 6rpx;
+    transform: translateX(-50%);
+    width: 36rpx;
+    height: 4rpx;
+    background: linear-gradient(90deg, #D9BE7A, #A88847);
+    border-radius: 2rpx;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  color: transparent;
+}
+
+.empty {
+  margin-top: 200rpx;
+  font-size: 24rpx;
+  color: #9A9A9A;
+  letter-spacing: 2rpx;
+}
+
+/* ═══════ 卡片网格 ═══════ */
+.prod-items {
+  width: calc(50% - 32rpx);
+  display: inline-block;
+  background: #FFFFFF;
+  padding-bottom: 20rpx;
+  box-sizing: border-box;
+  border-radius: 16rpx;
+  box-shadow: 0 4rpx 20rpx rgba(14, 14, 14, 0.04);
+  vertical-align: top;
+  transition: transform .2s;
+
+  &:active {
+    transform: scale(0.985);
+  }
+
+  &:nth-child(2n-1) {
+    margin: 20rpx 10rpx 12rpx 22rpx;
+  }
+  &:nth-child(2n) {
+    margin: 20rpx 22rpx 12rpx 10rpx;
+  }
+
+  .hot-imagecont {
+    width: 100%;
+    height: 0;
+    padding-top: 100%;
+    position: relative;
+    overflow: hidden;
+    font-size: 0;
+    background: #F5F3F0;
+
+    .hotsaleimg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+  }
+
+  .hot-text {
+    margin-top: 0;
+    padding: 18rpx 20rpx 0;
+
+    .hotprod-text {
+      font-size: 26rpx;
+      color: #1A1A1A;
+      letter-spacing: 0.5rpx;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .prod-info {
+      min-height: 30rpx;
+      font-size: 22rpx;
+      color: #9A9A9A;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 6rpx;
+      letter-spacing: 0.5rpx;
+    }
+
+    .prod-text-info {
+      position: relative;
+      height: 60rpx;
+      line-height: 60rpx;
+      font-family: "DIN Alternate", Helvetica, Arial, sans-serif;
+
+      .hotprod-price {
+        display: inline;
+        font-size: 28rpx;
+        color: #0E0E0E;
+        font-weight: 600;
+        letter-spacing: 0.5rpx;
+      }
+
+      .basket-img {
+        width: 44rpx;
+        height: 44rpx;
+        position: absolute;
+        right: 0;
+        bottom: 8rpx;
+        padding: 8rpx;
+        filter: grayscale(1) brightness(.3);
+      }
+    }
+  }
+}
+
+.more-prod {
+  .prod-text-right {
+    .prod-info {
+      font-size: 22rpx;
+      color: #9A9A9A;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  }
+}
+
+.empty-wrap {
+  color: #9A9A9A;
+  text-align: center;
+  padding-top: 400rpx;
+  font-size: 24rpx;
+  letter-spacing: 2rpx;
+}

@@ -49,7 +49,8 @@
 | 层 | 技术 |
 |---|---|
 | 后端 | FastAPI · SQLAlchemy 2.0 async · Pydantic v2 · Alembic |
-| 前端 | React 19 · TypeScript 6 · Vite 8 · Ant Design v6 · React Query · Zustand |
+| 前端（ERP 管理台） | React 19 · TypeScript 6 · Vite 8 · Ant Design v6 · React Query · Zustand |
+| 小程序（C 端 + 业务员工作台） | uni-app · Vue 3 · Vite · SCSS（H5 / 微信小程序 / App 多端） |
 | 数据库 | PostgreSQL 16（RLS 行级安全）· Redis 7 |
 | 部署 | Docker Compose |
 
@@ -79,6 +80,18 @@
 
 详见 [MCP 工具文档](docs/MCP工具文档.md)。
 
+## 部署拓扑
+
+仓库是 monorepo，但**三个子项目各自独立部署**，不做前端 workspace：
+
+| 子项目 | 部署产物 | 依赖 |
+|---|---|---|
+| `backend/` | FastAPI 进程（Uvicorn / Gunicorn） | 所有端的**统一后端**：ERP 管理台、小程序 C 端、小程序业务员工作台共用一个 FastAPI + 同一个 PostgreSQL + 同一套 JWT 工具 |
+| `frontend/` | 静态 SPA（Nginx 托管） | 独立 `npm` 管理、独立构建；只调 `backend/api/*`（管理台路由） |
+| `miniprogram/` | H5 静态站（Nginx） / 微信小程序包 / App | 独立 `pnpm` 管理、独立构建；只调 `backend/api/mall/*`（小程序专属路由） |
+
+frontend 和 miniprogram **互不依赖、不共享包管理**（React vs Vue 生态差异太大，不值得统一）。后端新功能按端分路由即可：`api/` 前缀给 ERP 管理台，`api/mall/` 前缀给小程序。
+
 ## 本地开发
 
 ### 基础设施
@@ -101,13 +114,26 @@ uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload
 
 API 文档：http://localhost:8002/docs
 
-### 前端
+### 前端（ERP 管理台）
 
 ```bash
 cd frontend
 npm install
 npm run dev    # http://localhost:5173（代理 /api → localhost:8002）
 ```
+
+### 小程序（C 端 + 业务员工作台）
+
+```bash
+cd miniprogram
+pnpm install
+pnpm run dev:h5           # H5 开发模式（浏览器预览，默认 :5173）
+pnpm run dev:mp-weixin    # 微信小程序开发模式（输出到 dist/dev/mp-weixin）
+pnpm run build:h5         # H5 生产构建（dist/build/h5）
+pnpm run lint             # ESLint
+```
+
+小程序同一套 codebase 同时承载 **C 端商城**（consumer）+ **业务员工作台**（salesman），登录后按 `user_type` 分流。业务员工作台覆盖：接单池 / 我的订单 / 履约（出库/送达/凭证）/ 打卡 / 拜访 / 请假 / 报销 / 稽查 / KPI / 通知 / 邀请码 / 我的客户 / 跳单告警。
 
 ### 默认账号
 
@@ -174,6 +200,33 @@ frontend/src/
     ├── attendance/(2)     ├── customers/   (2)
     ├── inspections/(2)    ├── purchase/    (2)
     └── ...
+
+miniprogram/                  # uni-app · Vue 3 小程序端
+├── src/
+│   ├── pages.json            # 页面注册 + tabBar
+│   ├── manifest.json         # 多端配置（H5/微信小程序/App）
+│   ├── main.js / App.vue
+│   ├── pages/                # C 端 + 业务员双端页面
+│   │   ├── index/ basket/ user/          # C 端 tabBar 三大页
+│   │   ├── prod/ sub-category/ search-*/ # C 端浏览/搜索
+│   │   ├── accountLogin/ register/       # 登录注册（邀请码必填）
+│   │   ├── submit-order/ order-detail/   # C 端下单/订单
+│   │   ├── salesman-home/ salesman-orders/ salesman-order-detail/
+│   │   ├── salesman-profile/ salesman-workspace/
+│   │   ├── salesman-checkin/ salesman-visit/ salesman-attendance/
+│   │   ├── salesman-leave/ salesman-expense/ salesman-inspection/
+│   │   ├── salesman-kpi/ salesman-notifications/
+│   │   ├── salesman-invite/ salesman-my-customers/
+│   │   ├── salesman-alerts/ salesman-upload-voucher/
+│   │   └── ...
+│   ├── utils/
+│   │   ├── http.js           # 请求封装（auto-refresh token）
+│   │   ├── login.js          # 登录态管理
+│   │   ├── salesman.js       # 业务员端共享：状态常量 / 脱敏 / 倒计时
+│   │   └── mock.js           # 开发期本地 mock（含 uploadFile 拦截）
+│   ├── styles/variables.scss # 设计 token（黑金色系）
+│   └── wxs/                  # 小程序原生 WXS 工具
+└── static/                   # tabBar 图标、占位图
 ```
 
 ## 文档

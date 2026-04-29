@@ -1,0 +1,241 @@
+/**
+ * 全局基础 - 极简黑金
+ * 色值：#0E0E0E 墨黑  #C9A961 金  #FAF8F5 奶白  #ECE8E1 线  #B54B4B 低饱和错误
+ * 注意：本文件为纯 CSS（不经 SCSS 预处理），禁止使用 `&` 等嵌套语法。
+ */
+
+page {
+  background: #FAF8F5;
+  color: #1A1A1A;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Helvetica, "Segoe UI", Arial, sans-serif;
+  font-size: 28rpx;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.container {
+  height: 100%;
+  box-sizing: border-box;
+  color: #1A1A1A;
+}
+
+/* ── 滚动条：极简 ── */
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+/* ── 价格：黑金质感，用字重区分，不用红 ── */
+.price {
+  font-family: "DIN Alternate", "SF Pro Display", Helvetica, Arial, sans-serif;
+  display: inline-block;
+  color: #0E0E0E;
+  font-weight: 600;
+  padding-bottom: 10rpx;
+  padding-left: 10rpx;
+  letter-spacing: 0.5rpx;
+}
+
+.symbol    { font-size: 22rpx; font-weight: 500; }
+.big-num   { font-size: 32rpx; }
+.small-num { font-size: 22rpx; font-weight: 500; }
+
+/* ── 按钮基类（可在任意页面复用）── */
+.u-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 80rpx;
+  line-height: 80rpx;
+  padding: 0 40rpx;
+  border-radius: 999rpx;
+  font-size: 28rpx;
+  letter-spacing: 3rpx;
+  box-sizing: border-box;
+  text-align: center;
+  transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
+}
+.u-btn::after {
+  border: 0 !important;
+}
+.u-btn--primary {
+  background: linear-gradient(135deg, #D9BE7A 0%, #C9A961 55%, #A88847 100%);
+  color: #0E0E0E;
+  font-weight: 600;
+  box-shadow: 0 6rpx 20rpx rgba(201, 169, 97, 0.3);
+}
+.u-btn--primary:active {
+  transform: translateY(1rpx);
+  box-shadow: 0 3rpx 10rpx rgba(201, 169, 97, 0.25);
+}
+.u-btn--ink {
+  background: #0E0E0E;
+  color: #C9A961;
+  font-weight: 600;
+}
+.u-btn--ink:active {
+  background: #1A1A1A;
+}
+.u-btn--ghost {
+  background: #FFFFFF;
+  border: 1rpx solid #0E0E0E;
+  color: #1A1A1A;
+}
+.u-btn--ghost:active {
+  background: #0E0E0E;
+  color: #C9A961;
+}
+.u-btn--block {
+  display: flex;
+  width: 100%;
+}
+.u-btn--lg {
+  height: 92rpx;
+  line-height: 92rpx;
+  font-size: 30rpx;
+}
+
+/* ── 卡片基类 ── */
+.u-card {
+  background: #FFFFFF;
+  border-radius: 16rpx;
+  box-shadow: 0 4rpx 20rpx rgba(14, 14, 14, 0.04);
+  overflow: hidden;
+}
+.u-card--elev {
+  box-shadow: 0 8rpx 32rpx rgba(14, 14, 14, 0.08);
+}
+
+/* ── 标签徽章 ── */
+.u-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 4rpx 14rpx;
+  font-size: 20rpx;
+  color: #A88847;
+  background: rgba(201, 169, 97, 0.08);
+  border: 1rpx solid #C9A961;
+  border-radius: 4rpx;
+  letter-spacing: 1rpx;
+  line-height: 1.6;
+}
+.u-tag--ink {
+  background: #0E0E0E;
+  color: #C9A961;
+  border-color: #0E0E0E;
+}
+
+/* ── 金色竖条装饰标题 ── */
+.u-title {
+  position: relative;
+  padding-left: 22rpx;
+  font-size: 32rpx;
+  font-weight: 600;
+  color: #0E0E0E;
+  letter-spacing: 3rpx;
+  line-height: 1;
+}
+.u-title::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6rpx;
+  height: 28rpx;
+  background: linear-gradient(180deg, #D9BE7A, #A88847);
+  border-radius: 2rpx;
+}
+
+/* ── 空态 ── */
+.u-empty {
+  padding: 160rpx 0;
+  text-align: center;
+}
+.u-empty__img {
+  width: 140rpx;
+  height: 140rpx;
+  opacity: .35;
+  filter: grayscale(1);
+}
+.u-empty__text {
+  display: block;
+  margin-top: 32rpx;
+  font-size: 24rpx;
+  color: #9A9A9A;
+  letter-spacing: 2rpx;
+}
+
+/* ── 复选框：金色选中态 ── */
+uni-checkbox-group {
+  width: 100% !important;
+}
+uni-checkbox-group uni-label {
+  width: 33% !important;
+  display: inline-flex;
+  margin-bottom: 20rpx;
+}
+uni-checkbox .uni-checkbox-input {
+  width: 38rpx !important;
+  height: 38rpx !important;
+  border-radius: 50% !important;
+  border: 1rpx solid #D9D9D9 !important;
+}
+uni-checkbox .uni-checkbox-input.uni-checkbox-input-checked {
+  background: linear-gradient(135deg, #D9BE7A 0%, #C9A961 55%, #A88847 100%) !important;
+  border: 1rpx solid #C9A961 !important;
+}
+uni-checkbox .uni-checkbox-input.uni-checkbox-input-checked::before {
+  display: inline-block;
+  width: 20rpx;
+  height: 20rpx;
+  line-height: 20rpx;
+  text-align: center;
+  font-size: 18rpx;
+  color: #0E0E0E;
+  background: transparent;
+  transform: translate(-60%, -50%) scale(1);
+  -webkit-transform: translate(-60%, -50%) scale(1);
+}
+
+/* ── 单选：金色选中态 ── */
+uni-radio .uni-radio-input {
+  height: 36rpx;
+  width: 36rpx;
+  border-radius: 50%;
+  background: transparent;
+  box-sizing: border-box;
+  border: 1rpx solid #D9D9D9 !important;
+}
+uni-radio .uni-radio-input.uni-radio-input-checked {
+  border: 1rpx solid #C9A961 !important;
+  background: linear-gradient(135deg, #D9BE7A, #A88847) !important;
+}
+uni-radio .uni-radio-input.uni-radio-input-checked::before {
+  border-radius: 50%;
+  width: 32rpx;
+  height: 32rpx;
+  line-height: 32rpx;
+  text-align: center;
+  font-size: 20rpx;
+  color: #0E0E0E;
+  background: linear-gradient(135deg, #D9BE7A, #A88847);
+  transform: translate(-50%, -50%) scale(1);
+  -webkit-transform: translate(-50%, -50%) scale(1);
+}
+
+/* ── 输入框 placeholder 全局弱化 ── */
+.u-placeholder {
+  color: #B8B8B8;
+  font-size: 26rpx;
+  letter-spacing: 0.5rpx;
+}
+
+/* ── iPhone X 以上底部按钮兼容 ── */
+@media screen and (width: 375px) and (height: 812px) {
+  .container { padding-bottom: 70px; }
+}
+@media screen and (width: 414px) and (height: 736px) {
+  .container { padding-bottom: 70px; }
+}

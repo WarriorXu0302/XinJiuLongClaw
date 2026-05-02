@@ -92,22 +92,43 @@ const load = async () => {
   }
 }
 
-const onRead = async (n) => {
-  if (n.status !== 'unread') return
-  // 乐观更新：先改本地，后调接口；失败回滚
-  const notifId = n.id
-  n.status = 'read'
-  try {
-    await http.request({
-      url: `/api/mall/workspace/notifications/${notifId}/mark-read`,
-      method: 'POST',
-      data: {}
+const jumpByEntity = (n) => {
+  const type = n.related_entity_type
+  const id = n.related_entity_id
+  if (!type || !id) return
+  // 业务员侧三类通知实体：MallOrder / MallSkipAlert / MallPayment
+  if (type === 'MallOrder') {
+    // 业务员订单详情页用 order_id（UUID）跳转
+    uni.navigateTo({
+      url: `/pages/salesman-order-detail/salesman-order-detail?order_id=${id}`
     })
-  } catch {
-    // eslint-disable-next-line require-atomic-updates
-    n.status = 'unread'
+  } else if (type === 'MallSkipAlert') {
+    uni.navigateTo({ url: '/pages/salesman-alerts/salesman-alerts' })
+  } else if (type === 'MallPayment') {
+    // 凭证在订单详情里；payment.order_id 不在通知里，跳通用订单列表兜底
+    uni.switchTab
+      ? uni.switchTab({ url: '/pages/salesman-orders/salesman-orders' })
+      : uni.navigateTo({ url: '/pages/salesman-orders/salesman-orders' })
   }
-  // TODO(M4c): 根据 related_entity_type 跳转到相关页面
+}
+
+const onRead = async (n) => {
+  const notifId = n.id
+  if (n.status === 'unread') {
+    // 乐观更新：先改本地，后调接口；失败回滚
+    n.status = 'read'
+    try {
+      await http.request({
+        url: `/api/mall/workspace/notifications/${notifId}/mark-read`,
+        method: 'POST',
+        data: {}
+      })
+    } catch {
+      // eslint-disable-next-line require-atomic-updates
+      n.status = 'unread'
+    }
+  }
+  jumpByEntity(n)
 }
 
 const onMarkAllRead = async () => {

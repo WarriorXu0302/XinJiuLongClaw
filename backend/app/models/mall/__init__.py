@@ -4,6 +4,7 @@ Mall (小程序) ORM models.
 from app.models.mall.content import MallNotice
 from app.models.mall.inventory import (
     MallInventory,
+    MallInventoryBarcode,
     MallInventoryFlow,
     MallWarehouse,
 )
@@ -40,8 +41,9 @@ __all__ = [
     # product (M2)
     "MallCategory", "MallProductTag", "MallProductTagRel",
     "MallProduct", "MallProductSku", "MallCollection",
-    # inventory (M2)
+    # inventory (M2 + M4a barcode)
     "MallWarehouse", "MallInventory", "MallInventoryFlow",
+    "MallInventoryBarcode",
     # content (M2)
     "MallNotice",
     # order (M3)

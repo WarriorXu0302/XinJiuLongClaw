@@ -6,7 +6,8 @@
   - 凭证图（最多 3 张，前端预先算 sha256，后端再校验）
   - 备注
 
-  接口：POST /api/mall/salesman/orders/{order_no}/upload-payment-voucher
+  接口（后端路径参数是 order_id）：
+    POST /api/mall/salesman/orders/{order_id}/upload-payment-voucher
 -->
 <template>
   <view class="page">
@@ -15,7 +16,7 @@
         上传收款凭证
       </view>
       <view class="header__sub">
-        订单 {{ orderNo }} · 应收 {{ fmtMoney(order?.pay_amount) }}
+        订单 {{ orderNo }} · 应收 {{ fmtMoney(order?.payAmount ?? order?.pay_amount) }}
       </view>
     </view>
 
@@ -155,6 +156,7 @@
 
 <script setup>
 const orderNo = ref('')
+const orderId = ref('')
 const order = ref(null)
 const submitting = ref(false)
 
@@ -185,12 +187,12 @@ const onAmountInput = (e) => {
 }
 
 const shortfall = computed(() => {
-  const pay = Number(order.value?.pay_amount || 0)
+  const pay = Number(order.value?.payAmount ?? order.value?.pay_amount ?? 0)
   const got = Number(form.value.amount || 0)
   return Math.max(0, pay - got)
 })
 const overpay = computed(() => {
-  const pay = Number(order.value?.pay_amount || 0)
+  const pay = Number(order.value?.payAmount ?? order.value?.pay_amount ?? 0)
   const got = Number(form.value.amount || 0)
   return got > pay ? got - pay : 0
 })
@@ -209,31 +211,34 @@ const canSubmit = computed(() => {
 
 const loadOrder = async () => {
   const res = await http.request({
-    url: `/api/mall/salesman/orders/${orderNo.value}`,
+    url: `/api/mall/salesman/orders/${orderId.value}`,
     method: 'GET'
   })
   order.value = res.data
-  if (!form.value.amount) form.value.amount = String(res.data?.pay_amount || '')
+  // MallOrderDetailVO 用 payAmount；原字段名 pay_amount 做兜底
+  if (!form.value.amount) form.value.amount = String(res.data?.payAmount ?? res.data?.pay_amount ?? '')
 }
 
 // 两段式上传：(1) uni.uploadFile 把文件传到后端，拿 remote_url + sha256
-// 真实哈希由后端读文件字节计算，前端不再猜
+// 真实哈希由后端读文件字节计算，前端不再猜。
+// 后端响应是裸 JSON {url, sha256, size, mime_type, kind}（新 ERP 协议，非 mall4j envelope）。
 const uploadOne = (localPath) => {
   return new Promise((resolve, reject) => {
+    const token = uni.getStorageSync('Token')
     uni.uploadFile({
       url: (import.meta.env.VITE_APP_BASE_API || '') + '/api/mall/salesman/attachments/upload',
       filePath: localPath,
       name: 'file',
       formData: { kind: 'payment_voucher' },
-      header: { Authorization: uni.getStorageSync('Token') },
+      header: token ? { Authorization: token.startsWith('Bearer ') ? token : `Bearer ${token}` } : {},
       success: (r) => {
         try {
           const body = typeof r.data === 'string' ? JSON.parse(r.data) : r.data
-          if (body.code === '00000' || body.success) {
-            const d = body.data || body
-            resolve({ remote_url: d.url, sha256: d.sha256, size: d.size })
+          // 2xx 成功直接给裸 body；4xx/5xx 后端返 {detail:"..."}
+          if (r.statusCode >= 200 && r.statusCode < 300 && body.url && body.sha256) {
+            resolve({ remote_url: body.url, sha256: body.sha256, size: body.size })
           } else {
-            reject(new Error(body.msg || '上传失败'))
+            reject(new Error(body.detail || body.msg || '上传失败'))
           }
         } catch (e) {
           reject(e)
@@ -319,7 +324,7 @@ const onSubmit = async () => {
     uni.showLoading({ title: '提交中…' })
     try {
       await http.request({
-        url: `/api/mall/salesman/orders/${orderNo.value}/upload-payment-voucher`,
+        url: `/api/mall/salesman/orders/${orderId.value}/upload-payment-voucher`,
         method: 'POST',
         data: {
           amount: amt,
@@ -342,7 +347,7 @@ const onSubmit = async () => {
   if (overpay.value > 0) {
     uni.showModal({
       title: '金额异常',
-      content: `实收 ${fmtMoney(amt)} 高于应收 ${fmtMoney(order.value?.pay_amount)}，确认无误？`,
+      content: `实收 ${fmtMoney(amt)} 高于应收 ${fmtMoney(order.value?.payAmount ?? order.value?.pay_amount)}，确认无误？`,
       success: (r) => { if (r.confirm) doSubmit() }
     })
   } else {
@@ -351,8 +356,9 @@ const onSubmit = async () => {
 }
 
 onLoad((q) => {
+  orderId.value = q?.order_id || ''
   orderNo.value = q?.order_no || ''
-  if (orderNo.value) loadOrder()
+  if (orderId.value) loadOrder()
 })
 </script>
 

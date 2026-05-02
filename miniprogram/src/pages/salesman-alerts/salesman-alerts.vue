@@ -120,7 +120,8 @@ const load = async () => {
 }
 
 const onAppeal = (a) => {
-  // TODO: 正式版加富文本输入框
+  // 小程序里 uni.showModal 的 editable 是目前最稳的跨端输入 UX；
+  // 富文本输入框依赖自定义 rich-editor，非 H5 环境不通用 — 先这样
   uni.showModal({
     title: '提交申诉',
     editable: true,

@@ -64,27 +64,37 @@
 </template>
 
 <script setup>
-const companyName = ref('')
+const companyName = ref('—')
 const dvyFlowId = ref('')
 const dvyData = ref([])
-/**
- * 生命周期函数--监听页面加载
- */
+
+const formatTrackTime = (iso) => {
+  if (!iso) return ''
+  try {
+    const d = new Date(iso)
+    const pad = (n) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  } catch (e) {
+    return iso
+  }
+}
+
 onLoad((options) => {
-  uni.showLoading()
+  dvyFlowId.value = options.orderNum || ''
+  if (!dvyFlowId.value) return
   http.request({
-    url: '/delivery/check',
-    method: 'GET',
-    data: {
-      orderNumber: options.orderNum
-    }
+    url: `/api/mall/orders/${dvyFlowId.value}/logistics`,
+    method: 'GET'
+  }).then(({ data }) => {
+    companyName.value = data?.carrier_name || '业务员自配送'
+    dvyFlowId.value = data?.tracking_no || dvyFlowId.value
+    dvyData.value = (data?.tracks || []).map(t => ({
+      context: `${t.title}：${t.desc || ''}`.replace(/：$/, ''),
+      time: formatTrackTime(t.at)
+    }))
+  }).catch(() => {
+    dvyData.value = []
   })
-    .then(({ data }) => {
-      companyName.value = data.companyName
-      dvyFlowId.value = data.dvyFlowId
-      dvyData.value = data.data
-      uni.hideLoading()
-    })
 })
 </script>
 

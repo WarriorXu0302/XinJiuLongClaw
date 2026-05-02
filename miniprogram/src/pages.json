@@ -86,15 +86,6 @@
       }
     },
     {
-      "path": "pages/express-delivery/express-delivery",
-      "style": {
-        "backgroundTextStyle": "light",
-        "navigationBarBackgroundColor": "#FAF8F5",
-        "navigationBarTitleText": "物流查询",
-        "navigationBarTextStyle": "black"
-      }
-    },
-    {
       "path": "pages/pay-result/pay-result",
       "style": {
         "backgroundTextStyle": "light",
@@ -159,6 +150,10 @@
     {
       "path": "pages/salesman-order-detail/salesman-order-detail",
       "style": { "navigationBarTitleText": "订单详情" }
+    },
+    {
+      "path": "pages/salesman-ship-scan/salesman-ship-scan",
+      "style": { "navigationBarTitleText": "扫码出库" }
     },
     {
       "path": "pages/salesman-workspace/salesman-workspace",

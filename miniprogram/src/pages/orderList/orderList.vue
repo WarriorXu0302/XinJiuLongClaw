@@ -189,9 +189,9 @@
                 class="button"
                 :data-ordernum="item.orderNumber"
                 hover-class="none"
-                @tap="toDeliveryPage"
+                @tap="toOrderDetailPage"
               >
-                查看物流
+                联系配送员
               </text>
               <text
                 v-if="item.status==3"
@@ -239,23 +239,37 @@ onReachBottom(() => {
 })
 
 const list = ref([])
+
+// 前端 tab 数字状态 → 后端 MallOrderStatus 字符串
+const STS_MAP = {
+  0: null, // 全部
+  1: 'pending_assignment', // 待支付/待接单（C 端暂按 pending_assignment 展示）
+  2: 'assigned',           // 待发货
+  3: 'shipped',            // 待收货/在途
+  5: 'completed',          // 已完成
+  6: 'cancelled'
+}
+
 /**
  * 加载订单数据
  */
 const loadOrderData = (sts, currentParam) => {
   uni.showLoading() // 加载订单列表
+  const size = 10
+  const statusStr = STS_MAP[Number(sts)] ?? null
+  const reqData = {
+    skip: (currentParam - 1) * size,
+    limit: size
+  }
+  if (statusStr) reqData.status = statusStr
   http.request({
-    url: '/p/myOrder/myOrder',
+    url: '/api/mall/orders',
     method: 'GET',
-    data: {
-      current: currentParam,
-      size: 10,
-      status: sts
-    }
+    data: reqData
   })
     .then(({ data }) => {
       let listParam = []
-      if (data.current === 1) {
+      if ((data.current || currentParam) === 1) {
         listParam = data.records
       } else {
         listParam = list.value
@@ -263,7 +277,7 @@ const loadOrderData = (sts, currentParam) => {
       }
       list.value = listParam
       pages.value = data.pages
-      current.value = data.current
+      current.value = data.current || currentParam
       uni.hideLoading()
     })
 }
@@ -276,14 +290,8 @@ const onStsTap = (e) => {
   loadOrderData(sts.value, 1)
 }
 
-/**
- * 查看物流
- */
-const toDeliveryPage = (e) => {
-  uni.navigateTo({
-    url: '/pages/express-delivery/express-delivery?orderNum=' + e.currentTarget.dataset.ordernum
-  })
-}
+// mall 无第三方物流，"查看物流"已改为"联系配送员" → 直接进订单详情页
+// 详情页的配送员 section 里有拨号 + 收款码入口
 
 /**
  * 取消订单
@@ -304,8 +312,8 @@ const onCancelOrder = (e) => {
           mask: true
         })
         http.request({
-          url: '/p/myOrder/cancel/' + ordernum,
-          method: 'PUT',
+          url: '/api/mall/orders/' + ordernum + '/cancel',
+          method: 'POST',
           data: {}
         })
           .then(() => {
@@ -343,8 +351,8 @@ const onConfirmReceive = (e) => {
           mask: true
         })
         http.request({
-          url: '/p/myOrder/receipt/' + e.currentTarget.dataset.ordernum,
-          method: 'PUT'
+          url: '/api/mall/orders/' + e.currentTarget.dataset.ordernum + '/confirm-receipt',
+          method: 'POST'
         })
           .then(() => {
             loadOrderData(sts.value, 1)
@@ -371,12 +379,16 @@ const delOrderList = (e) => {
         uni.showLoading()
 
         http.request({
-          url: '/p/myOrder/' + ordernum,
+          url: '/api/mall/orders/' + ordernum,
           method: 'DELETE'
         })
           .then(() => {
             loadOrderData(sts.value, 1)
             uni.hideLoading()
+          })
+          .catch((err) => {
+            uni.hideLoading()
+            uni.showToast({ title: err?.detail || '删除失败', icon: 'none' })
           })
       }
     }

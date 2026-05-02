@@ -36,7 +36,7 @@ const news = ref([])
 onShow(() => {
   // 加载公告
   http.request({
-    url: '/shop/notice/noticeList',
+    url: '/api/mall/notices',
     method: 'GET'
   })
     .then(({ data }) => {

@@ -3,12 +3,14 @@
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_mall_db
 from app.core.security import CurrentMallUser
+from app.models.mall.user import MallUser
 from app.schemas.mall.order import (
+    MallCourierVO,
     MallOrderCancelRequest,
     MallOrderCreateRequest,
     MallOrderDetailVO,
@@ -64,7 +66,7 @@ async def create(
         remarks=body.remarks,
     )
     items = await order_service.get_order_items(db, order.id)
-    return _build_detail_vo(order, items)
+    return await _build_detail_vo(db, order, items)
 
 
 # =============================================================================
@@ -110,7 +112,7 @@ async def detail(
     user = await auth_service.verify_token_and_load_user(db, current)
     order = await order_service.get_my_order(db, user, order_no)
     items = await order_service.get_order_items(db, order.id)
-    return _build_detail_vo(order, items)
+    return await _build_detail_vo(db, order, items)
 
 
 # =============================================================================
@@ -121,36 +123,139 @@ async def detail(
 async def cancel(
     order_no: str,
     current: CurrentMallUser,
+    request: Request,
     body: Optional[MallOrderCancelRequest] = None,
     db: AsyncSession = Depends(get_mall_db),
 ):
     await apply_price_visibility(current, db)
     user = await auth_service.verify_token_and_load_user(db, current)
     order = await order_service.cancel_order(
-        db, user, order_no, reason=body.reason if body else None
+        db, user, order_no, reason=body.reason if body else None,
+        request=request,
     )
     items = await order_service.get_order_items(db, order.id)
-    return _build_detail_vo(order, items)
+    return await _build_detail_vo(db, order, items)
+
+
+@router.delete("/{order_no}", status_code=204)
+async def delete_order(
+    order_no: str,
+    current: CurrentMallUser,
+    request: Request,
+    db: AsyncSession = Depends(get_mall_db),
+):
+    """C 端从列表删除（软删）。仅 completed/cancelled/partial_closed 可删。"""
+    await apply_price_visibility(current, db)
+    user = await auth_service.verify_token_and_load_user(db, current)
+    await order_service.delete_my_order(db, user, order_no, request=request)
 
 
 @router.post("/{order_no}/confirm-receipt", response_model=MallOrderDetailVO)
 async def confirm_receipt(
     order_no: str,
     current: CurrentMallUser,
+    request: Request,
     db: AsyncSession = Depends(get_mall_db),
 ):
     await apply_price_visibility(current, db)
     user = await auth_service.verify_token_and_load_user(db, current)
-    order = await order_service.confirm_receipt(db, user, order_no)
+    order = await order_service.confirm_receipt(db, user, order_no, request=request)
     items = await order_service.get_order_items(db, order.id)
-    return _build_detail_vo(order, items)
+    return await _build_detail_vo(db, order, items)
+
+
+# =============================================================================
+# 物流查询（业务员自配送 —— 返回订单当前履约状态 + 配送员信息）
+# =============================================================================
+
+@router.get("/{order_no}/logistics")
+async def logistics(
+    order_no: str,
+    current: CurrentMallUser,
+    db: AsyncSession = Depends(get_mall_db),
+):
+    """
+    返回订单物流/履约轨迹。第一版是业务员自配送，无第三方物流 tracking；
+    但小程序"查看物流"按钮必须有响应，所以构造一个规范化的 tracks 时间线：
+      下单 → 接单 → 出库 → 送达 → 客户确认
+    """
+    from sqlalchemy import select
+    from app.models.mall.order import MallOrder, MallShipment
+
+    user = await auth_service.verify_token_and_load_user(db, current)
+    order = (await db.execute(
+        select(MallOrder)
+        .where(MallOrder.order_no == order_no)
+        .where(MallOrder.user_id == user.id)  # 防越权
+    )).scalar_one_or_none()
+    if order is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="订单不存在")
+
+    shipment = (await db.execute(
+        select(MallShipment).where(MallShipment.order_id == order.id)
+    )).scalar_one_or_none()
+
+    # 构造轨迹
+    tracks: list[dict] = []
+    if order.created_at:
+        tracks.append({
+            "at": order.created_at, "title": "订单已下单",
+            "desc": f"订单 {order.order_no} 提交成功，等待业务员接单",
+        })
+    if order.claimed_at:
+        tracks.append({
+            "at": order.claimed_at, "title": "业务员已接单",
+            "desc": "业务员已接单，正在备货",
+        })
+    if order.shipped_at:
+        tracks.append({
+            "at": order.shipped_at, "title": "已出库",
+            "desc": "商品已出库，正在配送",
+        })
+    if order.delivered_at:
+        tracks.append({
+            "at": order.delivered_at, "title": "已送达",
+            "desc": "商品已送达，请确认收货",
+        })
+    if order.customer_confirmed_at:
+        tracks.append({
+            "at": order.customer_confirmed_at, "title": "您已确认收货",
+            "desc": "感谢您的购买",
+        })
+    if order.cancelled_at:
+        tracks.append({
+            "at": order.cancelled_at, "title": "订单已取消",
+            "desc": order.cancellation_reason or "—",
+        })
+
+    # 配送员信息（已接单后才暴露）
+    courier = None
+    if order.assigned_salesman_id:
+        salesman = await db.get(MallUser, order.assigned_salesman_id)
+        if salesman is not None:
+            courier = {
+                "nickname": salesman.nickname,
+                "mobile": salesman.phone,
+                "wechat_qr_url": salesman.wechat_qr_url,
+                "alipay_qr_url": salesman.alipay_qr_url,
+            }
+
+    return {
+        "order_no": order.order_no,
+        "status": order.status,
+        "carrier_name": shipment.carrier_name if shipment else "业务员自配送",
+        "tracking_no": shipment.tracking_no if shipment else None,
+        "courier": courier,
+        "tracks": sorted(tracks, key=lambda t: t["at"], reverse=True),
+    }
 
 
 # =============================================================================
 # 内部工具
 # =============================================================================
 
-def _build_detail_vo(order, items) -> MallOrderDetailVO:
+async def _build_detail_vo(db: AsyncSession, order, items) -> MallOrderDetailVO:
     vo = MallOrderDetailVO.model_validate(order, from_attributes=True)
     vo.items = [
         MallOrderItemVO.model_validate({
@@ -165,4 +270,14 @@ def _build_detail_vo(order, items) -> MallOrderDetailVO:
         })
         for it in items
     ]
+    # 配送员信息：只有被接单后（assigned_salesman_id 非空）才填
+    if order.assigned_salesman_id:
+        salesman = await db.get(MallUser, order.assigned_salesman_id)
+        if salesman is not None:
+            vo.courier = MallCourierVO(
+                nickname=salesman.nickname,
+                mobile=salesman.phone,
+                wechat_qr_url=salesman.wechat_qr_url,
+                alipay_qr_url=salesman.alipay_qr_url,
+            )
     return vo

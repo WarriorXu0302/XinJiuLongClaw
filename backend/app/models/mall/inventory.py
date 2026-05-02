@@ -127,3 +127,76 @@ class MallInventoryFlow(Base):
 
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+# =============================================================================
+# MallInventoryBarcode
+# =============================================================================
+
+class MallInventoryBarcode(Base):
+    """单瓶/单箱级别条码。
+
+    对齐 ERP InventoryBarcode：支持扫码出库核销、状态流转（IN_STOCK → OUTBOUND）。
+    mall 侧简化：
+      - 第一版只用 BOTTLE（1 码 = 1 瓶），CASE 预留
+      - 入库时由采购/种子脚本批量生成条码
+      - 出库时业务员在小程序扫码，后端逐码核销
+      - 支持 parent_barcode 关联（CASE → BOTTLE 批量拆箱）
+    """
+
+    __tablename__ = "mall_inventory_barcodes"
+    __table_args__ = (
+        Index("ix_mall_barcodes_sku", "sku_id"),
+        Index("ix_mall_barcodes_warehouse", "warehouse_id"),
+        Index("ix_mall_barcodes_status", "status"),
+        Index("ix_mall_barcodes_batch", "batch_no"),
+        Index("ix_mall_barcodes_parent", "parent_barcode"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    barcode: Mapped[str] = mapped_column(
+        String(200), unique=True, index=True, nullable=False
+    )
+    barcode_type: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # MallInventoryBarcodeType
+    sku_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("mall_product_skus.id", ondelete="RESTRICT"), nullable=False
+    )
+    product_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("mall_products.id", ondelete="RESTRICT"), nullable=False
+    )
+    warehouse_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("mall_warehouses.id", ondelete="RESTRICT"), nullable=False
+    )
+    batch_no: Mapped[str] = mapped_column(
+        String(100), nullable=False, index=True
+    )
+    parent_barcode: Mapped[Optional[str]] = mapped_column(
+        String(200), nullable=True, index=True
+    )
+    # 状态：in_stock / outbound / damaged
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+
+    # 出库时回填：关联 mall_order + 流水
+    outbound_order_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("mall_orders.id", ondelete="SET NULL"), nullable=True
+    )
+    outbound_inventory_flow_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("mall_inventory_flows.id", ondelete="SET NULL"), nullable=True
+    )
+    outbound_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    outbound_by_user_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("mall_users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    cost_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        onupdate=func.now(), nullable=True
+    )

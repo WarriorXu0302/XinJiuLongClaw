@@ -141,7 +141,7 @@ const http = {
       return
     }
     http.request({
-      url: '/p/shopCart/prodCount',
+      url: '/api/mall/cart/count',
       method: 'GET',
       dontTrunLogin: true,
       data: {}

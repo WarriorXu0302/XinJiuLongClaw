@@ -131,7 +131,8 @@ async def mark_invite_used(
 
 
 async def invalidate_invite_code(
-    db: AsyncSession, salesman: MallUser, code_id: str, reason: str | None = None
+    db: AsyncSession, salesman: MallUser, code_id: str, reason: str | None = None,
+    request=None,  # 可选 FastAPI Request，记审计 IP
 ) -> MallInviteCode:
     """业务员主动作废自己签发的未用邀请码。"""
     row = (
@@ -152,6 +153,17 @@ async def invalidate_invite_code(
 
     row.invalidated_at = datetime.now(timezone.utc)
     row.invalidated_reason = reason
+
+    # 合规审计（业务员自服务 → actor_type=mall_user）
+    from app.services.audit_service import log_audit
+    await log_audit(
+        db, action="mall_invite_code.invalidate_by_salesman",
+        entity_type="MallInviteCode", entity_id=row.id,
+        mall_user_id=salesman.id, actor_type="mall_user",
+        request=request,
+        changes={"code": row.code, "reason": reason},
+    )
+
     await db.flush()
     return row
 

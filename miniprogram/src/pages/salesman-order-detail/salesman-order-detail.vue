@@ -8,12 +8,12 @@
     - 金额明细
     - 动态操作按钮（按状态显示 ship / deliver / upload-voucher / release）
 
-  接口：
-    - GET /api/mall/salesman/orders/{order_no}
-    - POST /api/mall/salesman/orders/{order_no}/ship
-    - POST /api/mall/salesman/orders/{order_no}/deliver
-    - POST /api/mall/salesman/orders/{order_no}/upload-payment-voucher
-    - POST /api/mall/salesman/orders/{order_no}/release
+  接口（后端路径参数全部是 order_id，不是 order_no）：
+    - GET /api/mall/salesman/orders/{order_id}
+    - POST /api/mall/salesman/orders/{order_id}/ship
+    - POST /api/mall/salesman/orders/{order_id}/deliver
+    - POST /api/mall/salesman/orders/{order_id}/upload-payment-voucher
+    - POST /api/mall/salesman/orders/{order_id}/release
 -->
 <template>
   <view class="page">
@@ -67,7 +67,7 @@
             收件人
           </text>
           <text class="section__val">
-            {{ order.address.receiver }}
+            {{ order.address && order.address.receiver }}
           </text>
           <text
             class="section__action"
@@ -81,7 +81,7 @@
             电话
           </text>
           <text class="section__val">
-            {{ order.customer_phone }}
+            {{ order.address && order.address.mobile }}
           </text>
         </view>
         <view class="section__row section__row--addr">
@@ -221,6 +221,7 @@
 const order = ref(null)
 const loading = ref(false)
 const orderNo = ref('')
+const orderId = ref('')
 
 const statusLabel = (s) => salesman.ORDER_STATUS_LABEL[s] || s
 const fmtMoney = salesman.fmtMoney
@@ -261,10 +262,12 @@ const loadOrder = async () => {
   loading.value = true
   try {
     const res = await http.request({
-      url: `/api/mall/salesman/orders/${orderNo.value}`,
+      url: `/api/mall/salesman/orders/${orderId.value}`,
       method: 'GET'
     })
     order.value = res.data
+    // 后端 detail VO 暂不含 orderId，兜底从 response 里读 (后端返回的 detail 里没有 id)；
+    // 若后续需要用到 id 做下游动作，仍用 orderId.value（从 query 来的那个）
   } finally {
     loading.value = false
   }
@@ -292,43 +295,68 @@ const onNavigate = () => {
 }
 
 const onShip = () => {
-  uni.showModal({
-    title: '标记已出库',
-    content: '确认商品已出库？出库后库存将扣减。',
-    success: async (r) => {
-      if (!r.confirm) return
-      await http.request({
-        url: `/api/mall/salesman/orders/${orderNo.value}/ship`,
-        method: 'POST',
-        data: {}
-      })
-      uni.showToast({ title: '已出库', icon: 'success' })
-      loadOrder()
-    }
+  uni.navigateTo({
+    url: `/pages/salesman-ship-scan/salesman-ship-scan?order_id=${orderId.value}&order_no=${orderNo.value}`
+  })
+}
+
+const uploadDeliveryPhoto = (localPath) => {
+  return new Promise((resolve, reject) => {
+    const token = uni.getStorageSync('Token')
+    uni.uploadFile({
+      url: (import.meta.env.VITE_APP_BASE_API || '') + '/api/mall/salesman/attachments/upload',
+      filePath: localPath,
+      name: 'file',
+      formData: { kind: 'delivery_photo' },
+      header: token ? { Authorization: token.startsWith('Bearer ') ? token : `Bearer ${token}` } : {},
+      success: (r) => {
+        try {
+          const body = typeof r.data === 'string' ? JSON.parse(r.data) : r.data
+          if (r.statusCode >= 200 && r.statusCode < 300 && body.url && body.sha256) {
+            resolve({ url: body.url, sha256: body.sha256, size: body.size, mime_type: body.mime_type })
+          } else {
+            reject(new Error(body.detail || body.msg || '上传失败'))
+          }
+        } catch (e) {
+          reject(e)
+        }
+      },
+      fail: (err) => reject(err)
+    })
   })
 }
 
 const onDeliver = () => {
-  // 正式实现需要 uni.chooseImage 拍送达照 + 上传
   uni.chooseImage({
     count: 3,
     sizeType: ['compressed'],
     sourceType: ['camera', 'album'],
-    success: async () => {
-      await http.request({
-        url: `/api/mall/salesman/orders/${orderNo.value}/deliver`,
-        method: 'POST',
-        data: { delivery_photos: ['mock-photo-url'] }
-      })
-      uni.showToast({ title: '已送达', icon: 'success' })
-      loadOrder()
+    success: async (res) => {
+      if (!res.tempFilePaths?.length) return
+      uni.showLoading({ title: '上传中...' })
+      try {
+        const photos = await Promise.all(res.tempFilePaths.map(uploadDeliveryPhoto))
+        uni.hideLoading()
+        uni.showLoading({ title: '标记送达...' })
+        await http.request({
+          url: `/api/mall/salesman/orders/${orderId.value}/deliver`,
+          method: 'POST',
+          data: { delivery_photos: photos }
+        })
+        uni.hideLoading()
+        uni.showToast({ title: '已送达', icon: 'success' })
+        loadOrder()
+      } catch (err) {
+        uni.hideLoading()
+        uni.showToast({ title: err?.message || err?.detail || '送达失败', icon: 'none' })
+      }
     }
   })
 }
 
 const onUploadVoucher = () => {
   uni.navigateTo({
-    url: `/pages/salesman-upload-voucher/salesman-upload-voucher?order_no=${orderNo.value}`
+    url: `/pages/salesman-upload-voucher/salesman-upload-voucher?order_id=${orderId.value}&order_no=${orderNo.value}`
   })
 }
 
@@ -340,7 +368,7 @@ const onRelease = () => {
     success: async (r) => {
       if (!r.confirm) return
       await http.request({
-        url: `/api/mall/salesman/orders/${orderNo.value}/release`,
+        url: `/api/mall/salesman/orders/${orderId.value}/release`,
         method: 'POST',
         data: { reason: '业务员主动释放' }
       })
@@ -351,8 +379,13 @@ const onRelease = () => {
 }
 
 onLoad((query) => {
+  orderId.value = query.order_id || ''
   orderNo.value = query.order_no || ''
-  if (orderNo.value) loadOrder()
+  // 兼容老跳转：若只传了 order_no 而没 order_id，记一条提示但后端会 404
+  if (orderId.value) loadOrder()
+  else if (orderNo.value) {
+    uni.showToast({ title: '订单 ID 缺失，请从列表重新进入', icon: 'none' })
+  }
 })
 </script>
 

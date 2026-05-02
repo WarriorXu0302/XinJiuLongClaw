@@ -27,6 +27,8 @@ import {
   EnvironmentOutlined,
   BellOutlined,
   WarningOutlined,
+  UserOutlined,
+  LoginOutlined,
 } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../stores/authStore';
@@ -101,6 +103,30 @@ const menuItems: MenuItem[] = [
       { key: '/finance/aging', icon: <WarningOutlined />, label: '应收账龄' },
       { key: '/finance/expenses', icon: <PayCircleOutlined />, label: '报销' },
       { key: '/finance/financing', icon: <BankOutlined />, label: '融资' },
+    ],
+  },
+  // ─── 商城 ───
+  {
+    type: 'group', label: '商城',
+    roles: ['admin', 'boss', 'finance', 'warehouse', 'hr'],
+    children: [
+      { key: '/mall/dashboard', icon: <DashboardOutlined />, label: '商城看板', roles: ['admin', 'boss', 'finance'] },
+      { key: '/mall/orders', icon: <ShoppingCartOutlined />, label: '商城订单', roles: ['admin', 'boss', 'finance'] },
+      { key: '/mall/products', icon: <AppstoreOutlined />, label: '商品', roles: ['admin', 'boss', 'purchase'] },
+      { key: '/mall/categories', icon: <TagsOutlined />, label: '分类与标签', roles: ['admin', 'boss'] },
+      { key: '/mall/consumers', icon: <UserOutlined />, label: 'C 端用户', roles: ['admin', 'boss', 'finance'] },
+      { key: '/mall/salesmen', icon: <TeamOutlined />, label: '业务员', roles: ['admin', 'boss', 'hr'] },
+      { key: '/mall/skip-alerts', icon: <WarningOutlined />, label: '跳单告警', roles: ['admin', 'boss'] },
+      { key: '/mall/invite-codes', icon: <BarcodeOutlined />, label: '邀请码', roles: ['admin', 'boss'] },
+      {
+        key: 'mall-audit', icon: <FileSearchOutlined />, label: '商城审计',
+        roles: ['admin', 'boss'],
+        children: [
+          { key: '/mall/audit/operations', icon: <AuditOutlined />, label: '操作审计' },
+          { key: '/mall/audit/login-logs', icon: <LoginOutlined />, label: '登录日志' },
+          { key: '/mall/audit/login-stats', icon: <DashboardOutlined />, label: '登录频率' },
+        ],
+      },
     ],
   },
   // ─── 人事 ───

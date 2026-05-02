@@ -769,23 +769,35 @@ async def pay_salary(rec_id: str, body: PaySalaryRequest, user: CurrentUser, db:
     rec.paid_by = user.get('employee_id')
     rec.payment_voucher_urls = body.voucher_urls
 
-    # 把本工资单挂的所有 mall_order 的 commission 标记为 settled
-    # （B2B 订单的 commission 已经在原有 finance 确认流程中处理；mall 是额外分支）
+    # 把本工资单挂的所有 mall commission 条目标记为 settled
+    # 按 commission_id 精确结算：避免 settle 了同 order 的其它未挂进本工资单的 top-up 条目
+    # （B2B 订单的 commission 已在原有 finance 确认流程中处理；mall 是额外分支）
     from sqlalchemy import update as _sql_update
-    mall_order_ids = (await db.execute(
-        select(SalaryOrderLink.mall_order_id)
+    linked_rows = (await db.execute(
+        select(SalaryOrderLink.commission_id, SalaryOrderLink.mall_order_id)
         .where(SalaryOrderLink.salary_record_id == rec.id)
         .where(SalaryOrderLink.mall_order_id.is_not(None))
         .where(SalaryOrderLink.is_manager_share.is_(False))
-    )).scalars().all()
-    if mall_order_ids:
+    )).all()
+    linked_commission_ids = [cid for cid, _ in linked_rows if cid]
+    mall_order_ids_legacy = [mid for cid, mid in linked_rows if not cid]
+    if linked_commission_ids:
         await db.execute(
             _sql_update(Commission)
-            .where(Commission.mall_order_id.in_(mall_order_ids))
+            .where(Commission.id.in_(linked_commission_ids))
+            .where(Commission.status == "pending")
+            .values(status="settled", settled_at=now)
+        )
+    if mall_order_ids_legacy:
+        # m5a4 之前建的 link 没有 commission_id，降级按 mall_order_id 兼容老数据
+        await db.execute(
+            _sql_update(Commission)
+            .where(Commission.mall_order_id.in_(mall_order_ids_legacy))
             .where(Commission.employee_id == rec.employee_id)
             .where(Commission.status == "pending")
             .values(status="settled", settled_at=now)
         )
+    mall_order_ids = [mid for _, mid in linked_rows if mid]  # 通知时计数用
 
     # 推送工资到账通知给员工本人
     from app.models.user import User
@@ -1303,18 +1315,19 @@ async def generate_salary_records(
         )).scalars().all()
 
         if mall_commission_rows:
-            # 排除已被其他 SalaryOrderLink 关联过的 mall 订单（幂等）
-            mall_order_ids = [c.mall_order_id for c in mall_commission_rows]
-            already_mall = (await db.execute(
-                select(SalaryOrderLink.mall_order_id)
-                .where(SalaryOrderLink.mall_order_id.in_(mall_order_ids))
+            # 排除已经挂进某个 SalaryOrderLink 的 commission 条目（按 commission_id 幂等）
+            # 这样 partial_closed 后 top-up 的新 commission 行（即使同一 mall_order）也能被本月扫入
+            commission_ids = [c.id for c in mall_commission_rows]
+            already_linked = (await db.execute(
+                select(SalaryOrderLink.commission_id)
+                .where(SalaryOrderLink.commission_id.in_(commission_ids))
                 .where(SalaryOrderLink.is_manager_share.is_(False))
             )).scalars().all()
-            already_mall_set = set(already_mall)
+            already_linked_set = set(x for x in already_linked if x)
 
             from app.models.mall.order import MallOrder
             for c in mall_commission_rows:
-                if c.mall_order_id in already_mall_set:
+                if c.id in already_linked_set:
                     continue
                 mall_order = await db.get(MallOrder, c.mall_order_id)
                 if mall_order is None:
@@ -1324,6 +1337,7 @@ async def generate_salary_records(
                 commission_total += amount
                 order_links.append({
                     "mall_order_id": c.mall_order_id,
+                    "commission_id": c.id,
                     "brand_id": c.brand_id,  # 可能 None
                     "receipt_amount": receipt,
                     "rate": receipt and (amount / receipt) or Decimal("0"),
@@ -1512,6 +1526,7 @@ async def generate_salary_records(
                 salary_record_id=rec.id,
                 order_id=link.get("order_id"),
                 mall_order_id=link.get("mall_order_id"),
+                commission_id=link.get("commission_id"),  # mall 路径带上；B2B 为 None
                 brand_id=link.get("brand_id"),
                 receipt_amount=link["receipt_amount"],
                 commission_rate_used=link["rate"],

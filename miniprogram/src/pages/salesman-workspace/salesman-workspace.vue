@@ -71,10 +71,13 @@
         </view>
       </view>
     </view>
+    <SalesmanTabbar active="workspace" />
   </view>
 </template>
 
 <script setup>
+import SalesmanTabbar from '@/components/salesman-tabbar/salesman-tabbar.vue'
+
 const todayCheckin = ref({ work_in: null, work_out: null })
 const badges = ref({ notifications: 0 })
 
@@ -132,7 +135,7 @@ onShow(() => {
 .page {
   min-height: 100vh;
   background: $color-cream;
-  padding-bottom: 40rpx;
+  padding-bottom: calc(150rpx + env(safe-area-inset-bottom));
 }
 
 .hero {

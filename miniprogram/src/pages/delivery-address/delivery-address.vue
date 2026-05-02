@@ -92,7 +92,7 @@ onShow(() => {
 const onGetList = () => {
   uni.showLoading()
   http.request({
-    url: '/p/address/list',
+    url: '/api/mall/addresses',
     method: 'GET'
   })
     .then(({ data }) => {
@@ -117,11 +117,9 @@ const onDefaultAddr = (e) => {
   const addrId = e.currentTarget.dataset.addrid
   uni.showLoading()
   http.request({
-    url: '/p/address/defaultAddr/' + addrId,
+    url: '/api/mall/addresses/' + addrId + '/default',
     method: 'PUT',
-    data: {
-      addrId
-    }
+    data: {}
   })
     .then(() => {
       uni.hideLoading()

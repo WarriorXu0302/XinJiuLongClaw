@@ -86,7 +86,7 @@ async def seed():
                 detail_html=f"<p>{name} · 严选正品，产地直发。</p>",
                 min_price=Decimal(str(min_p)),
                 max_price=Decimal(str(max_p)),
-                total_sales=100,
+                total_sales=0,  # 真实数据由订单 confirm_payment 累加
                 status=MallProductStatus.ON_SALE.value,
             )
             s.add(prod)

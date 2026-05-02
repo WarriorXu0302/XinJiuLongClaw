@@ -6,7 +6,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +31,9 @@ def _user_dict(u: MallUser) -> dict:
         "status": u.status,
         "linked_employee_id": u.linked_employee_id,
         "referrer_salesman_id": u.referrer_salesman_id,
+        "referrer_bound_at": u.referrer_bound_at,
+        "referrer_last_changed_at": u.referrer_last_changed_at,
+        "referrer_change_reason": u.referrer_change_reason,
         "last_order_at": u.last_order_at,
         "archived_at": u.archived_at,
         "created_at": u.created_at,
@@ -41,13 +44,22 @@ def _user_dict(u: MallUser) -> dict:
 async def list_users(
     user: CurrentUser,
     status: Optional[str] = Query(default=None),
-    user_type: Optional[str] = Query(default=None),
+    user_type: Optional[str] = Query(default=None, description="consumer / salesman"),
     referrer_id: Optional[str] = Query(default=None),
     keyword: Optional[str] = Query(default=None, description="昵称/手机号/用户名关键词"),
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
+    """C 端用户 / 业务员列表。
+
+    额外返回：
+      - order_count：已成交订单数（completed + partial_closed）
+      - total_gmv：累计实收金额
+      - referrer_nickname：推荐人昵称（C 端用户有）
+    """
+    from app.models.mall.order import MallOrder
+
     require_role(user, "admin", "boss", "finance")
     stmt = select(MallUser)
     if status:
@@ -69,10 +81,56 @@ async def list_users(
         select(func.count()).select_from(stmt.subquery())
     )).scalar() or 0)
     rows = (await db.execute(stmt.offset(skip).limit(limit))).scalars().all()
-    return {
-        "records": [_user_dict(u) for u in rows],
-        "total": total,
-    }
+
+    if not rows:
+        return {"records": [], "total": 0}
+
+    # 批量聚合订单数 + GMV
+    user_ids = [u.id for u in rows]
+    order_stats = dict((await db.execute(
+        select(
+            MallOrder.user_id,
+            func.count(MallOrder.id).label("cnt"),
+            func.coalesce(func.sum(MallOrder.received_amount), 0).label("gmv"),
+        )
+        .where(MallOrder.user_id.in_(user_ids))
+        .where(MallOrder.status.in_(["completed", "partial_closed"]))
+        .group_by(MallOrder.user_id)
+    )).all()).items() if False else {}  # 下面再写
+    # 重写：row 元组不能用 dict() 这种技巧
+    stats_rows = (await db.execute(
+        select(
+            MallOrder.user_id,
+            func.count(MallOrder.id),
+            func.coalesce(func.sum(MallOrder.received_amount), 0),
+        )
+        .where(MallOrder.user_id.in_(user_ids))
+        .where(MallOrder.status.in_(["completed", "partial_closed"]))
+        .group_by(MallOrder.user_id)
+    )).all()
+    stats_map = {uid: (cnt, gmv) for uid, cnt, gmv in stats_rows}
+
+    # 批量取推荐人昵称
+    referrer_ids = list({u.referrer_salesman_id for u in rows if u.referrer_salesman_id})
+    ref_map = {}
+    if referrer_ids:
+        ref_rows = (await db.execute(
+            select(MallUser).where(MallUser.id.in_(referrer_ids))
+        )).scalars().all()
+        ref_map = {r.id: r for r in ref_rows}
+
+    records = []
+    for u in rows:
+        cnt, gmv = stats_map.get(u.id, (0, 0))
+        ref = ref_map.get(u.referrer_salesman_id) if u.referrer_salesman_id else None
+        records.append({
+            **_user_dict(u),
+            "order_count": int(cnt),
+            "total_gmv": str(gmv or 0),
+            "referrer_nickname": ref.nickname if ref else None,
+            "referrer_phone": ref.phone if ref else None,
+        })
+    return {"records": records, "total": total}
 
 
 @router.get("/{user_id}")
@@ -81,11 +139,98 @@ async def get_user(
     user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    """详情 = 用户信息 + 订单历史（最多 20 条）+ 登录日志（最多 10 条）+ 地址"""
+    from app.models.mall.order import MallOrder
+    from app.models.mall.user import MallAddress, MallLoginLog
+
     require_role(user, "admin", "boss", "finance")
     u = await db.get(MallUser, user_id)
     if u is None:
         raise HTTPException(status_code=404, detail="用户不存在")
-    return _user_dict(u)
+
+    # 推荐人
+    ref = None
+    if u.referrer_salesman_id:
+        ref = await db.get(MallUser, u.referrer_salesman_id)
+
+    # 订单历史
+    orders = (await db.execute(
+        select(MallOrder)
+        .where(MallOrder.user_id == user_id)
+        .order_by(desc(MallOrder.created_at))
+        .limit(20)
+    )).scalars().all()
+
+    # 登录日志
+    logs = (await db.execute(
+        select(MallLoginLog)
+        .where(MallLoginLog.user_id == user_id)
+        .order_by(desc(MallLoginLog.login_at))
+        .limit(10)
+    )).scalars().all()
+
+    # 地址
+    addrs = (await db.execute(
+        select(MallAddress)
+        .where(MallAddress.user_id == user_id)
+        .order_by(desc(MallAddress.is_default), MallAddress.id)
+    )).scalars().all()
+
+    # 聚合订单统计
+    stats = (await db.execute(
+        select(
+            func.count(MallOrder.id),
+            func.coalesce(func.sum(MallOrder.received_amount), 0),
+        )
+        .where(MallOrder.user_id == user_id)
+        .where(MallOrder.status.in_(["completed", "partial_closed"]))
+    )).one()
+    order_count, total_gmv = int(stats[0] or 0), str(stats[1] or 0)
+
+    return {
+        **_user_dict(u),
+        "referrer": ({
+            "id": ref.id, "nickname": ref.nickname, "phone": ref.phone,
+        } if ref else None),
+        "order_count": order_count,
+        "total_gmv": total_gmv,
+        "orders": [
+            {
+                "id": o.id,
+                "order_no": o.order_no,
+                "status": o.status,
+                "payment_status": o.payment_status,
+                "total_amount": str(o.total_amount),
+                "received_amount": str(o.received_amount or 0),
+                "created_at": o.created_at,
+                "completed_at": o.completed_at,
+                "cancelled_at": o.cancelled_at,
+            }
+            for o in orders
+        ],
+        "login_logs": [
+            {
+                "id": l.id,
+                "login_at": l.login_at,
+                "login_method": l.login_method,
+                "ip_address": l.ip_address,
+                "user_agent": l.user_agent,
+                "client_app": l.client_app,
+            }
+            for l in logs
+        ],
+        "addresses": [
+            {
+                "id": a.id,
+                "receiver": a.receiver,
+                "mobile": a.mobile,
+                "province": a.province, "city": a.city, "area": a.area,
+                "addr": a.addr,
+                "is_default": a.is_default,
+            }
+            for a in addrs
+        ],
+    }
 
 
 # =============================================================================
@@ -101,6 +246,7 @@ async def reactivate(
     user_id: str,
     body: _StatusBody,
     user: CurrentUser,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """启用归档/禁用的用户。last_order_at 重置为 now，给 3 个月新的观察期。"""
@@ -124,7 +270,7 @@ async def reactivate(
         action="mall_user.reactivate",
         entity_type="MallUser",
         entity_id=u.id,
-        user=user,
+        user=user, request=request,
         changes={"from_status": old_status, "to_status": "active", "reason": body.reason},
     )
     await db.flush()
@@ -136,6 +282,7 @@ async def disable(
     user_id: str,
     body: _StatusBody,
     user: CurrentUser,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     require_role(user, "admin", "boss")
@@ -153,7 +300,7 @@ async def disable(
         action="mall_user.disable",
         entity_type="MallUser",
         entity_id=u.id,
-        user=user,
+        user=user, request=request,
         changes={"from_status": old_status, "to_status": "disabled", "reason": body.reason},
     )
     await db.flush()
@@ -174,6 +321,7 @@ async def change_referrer(
     user_id: str,
     body: _RebindBody,
     user: CurrentUser,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     require_role(user, "admin", "boss")
@@ -203,8 +351,40 @@ async def change_referrer(
         action="mall_user.change_referrer",
         entity_type="MallUser",
         entity_id=u.id,
-        user=user,
+        user=user, request=request,
         changes={"from": old, "to": body.new_referrer_id, "reason": body.reason},
     )
     await db.flush()
     return _user_dict(u)
+
+
+# =============================================================================
+# 辅助：active 业务员下拉（换绑用）
+# =============================================================================
+
+@router.get("/_helpers/salesmen")
+async def list_salesmen_helper(
+    user: CurrentUser,
+    keyword: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    require_role(user, "admin", "boss", "finance")
+    stmt = select(MallUser).where(
+        MallUser.user_type == MallUserType.SALESMAN.value
+    ).where(MallUser.status == MallUserStatus.ACTIVE.value)
+    if keyword:
+        kw = f"%{keyword}%"
+        from sqlalchemy import or_
+        stmt = stmt.where(or_(
+            MallUser.nickname.ilike(kw),
+            MallUser.phone.ilike(kw),
+            MallUser.username.ilike(kw),
+        ))
+    stmt = stmt.order_by(MallUser.created_at).limit(50)
+    rows = (await db.execute(stmt)).scalars().all()
+    return {
+        "records": [
+            {"id": u.id, "nickname": u.nickname, "phone": u.phone, "username": u.username}
+            for u in rows
+        ]
+    }

@@ -300,7 +300,7 @@ const loadTodayStatus = async () => {
       work_out: res.data?.work_out || null
     }
   } catch {
-    // 未实现端点时容错，不阻塞打卡
+    // 拉今日打卡状态失败不阻塞主流程；业务员仍可继续打卡
   }
 }
 

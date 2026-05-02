@@ -1,23 +1,316 @@
 /**
- * 商城运营看板（《商城》一级菜单首页）
+ * 商城运营看板
  *
- * 内容：今日/本月订单数、GMV、实收；业务员排行；商品销量排行；待处理项
- *
- * TODO(M5):
- *   - GET /api/mall/admin/dashboard/metrics
- *   - GET /api/mall/admin/dashboard/salesman-ranking
- *   - GET /api/mall/admin/dashboard/product-ranking
- *   - GET /api/mall/admin/dashboard/pending-tasks
+ * 顶部 4 大关键指标：今日订单 / 实收 / 新用户 / 取消（vs 昨日环比）
+ * 待处理红点：待接单 / 待财务确认 / 告警 / 低库存
+ * 本月 30 天趋势（迷你折线 SVG）
+ * 业务员排行 / 商品排行 / 低库存
  */
-import { Typography } from 'antd';
+import { Card, Col, Empty, Row, Space, Statistic, Table, Tag, Typography } from 'antd';
+import {
+  ShoppingCartOutlined, DollarOutlined, UserAddOutlined, StopOutlined,
+  WarningOutlined, FireOutlined, InboxOutlined, TrophyOutlined,
+} from '@ant-design/icons';
+import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
+import dayjs from 'dayjs';
+import api from '../../api/client';
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
+
+interface Summary {
+  today: { orders: number; received: string; new_users: number; cancelled: number };
+  yesterday: { orders: number; received: string };
+  pending: {
+    pending_assignment: number;
+    pending_payment_confirmation: number;
+    open_skip_alerts: number;
+    low_stock_count: number;
+  };
+  month: { orders: number; received: string; new_users: number };
+  trend: { day: string; orders: number; received: string }[];
+  salesman_rank: { id: string; nickname?: string; phone?: string; order_count: number; gmv: string }[];
+  product_rank: { id: number; name?: string; main_image?: string; quantity: number; amount: string }[];
+  low_stock: { inventory_id: string; product_id: number; product_name: string; spec?: string; quantity: number }[];
+}
+
+function diffPercent(today: number, yesterday: number): string {
+  if (yesterday === 0) return today > 0 ? '+∞' : '0%';
+  const rate = ((today - yesterday) / yesterday) * 100;
+  return `${rate >= 0 ? '+' : ''}${rate.toFixed(1)}%`;
+}
+
+// 迷你折线（简单 SVG，避免引 echarts）
+function MiniLineChart({
+  data,
+  metric,
+  color,
+  height = 200,
+}: {
+  data: { day: string; orders: number; received: string }[];
+  metric: 'orders' | 'received';
+  color: string;
+  height?: number;
+}) {
+  const values = data.map(d => metric === 'orders' ? d.orders : Number(d.received));
+  const max = Math.max(...values, 1);
+  const min = 0;
+  const w = 100 / (data.length - 1);
+
+  const points = values.map((v, i) => {
+    const x = i * w;
+    const y = ((max - v) / (max - min)) * 80 + 10; // padding 10 top/bottom
+    return `${x},${y}`;
+  }).join(' ');
+
+  // Fill area
+  const areaPoints = `0,100 ${points} 100,100`;
+
+  return (
+    <div style={{ position: 'relative', height }}>
+      <svg
+        viewBox="0 0 100 100"
+        preserveAspectRatio="none"
+        width="100%"
+        height={height}
+      >
+        <polygon points={areaPoints} fill={color} fillOpacity="0.15" />
+        <polyline points={points} fill="none" stroke={color} strokeWidth="0.5" strokeLinejoin="round" />
+        {values.map((v, i) => {
+          if (v === 0) return null;
+          const x = i * w;
+          const y = ((max - v) / (max - min)) * 80 + 10;
+          return <circle key={i} cx={x} cy={y} r="0.8" fill={color} />;
+        })}
+      </svg>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between',
+        fontSize: 11, color: '#999', marginTop: 4,
+      }}>
+        <span>{dayjs(data[0]?.day).format('MM-DD')}</span>
+        <span>{dayjs(data[data.length - 1]?.day).format('MM-DD')}</span>
+      </div>
+    </div>
+  );
+}
 
 export default function MallDashboard() {
+  const navigate = useNavigate();
+
+  const { data, isLoading } = useQuery<Summary>({
+    queryKey: ['mall-dashboard-summary'],
+    queryFn: () => api.get('/mall/admin/dashboard/summary').then(r => r.data),
+    refetchInterval: 30000,
+  });
+
+  if (isLoading || !data) {
+    return <div>加载中…</div>;
+  }
+
   return (
     <div>
-      <Title level={3}>商城看板</Title>
-      <p>TODO(M5): 今日订单 / GMV / 实收 / 业务员排行 / 商品排行 / 待处理项</p>
+      <Title level={4}>商城看板</Title>
+
+      {/* 4 大关键指标 */}
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={6}>
+          <Card size="small">
+            <Statistic
+              title={<><ShoppingCartOutlined /> 今日新单</>}
+              value={data.today.orders}
+              suffix={
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  昨日 {data.yesterday.orders} · {diffPercent(data.today.orders, data.yesterday.orders)}
+                </Text>
+              }
+            />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small">
+            <Statistic
+              title={<><DollarOutlined /> 今日实收</>}
+              value={Number(data.today.received)}
+              prefix="¥"
+              precision={2}
+              suffix={
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  昨日 ¥{Number(data.yesterday.received).toLocaleString()} ·{' '}
+                  {diffPercent(Number(data.today.received), Number(data.yesterday.received))}
+                </Text>
+              }
+              valueStyle={{ color: '#C9A961' }}
+            />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small">
+            <Statistic
+              title={<><UserAddOutlined /> 今日新增用户</>}
+              value={data.today.new_users}
+              valueStyle={{ color: '#52c41a' }}
+            />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small">
+            <Statistic
+              title={<><StopOutlined /> 今日取消单</>}
+              value={data.today.cancelled}
+              valueStyle={{ color: data.today.cancelled > 0 ? '#ff4d4f' : undefined }}
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      {/* 待处理事项 */}
+      <Card title="待处理事项" size="small" style={{ marginBottom: 16 }}>
+        <Space size="large" wrap>
+          <a onClick={() => navigate('/mall/orders?status=pending_assignment')}>
+            <Tag color={data.pending.pending_assignment > 0 ? 'orange' : 'default'}
+              style={{ fontSize: 14, padding: '4px 12px' }}>
+              <ShoppingCartOutlined /> 待接单 <strong>{data.pending.pending_assignment}</strong>
+            </Tag>
+          </a>
+          <a onClick={() => navigate('/approval/finance')}>
+            <Tag color={data.pending.pending_payment_confirmation > 0 ? 'gold' : 'default'}
+              style={{ fontSize: 14, padding: '4px 12px' }}>
+              <DollarOutlined /> 待财务确认 <strong>{data.pending.pending_payment_confirmation}</strong>
+            </Tag>
+          </a>
+          <a onClick={() => navigate('/mall/skip-alerts?status=open')}>
+            <Tag color={data.pending.open_skip_alerts > 0 ? 'red' : 'default'}
+              style={{ fontSize: 14, padding: '4px 12px' }}>
+              <WarningOutlined /> 未处理告警 <strong>{data.pending.open_skip_alerts}</strong>
+            </Tag>
+          </a>
+          <Tag color={data.pending.low_stock_count > 0 ? 'volcano' : 'default'}
+            style={{ fontSize: 14, padding: '4px 12px' }}>
+            <InboxOutlined /> 低库存 SKU <strong>{data.pending.low_stock_count}</strong>
+          </Tag>
+        </Space>
+      </Card>
+
+      {/* 本月累计 + 趋势 */}
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={12}>
+          <Card title="本月订单数趋势（近 30 天）" size="small"
+            extra={<Text strong>本月累计 {data.month.orders}</Text>}
+          >
+            <MiniLineChart data={data.trend} metric="orders" color="#1677ff" />
+          </Card>
+        </Col>
+        <Col span={12}>
+          <Card title="本月实收趋势（近 30 天）" size="small"
+            extra={<Text strong style={{ color: '#C9A961' }}>
+              本月累计 ¥{Number(data.month.received).toLocaleString()}
+            </Text>}
+          >
+            <MiniLineChart data={data.trend} metric="received" color="#C9A961" />
+          </Card>
+        </Col>
+      </Row>
+
+      {/* 排行 */}
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={12}>
+          <Card title={<><TrophyOutlined /> 本月业务员 GMV Top 5</>} size="small">
+            {data.salesman_rank.length === 0 ? <Empty description="本月暂无已完成订单" /> : (
+              <Table
+                dataSource={data.salesman_rank}
+                rowKey="id"
+                pagination={false}
+                size="small"
+                columns={[
+                  { title: '排名', key: 'rank', width: 60, align: 'center' as const,
+                    render: (_, __, idx) => {
+                      if (idx < 3) return <span style={{ fontSize: 18 }}>
+                        {['🥇', '🥈', '🥉'][idx]}
+                      </span>;
+                      return <span style={{ color: '#999' }}>{idx + 1}</span>;
+                    }},
+                  { title: '业务员', dataIndex: 'nickname' },
+                  { title: '订单', dataIndex: 'order_count', width: 70, align: 'right' as const },
+                  {
+                    title: 'GMV',
+                    dataIndex: 'gmv',
+                    width: 120,
+                    align: 'right' as const,
+                    render: (v: string) => <strong>¥{Number(v).toLocaleString()}</strong>,
+                  },
+                ]}
+              />
+            )}
+          </Card>
+        </Col>
+        <Col span={12}>
+          <Card title={<><FireOutlined /> 本月商品销量 Top 10</>} size="small">
+            {data.product_rank.length === 0 ? <Empty description="本月暂无销量" /> : (
+              <Table
+                dataSource={data.product_rank}
+                rowKey="id"
+                pagination={false}
+                size="small"
+                columns={[
+                  { title: '排名', key: 'rank', width: 50, align: 'center' as const,
+                    render: (_, __, idx) => idx + 1 },
+                  {
+                    title: '商品',
+                    dataIndex: 'name',
+                    ellipsis: true,
+                    render: (v, r) => (
+                      <Space>
+                        {r.main_image && (
+                          <img src={r.main_image} alt="" width={32} height={32}
+                            style={{ objectFit: 'cover', borderRadius: 2 }} />
+                        )}
+                        <span>{v}</span>
+                      </Space>
+                    ),
+                  },
+                  { title: '销量', dataIndex: 'quantity', width: 70, align: 'right' as const },
+                  {
+                    title: '销售额',
+                    dataIndex: 'amount',
+                    width: 100,
+                    align: 'right' as const,
+                    render: (v: string) => `¥${Number(v).toLocaleString()}`,
+                  },
+                ]}
+              />
+            )}
+          </Card>
+        </Col>
+      </Row>
+
+      {/* 低库存告警 */}
+      {data.low_stock.length > 0 && (
+        <Card title={<><InboxOutlined /> 低库存预警（≤ 10 瓶）</>} size="small"
+          style={{ marginBottom: 16 }}
+        >
+          <Table
+            dataSource={data.low_stock}
+            rowKey="inventory_id"
+            pagination={false}
+            size="small"
+            columns={[
+              { title: '商品', dataIndex: 'product_name' },
+              { title: '规格', dataIndex: 'spec' },
+              {
+                title: '剩余',
+                dataIndex: 'quantity',
+                width: 100,
+                align: 'right' as const,
+                render: (v: number) => (
+                  <Tag color={v === 0 ? 'red' : v < 5 ? 'volcano' : 'orange'}>
+                    {v} 瓶
+                  </Tag>
+                ),
+              },
+            ]}
+          />
+        </Card>
+      )}
     </div>
   );
 }

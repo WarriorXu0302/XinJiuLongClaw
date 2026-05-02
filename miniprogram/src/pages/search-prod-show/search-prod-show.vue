@@ -171,13 +171,12 @@ const searchProdList = ref([])
  */
 const toLoadData = () => {
   http.request({
-    url: '/search/searchProdPage',
+    url: '/api/mall/search/products',
     method: 'GET',
     data: {
-      current: 1,
-      prodName: prodName.value,
-      size: 10,
-      sort: sts.value
+      q: prodName.value,
+      skip: 0,
+      limit: 10
     }
   })
     .then(({ data }) => {

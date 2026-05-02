@@ -217,7 +217,7 @@ const toClassifyPage = (e) => {
 
 const getTag = () => {
   http.request({
-    url: '/prod/tag/prodTagList',
+    url: '/api/mall/products/tags',
     method: 'GET',
     data: {}
   })
@@ -235,9 +235,9 @@ const getTag = () => {
 
 const getTagProd = (id, index) => {
   http.request({
-    url: '/prod/prodListByTagId',
+    url: '/api/mall/products',
     method: 'GET',
-    data: { tagId: id, size: 12 }
+    data: { tag_id: id, limit: 12 }
   })
     .then(({ data }) => {
       updata.value = false

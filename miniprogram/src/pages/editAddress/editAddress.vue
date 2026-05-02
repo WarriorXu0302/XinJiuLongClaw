@@ -136,10 +136,11 @@ onLoad((options) => {
     uni.showLoading()
 
     http.request({
-      url: '/p/address/addrInfo/' + options.addrId,
+      url: '/api/mall/addresses/' + options.addrId,
       method: 'GET'
     })
       .then(({ data }) => {
+        // MallAddressVO: provinceId/cityId/areaId（都是字符串 area_code）
         province.value = data.province
         city.value = data.city
         area.value = data.area
@@ -163,11 +164,9 @@ const valArr = ref([0, 0, 0])
 const initCityData = (provinceId, cityId, areaId) => {
   uni.showLoading()
   http.request({
-    url: '/p/area/listByPid',
+    url: '/api/mall/regions',
     method: 'GET',
-    data: {
-      pid: 0
-    }
+    data: {}
   })
     .then(({ data }) => {
       provArray.value = data
@@ -265,10 +264,10 @@ const animationEvents = (moveY, showParam) => {
  */
 const getCityArray = (provinceId, cityId, areaId) => {
   http.request({
-    url: '/p/area/listByPid',
+    url: '/api/mall/regions',
     method: 'GET',
     data: {
-      pid: provinceId
+      parent_code: provinceId
     }
   })
     .then(({ data }) => {
@@ -290,10 +289,10 @@ const getCityArray = (provinceId, cityId, areaId) => {
  */
 const getAreaArray = (cityId, areaId) => {
   http.request({
-    url: '/p/area/listByPid',
+    url: '/api/mall/regions',
     method: 'GET',
     data: {
-      pid: cityId
+      parent_code: cityId
     }
   }).then(({ data }) => {
     areaArray.value = data
@@ -359,11 +358,11 @@ const onSaveAddr = () => {
   }
 
   uni.showLoading()
-  let url = '/p/address/addAddr'
+  let url = '/api/mall/addresses'
   let method = 'POST'
 
   if (addrId.value != 0) {
-    url = '/p/address/updateAddr'
+    url = '/api/mall/addresses/' + addrId.value
     method = 'PUT'
   } // 添加或修改地址
 
@@ -380,8 +379,7 @@ const onSaveAddr = () => {
       cityId: cityId.value,
       areaId: areaId.value,
       area: area.value,
-      userType: 0,
-      addrId: addrId.value
+      commonAddr: false
     }
   })
     .then(() => {
@@ -415,7 +413,7 @@ const onDeleteAddr = () => {
         const addrIdParam = addrId.value
         uni.showLoading()
         http.request({
-          url: '/p/address/deleteAddr/' + addrIdParam,
+          url: '/api/mall/addresses/' + addrIdParam,
           method: 'DELETE'
         })
           .then(() => {

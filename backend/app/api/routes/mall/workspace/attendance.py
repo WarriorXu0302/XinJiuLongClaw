@@ -275,3 +275,114 @@ async def list_visits(
             for r in rows
         ]
     }
+
+
+# =============================================================================
+# 月度汇总（业务员自己的）
+# =============================================================================
+
+@router.get("/monthly-summary")
+async def monthly_summary(
+    current: CurrentMallUser,
+    period: Optional[str] = None,
+    db: AsyncSession = Depends(get_mall_db),
+):
+    """月度考勤汇总（仅返回本业务员自己的）。
+
+    period 格式 YYYY-MM；不传则取本月（Asia/Shanghai）。
+    """
+    from datetime import date, timedelta
+    from decimal import Decimal
+
+    from app.models.attendance import LeaveRequest
+
+    user = await _require_linked_salesman(current, db)
+    emp_id = user.linked_employee_id
+
+    if not period:
+        now = datetime.now(ZoneInfo("Asia/Shanghai"))
+        period = f"{now.year:04d}-{now.month:02d}"
+    try:
+        y, m = map(int, period.split("-"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="period 格式应为 YYYY-MM")
+
+    start = date(y, m, 1)
+    end = date(y + 1, 1, 1) - timedelta(days=1) if m == 12 else date(y, m + 1, 1) - timedelta(days=1)
+
+    checkins = (await db.execute(
+        select(CheckinRecord).where(
+            CheckinRecord.employee_id == emp_id,
+            CheckinRecord.checkin_date.between(start, end),
+        )
+    )).scalars().all()
+    late_times = sum(1 for c in checkins if c.status == "late")
+    late_over30 = sum(1 for c in checkins if c.status == "late_over30")
+
+    leaves = (await db.execute(
+        select(LeaveRequest).where(
+            LeaveRequest.employee_id == emp_id,
+            LeaveRequest.status == "approved",
+            LeaveRequest.start_date <= end,
+            LeaveRequest.end_date >= start,
+        )
+    )).scalars().all()
+    leave_days = sum(float(l.total_days) for l in leaves)
+
+    visits = (await db.execute(
+        select(CustomerVisit).where(
+            CustomerVisit.employee_id == emp_id,
+            CustomerVisit.visit_date.between(start, end),
+            CustomerVisit.is_valid.is_(True),
+        )
+    )).scalars().all()
+
+    non_overtime_leaves = [l for l in leaves if l.leave_type != "overtime_off"]
+    is_full_attendance = (
+        late_times == 0 and late_over30 == 0 and len(non_overtime_leaves) == 0
+    )
+
+    return {
+        "period": period,
+        "employee_id": emp_id,
+        "late_times": late_times,
+        "late_over30_times": late_over30,
+        "leave_days": leave_days,
+        "valid_visits": len(visits),
+        "is_full_attendance": is_full_attendance,
+    }
+
+
+# =============================================================================
+# checkin 历史（GET — 前端 salesman-attendance 拉历史打卡记录）
+# =============================================================================
+
+@router.get("/checkin")
+async def list_checkins(
+    current: CurrentMallUser,
+    db: AsyncSession = Depends(get_mall_db),
+):
+    user = await _require_linked_salesman(current, db)
+    rows = (await db.execute(
+        select(CheckinRecord)
+        .where(CheckinRecord.employee_id == user.linked_employee_id)
+        .order_by(desc(CheckinRecord.checkin_date))
+        .limit(60)
+    )).scalars().all()
+    return {
+        "records": [
+            {
+                "id": r.id,
+                "checkin_date": r.checkin_date,
+                "checkin_time": r.checkin_time,
+                "checkin_type": r.checkin_type,
+                "status": r.status,
+                "late_minutes": r.late_minutes,
+                "latitude": r.latitude,
+                "longitude": r.longitude,
+                "photo_url": r.photo_url,
+                "notes": r.notes,
+            }
+            for r in rows
+        ]
+    }

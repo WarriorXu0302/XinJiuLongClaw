@@ -25,6 +25,8 @@ from app.schemas.mall.auth import (
     MallWechatLoginRequest,
     MallWechatRegisterRequest,
 )
+from app.core.database import admin_session_factory
+from app.services.audit_service import log_audit
 from app.services.mall import auth_service
 from app.services.mall.validators import assert_mall_user_active
 
@@ -41,9 +43,33 @@ async def login_password(
     request: Request,
     db: AsyncSession = Depends(get_mall_db),
 ):
-    user = await auth_service.authenticate_by_password(
-        db, payload.username, payload.password
-    )
+    try:
+        user = await auth_service.authenticate_by_password(
+            db, payload.username, payload.password
+        )
+    except HTTPException as exc:
+        # 审计登录失败（账户安全：识别暴力破解 / 撞库）
+        # 用独立 session 写，不污染主事务（主事务会 rollback + raise）
+        async with admin_session_factory() as audit_session:
+            existing = await auth_service.get_mall_user_by_username(
+                audit_session, payload.username
+            )
+            await log_audit(
+                audit_session, action="mall_user.login_failed",
+                entity_type="MallUser",
+                entity_id=existing.id if existing else None,
+                mall_user_id=existing.id if existing else None,
+                actor_type="mall_user" if existing else "anonymous",
+                request=request,
+                changes={
+                    "username_tried": payload.username,
+                    "user_exists": bool(existing),
+                    "status_code": exc.status_code,
+                    "reason": exc.detail,
+                },
+            )
+            await audit_session.commit()
+        raise
     await auth_service.record_login_log(
         db,
         user=user,

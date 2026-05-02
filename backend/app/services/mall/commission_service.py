@@ -11,7 +11,7 @@ Mall 提成服务。
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -51,66 +51,84 @@ async def _resolve_commission_rate(
 async def post_commission_for_order(
     db: AsyncSession, order: MallOrder
 ) -> list[Commission]:
-    """订单首次结算时写 commission。
+    """订单首次结算 / 补录恢复时写 commission。
 
-    幂等：order.commission_posted=True 时跳过。
+    幂等 + 增量补发：
+      - 按 received_amount 切分到各 brand 得到目标提成
+      - 查本订单已写入的各 brand commission 合计
+      - 仅差额 > 0 时追加一条新 commission（首次调用就是全额）
+
+    覆盖以下场景：
+      1. 首次全款 confirm_payment → 全额首次入账
+      2. partial_closed 时 received>0 → 仅对已收部分计提成
+      3. partial_closed 恢复 completed → 对新增部分补提成（旧逻辑会跳过）
     """
-    if order.commission_posted:
-        return []
     if not order.assigned_salesman_id:
-        # 没有配送业务员（理论不会到 confirm_payment；留兜底日志）
         return []
 
     salesman = (await db.execute(
         select(MallUser).where(MallUser.id == order.assigned_salesman_id)
     )).scalar_one_or_none()
     if salesman is None or not salesman.linked_employee_id:
-        # 业务员没有绑 employee，无法入 ERP commission 表
         return []
 
-    # 取订单 items，按 brand_id 分组
     items = (await db.execute(
         select(MallOrderItem).where(MallOrderItem.order_id == order.id)
     )).scalars().all()
     if not items:
         return []
 
-    # 实收 = received_amount；按 item.subtotal / total_amount 切分收入到各 brand
     total_amount = order.total_amount or Decimal("0")
     received = order.received_amount or Decimal("0")
     if total_amount <= 0 or received <= 0:
         return []
 
-    # 按 brand 聚合 items 的 subtotal
     brand_subtotal: dict[Optional[str], Decimal] = {}
     for it in items:
         brand_subtotal[it.brand_id] = (
             brand_subtotal.get(it.brand_id, Decimal("0")) + (it.subtotal or Decimal("0"))
         )
 
+    # 本订单已写入的各 brand commission 合计（只数 pending+settled；rejected/void 不算）
+    existing_rows = (await db.execute(
+        select(Commission.brand_id, func.coalesce(func.sum(Commission.commission_amount), 0))
+        .where(Commission.mall_order_id == order.id)
+        .where(Commission.status.in_(["pending", "settled"]))
+        .group_by(Commission.brand_id)
+    )).all()
+    existing_by_brand: dict[Optional[str], Decimal] = {
+        bid: Decimal(str(amt or 0)) for bid, amt in existing_rows
+    }
+
     commissions: list[Commission] = []
     for brand_id, subtotal in brand_subtotal.items():
         if subtotal <= 0:
             continue
-        # 按 subtotal 占比切收入
         brand_income = (received * subtotal / total_amount).quantize(Decimal("0.01"))
         rate = await _resolve_commission_rate(
             db, salesman.linked_employee_id, brand_id
         )
-        amount = (brand_income * rate).quantize(Decimal("0.01"))
-        if amount <= 0:
+        target_amount = (brand_income * rate).quantize(Decimal("0.01"))
+        already = existing_by_brand.get(brand_id, Decimal("0"))
+        delta = (target_amount - already).quantize(Decimal("0.01"))
+        if delta <= 0:
             continue
         c = Commission(
             employee_id=salesman.linked_employee_id,
             brand_id=brand_id,
             mall_order_id=order.id,
-            commission_amount=amount,
+            commission_amount=delta,
             status="pending",
-            notes=f"Mall 订单 {order.order_no} · 品牌提成率 {rate}",
+            notes=(
+                f"Mall 订单 {order.order_no} · 品牌提成率 {rate} · "
+                f"{'补发差额' if already > 0 else '首次入账'}"
+            ),
         )
         db.add(c)
         commissions.append(c)
 
-    order.commission_posted = True
+    # commission_posted 标记保留语义：True 表示本订单至少发过一笔提成
+    if commissions:
+        order.commission_posted = True
     await db.flush()
     return commissions

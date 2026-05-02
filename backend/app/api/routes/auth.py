@@ -1,13 +1,13 @@
 """
 Authentication API routes — login, token refresh, user info.
 """
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.database import get_db, get_db_anon
+from app.core.database import admin_session_factory, get_db, get_db_anon
 from app.core.security import (
     CurrentUser,
     create_access_token,
@@ -18,6 +18,7 @@ from app.core.security import (
 )
 from app.models.user import Role, User, UserRole
 from app.models.payroll import EmployeeBrandPosition
+from app.services.audit_service import log_audit
 
 router = APIRouter()
 
@@ -80,8 +81,37 @@ async def build_jwt_payload(db: AsyncSession, user: User) -> dict:
     }
 
 
+async def _audit_login_failure(
+    request: Request, username: str, user_obj: User | None,
+    status_code: int, reason: str,
+):
+    """登录失败审计 —— 独立 session，和主事务解耦。
+
+    注意：audit_logs.actor_id FK → employees.id；
+    用户不一定绑定 employee（如纯管理员），所以 actor_id 只在 user.employee_id 存在时写。
+    entity_id 写 user.id（User 表的主键），便于按账户反查。
+    """
+    async with admin_session_factory() as s:
+        await log_audit(
+            s, action="user.login_failed",
+            entity_type="User",
+            entity_id=user_obj.id if user_obj else None,
+            actor_id=user_obj.employee_id if user_obj else None,
+            actor_type="employee" if user_obj else "anonymous",
+            request=request,
+            changes={
+                "username_tried": username,
+                "user_id": user_obj.id if user_obj else None,
+                "user_exists": bool(user_obj),
+                "status_code": status_code,
+                "reason": reason,
+            },
+        )
+        await s.commit()
+
+
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db_anon)):
+async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db_anon)):
     user = (
         await db.execute(
             select(User)
@@ -91,11 +121,17 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db_anon)):
     ).scalar_one_or_none()
 
     if user is None or not verify_password(body.password, user.hashed_password):
+        await _audit_login_failure(
+            request, body.username, user, 401, "Incorrect username or password",
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
         )
     if not user.is_active:
+        await _audit_login_failure(
+            request, body.username, user, 403, "Account is disabled",
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is disabled",
@@ -204,7 +240,7 @@ async def list_users(
 
 
 @router.post("/users", status_code=201)
-async def create_user(body: CreateUserRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+async def create_user(body: CreateUserRequest, user: CurrentUser, request: Request, db: AsyncSession = Depends(get_db)):
     """Create a new user account with optional role assignment."""
     from app.core.permissions import require_role
     require_role(user, "boss")
@@ -228,6 +264,17 @@ async def create_user(body: CreateUserRequest, user: CurrentUser, db: AsyncSessi
             db.add(UserRole(id=str(uuid.uuid4()), user_id=new_user.id, role_id=r.id))
         await db.flush()
 
+    # 审计：创建账户
+    await log_audit(
+        db, action="user.create", entity_type="User",
+        entity_id=new_user.id, user=user, request=request,
+        changes={
+            "username": new_user.username,
+            "employee_id": new_user.employee_id,
+            "role_codes": body.role_codes or [],
+        },
+    )
+
     # Re-fetch with relationships
     refreshed = (await db.execute(
         select(User).where(User.id == new_user.id)
@@ -237,19 +284,33 @@ async def create_user(body: CreateUserRequest, user: CurrentUser, db: AsyncSessi
 
 
 @router.put("/users/{user_id}")
-async def update_user(user_id: str, body: UpdateUserRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+async def update_user(user_id: str, body: UpdateUserRequest, user: CurrentUser, request: Request, db: AsyncSession = Depends(get_db)):
     from app.core.permissions import require_role
     require_role(user, "boss")
     u = await db.get(User, user_id)
     if u is None:
         raise HTTPException(404, "用户不存在")
-    if body.username is not None:
+    changes: dict = {}
+    if body.username is not None and body.username != u.username:
+        changes["username"] = {"from": u.username, "to": body.username}
         u.username = body.username
     if body.employee_id is not None:
-        u.employee_id = body.employee_id or None
-    if body.is_active is not None:
+        new_emp = body.employee_id or None
+        if new_emp != u.employee_id:
+            changes["employee_id"] = {"from": u.employee_id, "to": new_emp}
+            u.employee_id = new_emp
+    if body.is_active is not None and body.is_active != u.is_active:
+        changes["is_active"] = {"from": u.is_active, "to": body.is_active}
         u.is_active = body.is_active
     await db.flush()
+
+    if changes:
+        await log_audit(
+            db, action="user.update", entity_type="User",
+            entity_id=u.id, user=user, request=request,
+            changes={"username": u.username, **changes},
+        )
+
     refreshed = (await db.execute(
         select(User).where(User.id == user_id)
         .options(selectinload(User.roles).selectinload(UserRole.role), selectinload(User.employee))
@@ -258,25 +319,39 @@ async def update_user(user_id: str, body: UpdateUserRequest, user: CurrentUser, 
 
 
 @router.post("/users/{user_id}/reset-password")
-async def reset_password(user_id: str, body: ResetPasswordRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+async def reset_password(user_id: str, body: ResetPasswordRequest, user: CurrentUser, request: Request, db: AsyncSession = Depends(get_db)):
     from app.core.permissions import require_role
     require_role(user, "boss")
     u = await db.get(User, user_id)
     if u is None:
         raise HTTPException(404, "用户不存在")
     u.hashed_password = get_password_hash(body.new_password)
+
+    # 审计：重置密码（敏感账户操作）
+    await log_audit(
+        db, action="user.reset_password", entity_type="User",
+        entity_id=u.id, user=user, request=request,
+        changes={"username": u.username},
+    )
+
     await db.flush()
     return {"detail": "密码已重置"}
 
 
 @router.put("/users/{user_id}/roles")
-async def set_user_roles(user_id: str, body: SetRolesRequest, user: CurrentUser, db: AsyncSession = Depends(get_db)):
+async def set_user_roles(user_id: str, body: SetRolesRequest, user: CurrentUser, request: Request, db: AsyncSession = Depends(get_db)):
     """Replace all roles for a user."""
     from app.core.permissions import require_role
     require_role(user, "boss")
     u = await db.get(User, user_id)
     if u is None:
         raise HTTPException(404, "用户不存在")
+
+    # 查旧角色用于审计
+    old_roles = (await db.execute(
+        select(Role.code).join(UserRole, UserRole.role_id == Role.id)
+        .where(UserRole.user_id == user_id)
+    )).scalars().all()
 
     # Delete existing roles
     existing = (await db.execute(select(UserRole).where(UserRole.user_id == user_id))).scalars().all()
@@ -291,6 +366,18 @@ async def set_user_roles(user_id: str, body: SetRolesRequest, user: CurrentUser,
             db.add(UserRole(id=str(uuid.uuid4()), user_id=user_id, role_id=r.id))
 
     await db.flush()
+
+    # 审计：角色变更是最高级别权限变动，必记
+    await log_audit(
+        db, action="user.set_roles", entity_type="User",
+        entity_id=u.id, user=user, request=request,
+        changes={
+            "username": u.username,
+            "from": sorted(old_roles),
+            "to": sorted(body.role_codes or []),
+        },
+    )
+
     refreshed = (await db.execute(
         select(User).where(User.id == user_id)
         .options(selectinload(User.roles).selectinload(UserRole.role), selectinload(User.employee))

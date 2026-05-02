@@ -8,7 +8,7 @@ POST /{id}/invalidate  业务员作废未用邀请码
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -74,12 +74,14 @@ class _InvalidateBody(BaseModel):
 async def invalidate(
     code_id: str,
     current: CurrentMallUser,
+    request: Request,
     body: Optional[_InvalidateBody] = None,
     db: AsyncSession = Depends(get_mall_db),
 ):
     _require_salesman(current)
     user = await auth_service.verify_token_and_load_user(db, current)
     row = await invite_service.invalidate_invite_code(
-        db, user, code_id, reason=body.reason if body else None
+        db, user, code_id, reason=body.reason if body else None,
+        request=request,
     )
     return _invite_to_dict(row)

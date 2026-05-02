@@ -6,9 +6,9 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -28,26 +28,93 @@ async def list_pending(
     limit: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
+    """财务审批中心：待确认的商城收款凭证。
+
+    返回字段补全为前端表格直接可用：
+      - order_no / pay_amount / received_amount：财务看应收 vs 已确认 vs 本次凭证
+      - salesman: {nickname, phone}：知道找谁追凭证
+      - customer: {nickname, mobile}：电话回访核实
+      - voucher_urls: list[{url, sha256, file_size}]：所有凭证图
+      - remarks：上传时的备注
+    """
+    from app.models.mall.base import MallAttachmentType
+    from app.models.mall.order import MallAttachment
+    from app.models.mall.user import MallUser
+
     require_role(user, "admin", "boss", "finance")
     stmt = (
         select(MallPayment)
         .where(MallPayment.status == MallPaymentApprovalStatus.PENDING_CONFIRMATION.value)
         .order_by(desc(MallPayment.created_at))
     )
+    total = int((await db.execute(
+        select(func.count()).select_from(stmt.subquery())
+    )).scalar() or 0)
     rows = (await db.execute(stmt.offset(skip).limit(limit))).scalars().all()
-    return {
-        "records": [
-            {
-                "id": p.id,
-                "order_id": p.order_id,
-                "amount": str(p.amount),
-                "payment_method": p.payment_method,
-                "uploaded_by_user_id": p.uploaded_by_user_id,
-                "created_at": p.created_at,
-            }
-            for p in rows
-        ]
-    }
+
+    if not rows:
+        return {"records": [], "total": 0}
+
+    # 批量拉关联：order / salesman / customer / voucher
+    order_ids = list({p.order_id for p in rows})
+    payment_ids = [p.id for p in rows]
+    uploader_ids = list({p.uploaded_by_user_id for p in rows})
+
+    orders = (await db.execute(
+        select(MallOrder).where(MallOrder.id.in_(order_ids))
+    )).scalars().all()
+    order_map = {o.id: o for o in orders}
+
+    customer_ids = list({o.user_id for o in orders})
+    users = (await db.execute(
+        select(MallUser).where(MallUser.id.in_(set(uploader_ids) | set(customer_ids)))
+    )).scalars().all()
+    user_map = {u.id: u for u in users}
+
+    attachments = (await db.execute(
+        select(MallAttachment)
+        .where(MallAttachment.kind == MallAttachmentType.PAYMENT_VOUCHER.value)
+        .where(MallAttachment.ref_type == "payment")
+        .where(MallAttachment.ref_id.in_(payment_ids))
+        .order_by(MallAttachment.created_at)
+    )).scalars().all()
+    atts_by_payment: dict[str, list] = {}
+    for a in attachments:
+        atts_by_payment.setdefault(a.ref_id, []).append({
+            "url": a.file_url,
+            "sha256": a.sha256,
+            "file_size": a.file_size,
+            "mime_type": a.mime_type,
+        })
+
+    records = []
+    for p in rows:
+        order = order_map.get(p.order_id)
+        salesman = user_map.get(p.uploaded_by_user_id)
+        customer = user_map.get(order.user_id) if order else None
+        records.append({
+            "id": p.id,
+            "order_id": p.order_id,
+            "order_no": order.order_no if order else None,
+            "pay_amount": str(order.pay_amount) if order and order.pay_amount is not None else None,
+            "received_amount": str(order.received_amount) if order and order.received_amount is not None else "0",
+            "payment_amount": str(p.amount),
+            "payment_method": p.payment_method,
+            "channel": p.channel,
+            "salesman": ({
+                "id": salesman.id,
+                "nickname": salesman.nickname,
+                "phone": salesman.phone,
+            } if salesman else None),
+            "customer": ({
+                "nickname": customer.nickname,
+                "mobile": (order.address_snapshot or {}).get("mobile") if order else None,
+            } if customer else None),
+            "voucher_urls": atts_by_payment.get(p.id, []),
+            "order_status": order.status if order else None,
+            "created_at": p.created_at,
+        })
+    return {"records": records, "total": total}
 
 
 class _RejectBody(BaseModel):
@@ -59,6 +126,7 @@ async def reject(
     payment_id: str,
     body: _RejectBody,
     user: CurrentUser,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     require_role(user, "admin", "boss", "finance")
@@ -72,11 +140,13 @@ async def reject(
     p.rejected_reason = body.reason
 
     # 如果订单所有 pending 凭证都被驳回 → 状态回到 delivered 等重传
+    # 注意：当前这条 p 在内存里已改成 REJECTED 但还没 flush，查询时要排除它的 id
     order = await db.get(MallOrder, p.order_id)
     if order and order.status == "pending_payment_confirmation":
         remaining = (await db.execute(
             select(MallPayment)
             .where(MallPayment.order_id == order.id)
+            .where(MallPayment.id != p.id)
             .where(MallPayment.status == MallPaymentApprovalStatus.PENDING_CONFIRMATION.value)
         )).scalars().all()
         if not remaining:
@@ -88,7 +158,7 @@ async def reject(
         action="mall_payment.reject",
         entity_type="MallPayment",
         entity_id=p.id,
-        user=user,
+        user=user, request=request,
         changes={"order_id": p.order_id, "amount": str(p.amount), "reason": body.reason},
     )
     await db.flush()
@@ -121,6 +191,7 @@ async def manual_record_payment(
     order_id: str,
     body: _ManualPaymentBody,
     user: CurrentUser,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Admin 补录线下收款。适用场景：
@@ -215,7 +286,7 @@ async def manual_record_payment(
         action="mall_payment.manual_record",
         entity_type="MallOrder",
         entity_id=order.id,
-        user=user,
+        user=user, request=request,
         changes={
             "amount": str(amount),
             "method": body.payment_method,

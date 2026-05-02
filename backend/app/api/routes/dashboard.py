@@ -293,6 +293,34 @@ async def profit_summary(
     # 分货本身没有利润/亏损，只是回款调整，暂记0
     items.append(ProfitItem(category='share_diff', label='分货差价', amount=0, direction='expense'))
 
+    # --- 10.5 商城（mall）销售利润 + 10.6 商城坏账 ---
+    # mall 独立记账：order.completed_at / partial_closed 在窗口内的，按 item.brand 切分收入
+    # 毛利 = 按比例切分的 received_amount − cost_price_snapshot × qty − commission − bad_debt
+    # bad_debt 单独列一行方便老板看"损失多少"（total_profit 里已扣过）
+    try:
+        from app.services.mall.profit_service import aggregate_mall_profit
+        mall_agg = await aggregate_mall_profit(
+            db, date_from=d_from, date_to=d_to, brand_id=brand_id,
+        )
+        mall_profit = float(mall_agg.get("total_profit") or 0)
+        mall_bad_debt = float(mall_agg.get("total_bad_debt") or 0)
+        items.append(ProfitItem(
+            category='mall_sales',
+            label='商城销售利润',
+            amount=abs(mall_profit),
+            direction='income' if mall_profit >= 0 else 'expense',
+        ))
+        if mall_bad_debt > 0:
+            items.append(ProfitItem(
+                category='mall_bad_debt',
+                label='商城坏账（60 天未收款）',
+                amount=mall_bad_debt,
+                direction='expense',
+            ))
+    except Exception as _e:
+        # 不影响主报表：mall 模块未初始化也能正常查 ERP 其他科目
+        items.append(ProfitItem(category='mall_sales', label='商城销售利润', amount=0, direction='income'))
+
     # --- 11. 人力成本净额（主属该品牌员工工资 + 公司社保 + 提成 - 实际厂家补贴回款） ---
     try:
         from app.models.payroll import SalaryRecord, EmployeeBrandPosition, ManufacturerSalarySubsidy

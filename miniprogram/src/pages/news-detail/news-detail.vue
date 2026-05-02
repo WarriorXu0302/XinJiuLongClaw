@@ -24,7 +24,7 @@ const news = ref({
 onLoad((options) => {
   // 加载公告详情
   http.request({
-    url: '/shop/notice/info/' + options.id,
+    url: '/api/mall/notices/' + options.id,
     method: 'GET'
   })
     .then(({ data }) => {

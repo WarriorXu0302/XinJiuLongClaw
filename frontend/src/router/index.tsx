@@ -53,6 +53,17 @@ import MobileCheckin from '../pages/mobile/MobileCheckin';
 import MobileNotifications from '../pages/mobile/MobileNotifications';
 import PolicyTemplateList from '../pages/policies/PolicyTemplateList';
 import AuditLogList from '../pages/audit/AuditLogList';
+import MallOrderList from '../pages/mall/orders/OrderList';
+import MallSalesmanList from '../pages/mall/users/SalesmanList';
+import MallCategoryTree from '../pages/mall/products/CategoryTree';
+import MallProductList from '../pages/mall/products/ProductList';
+import MallConsumerList from '../pages/mall/users/ConsumerList';
+import MallSkipAlertList from '../pages/mall/operations/SkipAlertList';
+import MallDashboard from '../pages/mall/Dashboard';
+import MallInviteCodeList from '../pages/mall/operations/InviteCodeList';
+import MallAuditLogList from '../pages/mall/audit/AuditLogList';
+import MallLoginLogList from '../pages/mall/audit/LoginLogList';
+import MallLoginLogStats from '../pages/mall/audit/LoginLogStats';
 import AuthGuard from '../layouts/AuthGuard';
 import PolicyApproval from '../pages/approval/PolicyApproval';
 import FinanceApproval from '../pages/approval/FinanceApproval';
@@ -138,6 +149,20 @@ const routes: RouteObject[] = [
       { path: 'attendance/map', element: <AttendanceMap /> },
       { path: 'hr/performance', element: <PerformanceDashboard /> },
       { path: 'me', element: <MyDashboard /> },
+
+      // 商城
+      { path: 'mall', element: <MallDashboard /> },
+      { path: 'mall/dashboard', element: <MallDashboard /> },
+      { path: 'mall/orders', element: <MallOrderList /> },
+      { path: 'mall/salesmen', element: <MallSalesmanList /> },
+      { path: 'mall/categories', element: <MallCategoryTree /> },
+      { path: 'mall/products', element: <MallProductList /> },
+      { path: 'mall/consumers', element: <MallConsumerList /> },
+      { path: 'mall/skip-alerts', element: <MallSkipAlertList /> },
+      { path: 'mall/invite-codes', element: <MallInviteCodeList /> },
+      { path: 'mall/audit/operations', element: <AuthGuard requiredRoles={['admin', 'boss']}><MallAuditLogList /></AuthGuard> },
+      { path: 'mall/audit/login-logs', element: <AuthGuard requiredRoles={['admin', 'boss']}><MallLoginLogList /></AuthGuard> },
+      { path: 'mall/audit/login-stats', element: <AuthGuard requiredRoles={['admin', 'boss']}><MallLoginLogStats /></AuthGuard> },
 
       // 审计
       { path: 'audit-logs', element: <AuthGuard requiredRoles={['admin']}><AuditLogList /></AuthGuard> },

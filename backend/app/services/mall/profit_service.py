@@ -1,18 +1,210 @@
 """
-利润台账回写服务。
+Mall 利润聚合服务。
 
-规则：
-  - 触发时机：订单 completed 或 partial_closed 时
-  - 收入 = pay_amount（**实收金额**，不是 total_amount）
-  - 成本 = SUM(order_items.cost_price_snapshot × quantity)
-  - 运费成本 = shipping_fee（单列扣项）
-  - 提成 = 同 order 的 commissions 总额（commission_service 先算）
-  - 净利润 = 收入 - 成本 - 运费 - 提成
-  - partial_closed 单：pay_amount 走 mall_sales_profit；未收额走 mall_bad_debt 科目
-  - 按 items.brand_id 分组，每品牌一行 profit_ledger
-  - 幂等：profit_ledger_posted 标志
+设计决策：
+  - **不建 profit_ledger 表**（ERP 本身也不存，是实时查聚合）
+  - 订单 completed / partial_closed 时 order_service 会标 profit_ledger_posted=True 作为"进入报表"标志
+  - 真正给老板看利润时调本服务的 aggregate_mall_profit()
+  - 按 brand_id 分账（order_item 下单时固化的 brand_id）
 
-**执行顺序**：commission_service 先 → profit_service 后（profit 读 commission 合计）
+利润公式：
+  毛利 = 收入(按 item 切分 received_amount) − 成本(cost_price_snapshot × qty) − 提成
+  - 收入切分：一笔订单可能跨品牌，按 item.subtotal / sum(item.subtotal) 的比例切分 received_amount 到各 brand
+  - 成本：下单瞬间固化的 cost_price_snapshot（避免后期成本变更影响历史利润）
+  - 提成：Commission 表已按 brand_id 写入，直接 sum
+
+bad_debt 科目：
+  - partial_closed 订单的 pay_amount - received_amount = 坏账金额
+  - 按 item.subtotal 比例切分到 brand
+  - 利润公式里作为额外扣项：profit = revenue - cost - commission - bad_debt
+
+不计：
+  - 运费（M3 商城无运费）
 """
-# TODO(M4):
-# async def post_order_to_profit_ledger(db, order: MallOrder) -> None: ...
+from datetime import datetime
+from decimal import Decimal
+from typing import Optional
+
+from sqlalchemy import func as sa_func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.mall.base import MallOrderStatus
+from app.models.mall.order import MallOrder, MallOrderItem
+from app.models.user import Commission
+
+
+async def aggregate_mall_profit(
+    db: AsyncSession,
+    *,
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+    brand_id: Optional[str] = None,
+) -> dict:
+    """聚合 mall 销售利润。
+
+    按时间窗口（基于 order.completed_at）+ 可选 brand_id 过滤。
+    返回：
+      {
+        total_revenue: str,         # 按 item 切分后的收入合计
+        total_cost: str,            # cost_price_snapshot × qty 合计
+        total_commission: str,      # mall 订单关联的 commission
+        total_profit: str,          # revenue - cost - commission
+        by_brand: [                 # 分品牌细分（若无 brand_id 筛选则展示所有）
+          {brand_id, revenue, cost, commission, profit, order_count}
+        ],
+      }
+
+    幂等性：纯聚合查询，调多次结果一致。
+    """
+    # 只统计已 completed / partial_closed 的订单
+    valid_statuses = [
+        MallOrderStatus.COMPLETED.value,
+        MallOrderStatus.PARTIAL_CLOSED.value,
+    ]
+
+    # ── 取相关订单（含 received_amount + pay_amount + status）─────
+    order_stmt = (
+        select(
+            MallOrder.id.label("oid"),
+            MallOrder.received_amount.label("recv"),
+            MallOrder.pay_amount.label("pay"),
+            MallOrder.status.label("st"),
+            MallOrder.completed_at,
+        )
+        .where(MallOrder.status.in_(valid_statuses))
+    )
+    if date_from:
+        order_stmt = order_stmt.where(MallOrder.completed_at >= date_from)
+    if date_to:
+        order_stmt = order_stmt.where(MallOrder.completed_at < date_to)
+    order_rows = (await db.execute(order_stmt)).all()
+    if not order_rows:
+        return {
+            "total_revenue": "0",
+            "total_cost": "0",
+            "total_commission": "0",
+            "total_bad_debt": "0",
+            "total_profit": "0",
+            "by_brand": [],
+        }
+
+    order_ids = [r[0] for r in order_rows]
+    recv_map = {r[0]: Decimal(str(r[1] or 0)) for r in order_rows}
+    # partial_closed 订单的坏账 = pay_amount - received_amount；completed 订单 bad_debt=0
+    bad_debt_map: dict[str, Decimal] = {}
+    for oid, recv, pay, st, _ct in order_rows:
+        if st == MallOrderStatus.PARTIAL_CLOSED.value:
+            bd = Decimal(str(pay or 0)) - Decimal(str(recv or 0))
+            bad_debt_map[oid] = bd if bd > 0 else Decimal("0")
+        else:
+            bad_debt_map[oid] = Decimal("0")
+
+    # ── 取所有 items（按 order + brand 分组）──────────────────
+    item_stmt = select(
+        MallOrderItem.order_id,
+        MallOrderItem.brand_id,
+        sa_func.sum(MallOrderItem.subtotal).label("item_subtotal"),
+        sa_func.sum(
+            MallOrderItem.cost_price_snapshot * MallOrderItem.quantity
+        ).label("item_cost"),
+        sa_func.sum(MallOrderItem.quantity).label("qty"),
+    ).where(MallOrderItem.order_id.in_(order_ids))
+    if brand_id:
+        item_stmt = item_stmt.where(MallOrderItem.brand_id == brand_id)
+    item_stmt = item_stmt.group_by(MallOrderItem.order_id, MallOrderItem.brand_id)
+    item_rows = (await db.execute(item_stmt)).all()
+
+    # ── 订单内 brand 收入切分 ──────────────────────────────────
+    # order_subtotal_by_order: 订单总 subtotal（用于算比例）
+    order_total_stmt = select(
+        MallOrderItem.order_id,
+        sa_func.sum(MallOrderItem.subtotal).label("order_total"),
+    ).where(MallOrderItem.order_id.in_(order_ids)).group_by(MallOrderItem.order_id)
+    order_total_rows = (await db.execute(order_total_stmt)).all()
+    order_total_map = {r[0]: Decimal(str(r[1] or 0)) for r in order_total_rows}
+
+    # 聚合到 brand
+    brand_agg: dict[Optional[str], dict] = {}
+    for oid, bid, item_sub, item_cost, qty in item_rows:
+        item_sub_d = Decimal(str(item_sub or 0))
+        item_cost_d = Decimal(str(item_cost or 0))
+        order_total = order_total_map.get(oid, Decimal("0"))
+        recv = recv_map.get(oid, Decimal("0"))
+        bad_debt_total = bad_debt_map.get(oid, Decimal("0"))
+
+        # 该 brand 在该订单里的占比 = item_sub / order_total
+        if order_total > 0:
+            ratio = item_sub_d / order_total
+            brand_revenue = (recv * ratio).quantize(Decimal("0.01"))
+            brand_bad_debt = (bad_debt_total * ratio).quantize(Decimal("0.01"))
+        else:
+            brand_revenue = Decimal("0")
+            brand_bad_debt = Decimal("0")
+
+        agg = brand_agg.setdefault(bid, {
+            "brand_id": bid,
+            "revenue": Decimal("0"),
+            "cost": Decimal("0"),
+            "commission": Decimal("0"),
+            "bad_debt": Decimal("0"),
+            "qty": 0,
+            "order_ids": set(),
+        })
+        agg["revenue"] += brand_revenue
+        agg["cost"] += item_cost_d
+        agg["bad_debt"] += brand_bad_debt
+        agg["qty"] += int(qty or 0)
+        agg["order_ids"].add(oid)
+
+    # ── 提成（按 brand_id 累加）─────────────────────────────
+    com_stmt = select(
+        Commission.brand_id,
+        sa_func.coalesce(sa_func.sum(Commission.commission_amount), 0),
+    ).where(Commission.mall_order_id.in_(order_ids))
+    if brand_id:
+        com_stmt = com_stmt.where(Commission.brand_id == brand_id)
+    com_stmt = com_stmt.group_by(Commission.brand_id)
+    com_rows = (await db.execute(com_stmt)).all()
+    for bid, total in com_rows:
+        agg = brand_agg.setdefault(bid, {
+            "brand_id": bid,
+            "revenue": Decimal("0"),
+            "cost": Decimal("0"),
+            "commission": Decimal("0"),
+            "bad_debt": Decimal("0"),
+            "qty": 0,
+            "order_ids": set(),
+        })
+        agg["commission"] += Decimal(str(total or 0))
+
+    # ── 汇总 ───────────────────────────────────────────────
+    by_brand = []
+    total_rev = total_cost = total_com = total_bd = Decimal("0")
+    for bid, agg in brand_agg.items():
+        profit = agg["revenue"] - agg["cost"] - agg["commission"] - agg["bad_debt"]
+        by_brand.append({
+            "brand_id": bid,
+            "revenue": str(agg["revenue"]),
+            "cost": str(agg["cost"]),
+            "commission": str(agg["commission"]),
+            "bad_debt": str(agg["bad_debt"]),
+            "profit": str(profit),
+            "qty": agg["qty"],
+            "order_count": len(agg["order_ids"]),
+        })
+        total_rev += agg["revenue"]
+        total_cost += agg["cost"]
+        total_com += agg["commission"]
+        total_bd += agg["bad_debt"]
+
+    # 按利润降序
+    by_brand.sort(key=lambda x: Decimal(x["profit"]), reverse=True)
+
+    return {
+        "total_revenue": str(total_rev),
+        "total_cost": str(total_cost),
+        "total_commission": str(total_com),
+        "total_bad_debt": str(total_bd),
+        "total_profit": str(total_rev - total_cost - total_com - total_bd),
+        "by_brand": by_brand,
+    }

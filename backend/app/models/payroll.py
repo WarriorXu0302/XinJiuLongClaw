@@ -206,7 +206,12 @@ class SalaryOrderLink(Base):
     __tablename__ = "salary_order_links"
     __table_args__ = (
         UniqueConstraint("order_id", "is_manager_share", name="uq_order_commission_once"),
-        UniqueConstraint("mall_order_id", "is_manager_share", name="uq_mall_order_commission_once"),
+        # mall 路径按 commission_id 去重：partial_closed 恢复后同一 mall_order 的 top-up commission
+        # 是独立的 Commission 行（见 commission_service.post_commission_for_order），必须能各自挂到工资单
+        UniqueConstraint(
+            "mall_order_id", "commission_id", "is_manager_share",
+            name="uq_mall_commission_linked_once",
+        ),
         # 二选一非空
         CheckConstraint(
             "(order_id IS NOT NULL AND mall_order_id IS NULL) OR (order_id IS NULL AND mall_order_id IS NOT NULL)",
@@ -221,6 +226,9 @@ class SalaryOrderLink(Base):
     order_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("orders.id"), nullable=True)
     mall_order_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("mall_orders.id"), nullable=True,
+    )
+    commission_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("commissions.id", ondelete="SET NULL"), nullable=True, index=True,
     )
     brand_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("brands.id"), nullable=True)
     receipt_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))

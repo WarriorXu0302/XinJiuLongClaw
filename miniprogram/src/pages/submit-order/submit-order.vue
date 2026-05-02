@@ -334,53 +334,39 @@ const shopReduce = ref('')
  * 加载订单数据
  */
 const loadOrderData = () => {
-  let addrId = 0
-  if (userAddr.value != null) {
-    addrId = userAddr.value.addrId
+  // 组装 preview 请求项
+  let items = []
+  if (orderEntry === '1') {
+    // 立即购买
+    const oi = JSON.parse(uni.getStorageSync('orderItem') || '{}')
+    if (oi && oi.skuId) {
+      items = [{ skuId: oi.skuId, count: oi.prodCount || 1 }]
+    }
+  } else {
+    // 购物车结算：后端 preview 按 sku 维度，暂先用 storage 里存的 items
+    const cartItems = JSON.parse(uni.getStorageSync('orderItems') || '[]')
+    items = cartItems
   }
+  const addrId = userAddr.value?.addrId || null
   uni.showLoading({
     mask: true
   })
   http.request({
-    url: '/p/order/confirm',
+    url: '/api/mall/orders/preview',
     method: 'POST',
-    data: {
-      addrId,
-      orderItem: orderEntry === '1' ? JSON.parse(uni.getStorageSync('orderItem')) : undefined,
-      basketIds: orderEntry === '0' ? JSON.parse(uni.getStorageSync('basketIds')) : undefined,
-      couponIds,
-      userChangeCoupon: 1
-    }
+    data: { items, addrId }
   })
     .then(({ data }) => {
       uni.hideLoading()
-      let orderItemsData = []
-      data.shopCartOrders[0].shopCartItemDiscounts?.forEach(itemDiscount => {
-        orderItemsData = orderItems.value?.concat(itemDiscount.shopCartItems)
-      })
-      if (data.shopCartOrders[0].coupons) {
-        const canUseCoupons = []
-        const unCanUseCoupons = []
-        data.shopCartOrders[0].coupons?.forEach(coupon => {
-          if (coupon.canUse) {
-            canUseCoupons.push(coupon)
-          } else {
-            unCanUseCoupons.push(coupon)
-          }
-        })
-        coupons.value = {
-          totalLength: data.shopCartOrders[0].coupons.length,
-          canUseCoupons,
-          unCanUseCoupons
-        }
-      }
-      orderItems.value = orderItemsData
-      actualTotal.value = data.actualTotal
-      total.value = data.total
-      totalCount.value = data.totalCount
-      userAddr.value = data.userAddr
-      transfee.value = data.shopCartOrders[0].transfee
-      shopReduce.value = data.shopCartOrders[0].shopReduce
+      // MallOrderPreviewResponse: items / totalAmount / shippingFee / discountAmount / payAmount / address
+      orderItems.value = data.items || []
+      actualTotal.value = data.payAmount ?? 0
+      total.value = data.totalAmount ?? 0
+      totalCount.value = (data.items || []).reduce((s, it) => s + (it.count || it.quantity || 0), 0)
+      userAddr.value = data.address || userAddr.value
+      transfee.value = data.shippingFee ?? 0
+      shopReduce.value = data.discountAmount ?? 0
+      coupons.value = { totalLength: 0, canUseCoupons: [], unCanUseCoupons: [] }
     })
     .catch(err => {
       uni.hideLoading()
@@ -427,14 +413,19 @@ const submitOrder = () => {
   uni.showLoading({
     mask: true
   })
+  // 拼装 create 请求：items + addrId + remarks（后端校验必填 addrId）
+  const items = (orderItems.value || []).map(it => ({
+    skuId: it.skuId || it.sku_id,
+    count: it.count || it.quantity || 1
+  }))
+  const addrId = userAddr.value?.addrId
   http.request({
-    url: '/p/order/submit',
+    url: '/api/mall/orders',
     method: 'POST',
     data: {
-      orderShopParam: [{
-        remarks: remarks.value,
-        shopId: 1
-      }]
+      items,
+      addrId,
+      remarks: remarks.value || null
     }
   })
     .then(({ data }) => {

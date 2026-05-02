@@ -95,16 +95,14 @@ const hotSearchList = ref([])
  */
 onShow(() => {
   http.request({
-    url: '/search/hotSearchByShopId',
+    url: '/api/mall/search/hot-keywords',
     method: 'GET',
-    data: {
-      number: 10,
-      shopId: 1,
-      sort: 1
-    }
+    data: {}
   })
     .then(({ data }) => {
-      hotSearchList.value = data
+      // 后端返回 {records: ["飞天茅台", ...]}，转成老模板期望的 [{title, content}]
+      const raw = data?.records || []
+      hotSearchList.value = raw.map(k => ({ title: k, content: k }))
     })
   // 获取历史搜索
   getRecentSearch()

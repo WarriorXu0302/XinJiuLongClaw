@@ -15,6 +15,28 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- 业务员"我的订单"在途 Tab 现在同时显示 `assigned` + `shipped` 两个状态（原仅 assigned → 导致已出库未送达的单消失）。后端 `/api/mall/salesman/orders` 的 `status` 参数支持逗号分隔多值
+- `cancel_order` 退库存按原出库流水的 inventory 定位目标仓，不再依赖 `get_default_warehouse()`。**修复**：默认仓换过后，取消订单会把货退到错的仓
+- `release_order` 仅允许在 `assigned` 状态释放；`shipped` 后条码已 OUTBOUND 绑定原业务员，不再允许自行释放（出库后须走管理员改派）
+- `admin_reassign` 在 shipped/delivered/pending_payment_confirmation 状态改派时，同步把本订单的 OUTBOUND 条码 `outbound_by_user_id` 过户到新业务员，避免归属数据错乱
+- `post_commission_for_order` 改为**按当前 received_amount 计算差额**：partial_closed 订单先按已收额计过提成，再被 manual-record 补款恢复 completed 时，会追加一条"补发差额"commission。原逻辑的 `order.commission_posted` 一旦 True 就跳过，导致 top-up 永远不发
+- `salary_order_links` 加 `commission_id` 列 + 唯一约束改 `(mall_order_id, commission_id, is_manager_share)`；`generate_salary_records` 按 commission_id 幂等去重、`pay_salary` 按 commission_id 精确结算。**修复**：同一 mall_order 的 top-up commission 原会被 `(mall_order_id, is_manager_share)` 老约束挡在第二次工资单之外
+
+### Changed
+
+- 小程序邀请码申诉模态改用 `uni.showModal editable=true`（跨端最稳的输入方案），注释标明决策；原"TODO 正式版加富文本"误导后续维护者
+- 通知页 `jumpByEntity` 路由到 MallOrder / MallSkipAlert / MallPayment 对应页面（原 TODO 占位）
+- 审计中间件 `audit_request_middleware` 用 ContextVar 自动注入 IP：68 个 `log_audit(...)` 调用点无需改签名即拿到真实 IP（X-Forwarded-For 优先）
+- profit_service 增加 `mall_bad_debt` 科目：partial_closed 订单的未收部分按 item 比例切分到 brand；`/api/dashboard/profit-summary` 独立展示"商城坏账"行
+
+### Removed
+
+- 删除 4 个 mall service dead stub（actor_context / attachment_service / notification_service / skip_alert_service）—— 实际业务逻辑已在 `order_service.py` 和 `attachments.py` 路由内联实现，占位文件误导读者
+- 删除 5 个 mall schema dead stub（admin / payment / salesman / shipment / common）—— 实际 Pydantic 模型散落在 auth/order/product 等具体 schema 文件
+- 删除 10 个 ERP 前端 mall 未挂载占位页（SkuList / Warehouse 系列 / SalesmanCreate / SalesmanImport / ReferrerManagement / NoticeList / HotSearchList），均未在 router 注册，删除避免未来误以为还有未完成工作
+
 ### Security
 
 - [#6] POST `/api/uploads` 补加 CurrentUser 鉴权，防未登录滥用上传（修 health-check S1）

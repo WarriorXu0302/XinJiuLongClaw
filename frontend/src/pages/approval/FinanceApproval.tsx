@@ -97,6 +97,32 @@ function FinanceApproval() {
     queryFn: () => api.get('/accounts', { params }).then(r => extractItems(r.data)),
   });
 
+  // Pending mall payments（商城待确认）
+  const { data: pendingMallPayments = [] } = useQuery<any[]>({
+    queryKey: ['pending-mall-payments'],
+    queryFn: () => api.get('/mall/admin/payments/pending').then(r => extractItems(r.data)),
+    refetchInterval: 5000,
+  });
+  const confirmMallPaymentMut = useMutation({
+    mutationFn: (order_id: string) => api.post(`/mall/admin/orders/${order_id}/confirm-payment`),
+    onSuccess: (res) => {
+      const d = res.data;
+      message.success(`订单 ${d.order_no} 已确认收款${d.commission_posted ? '，提成已入账' : ''}`);
+      queryClient.invalidateQueries({ queryKey: ['pending-mall-payments'] });
+      queryClient.invalidateQueries({ queryKey: ['account-summary'] });
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail ?? '确认失败'),
+  });
+  const rejectMallPaymentMut = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      api.post(`/mall/admin/payments/${id}/reject`, { reason }),
+    onSuccess: () => {
+      message.success('已驳回，业务员可重新上传凭证');
+      queryClient.invalidateQueries({ queryKey: ['pending-mall-payments'] });
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail ?? '驳回失败'),
+  });
+
   // Pending inspection cases
   const { data: pendingCases = [] } = useQuery<any[]>({
     queryKey: ['pending-inspection-cases', brandId],
@@ -507,6 +533,98 @@ function FinanceApproval() {
                 )},
               ] as any}
               dataSource={deliveredOrders} rowKey="order_id" size="middle" pagination={false}
+            />,
+        },
+        {
+          key: 'mall-payments',
+          label: <span>商城待确认 <Tag color="red">{pendingMallPayments.length}</Tag></span>,
+          children: pendingMallPayments.length === 0 ? <Empty description="暂无商城待确认收款" /> :
+            <Table
+              columns={[
+                { title: '订单号', dataIndex: 'order_no', width: 180 },
+                { title: '应收 / 已收', key: 'paid_ratio', width: 160, align: 'right' as const,
+                  render: (_: any, r: any) => (
+                    <span>
+                      <span style={{ color: '#999' }}>¥{Number(r.pay_amount || 0).toLocaleString()}</span>
+                      {' / '}
+                      <strong>¥{Number(r.received_amount || 0).toLocaleString()}</strong>
+                    </span>
+                  ) },
+                { title: '本次凭证金额', dataIndex: 'payment_amount', width: 130, align: 'right' as const,
+                  render: (v: string) => <strong style={{ color: '#C9A961' }}>¥{Number(v).toLocaleString()}</strong> },
+                { title: '支付方式', dataIndex: 'payment_method', width: 90,
+                  render: (v: string) => {
+                    const m: Record<string, string> = { cash: '现金', bank: '银行转账', wechat: '微信', alipay: '支付宝' };
+                    return <Tag>{m[v] ?? v}</Tag>;
+                  }},
+                { title: '业务员', key: 'sm', width: 140,
+                  render: (_: any, r: any) => r.salesman ? `${r.salesman.nickname || ''}${r.salesman.phone ? ` · ${r.salesman.phone}` : ''}` : '-' },
+                { title: '客户', key: 'cust', width: 140,
+                  render: (_: any, r: any) => r.customer ? `${r.customer.nickname || ''}${r.customer.mobile ? ` · ${r.customer.mobile}` : ''}` : '-' },
+                { title: '凭证', key: 'vouchers', width: 90,
+                  render: (_: any, r: any) => {
+                    const urls: any[] = r.voucher_urls || [];
+                    if (!urls.length) return '-';
+                    return <a onClick={() => Modal.info({
+                      title: `${r.order_no} 收款凭证（${urls.length}张）`,
+                      width: 720,
+                      content: (
+                        <Space wrap>
+                          {urls.map((u, i) => (
+                            <Image key={i} src={u.url} width={160} height={160} style={{ objectFit: 'cover', border: '1px solid #d9d9d9', borderRadius: 4 }} />
+                          ))}
+                        </Space>
+                      ),
+                    })}>{urls.length}张</a>;
+                  }},
+                { title: '上传时间', dataIndex: 'created_at', width: 150,
+                  render: (v: string) => v ? new Date(v).toLocaleString('zh-CN') : '-' },
+                { title: '操作', key: 'act', width: 200, fixed: 'right' as const, render: (_: any, r: any) => (
+                  <Space>
+                    <Button size="small" type="primary" icon={<CheckCircleOutlined />}
+                      onClick={() => Modal.confirm({
+                        title: `确认收款 - ${r.order_no}`,
+                        width: 480,
+                        content: (
+                          <div>
+                            <p>本次凭证 <strong>¥{Number(r.payment_amount).toLocaleString()}</strong>（{({cash:'现金', bank:'银行', wechat:'微信', alipay:'支付宝'} as Record<string,string>)[r.payment_method] || r.payment_method}）</p>
+                            <p>订单应收 ¥{Number(r.pay_amount || 0).toLocaleString()}，已确认 ¥{Number(r.received_amount || 0).toLocaleString()}</p>
+                            <p style={{ color: '#999', marginTop: 12, fontSize: 12 }}>
+                              确认后：累计已收 → ¥{(Number(r.received_amount || 0) + Number(r.payment_amount)).toLocaleString()}；
+                              累计达到应收将自动 completed 并触发提成入账
+                            </p>
+                          </div>
+                        ),
+                        onOk: () => confirmMallPaymentMut.mutate(r.order_id),
+                      })}>
+                      确认
+                    </Button>
+                    <Button size="small" danger icon={<CloseCircleOutlined />}
+                      onClick={() => {
+                        let reason = '';
+                        Modal.confirm({
+                          title: `驳回凭证 - ${r.order_no}`,
+                          content: (
+                            <div>
+                              <div style={{ marginBottom: 8 }}>
+                                本次凭证 ¥{Number(r.payment_amount).toLocaleString()} 将被驳回，业务员可重新上传。
+                              </div>
+                              <Input.TextArea rows={3} placeholder="驳回原因（必填，将通知业务员）"
+                                onChange={e => { reason = e.target.value; }} />
+                            </div>
+                          ),
+                          onOk: () => {
+                            if (!reason.trim()) { message.warning('请填写驳回原因'); return Promise.reject(); }
+                            return rejectMallPaymentMut.mutateAsync({ id: r.id, reason });
+                          },
+                        });
+                      }}>
+                      驳回
+                    </Button>
+                  </Space>
+                )},
+              ] as any}
+              dataSource={pendingMallPayments} rowKey="id" size="middle" pagination={false} scroll={{ x: 1400 }}
             />,
         },
         {

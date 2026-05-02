@@ -159,6 +159,14 @@ class MallOrder(Base):
     cancelled_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # C 端用户点"确认收货"按钮的时间（只记一次，delivered 状态可点）
+    customer_confirmed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # C 端用户软删（仅影响列表可见性；订单本身保留给利润/审计）
+    consumer_deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # ─── 幂等 flag（M4 用）─────────────────────────────────
     profit_ledger_posted: Mapped[bool] = mapped_column(

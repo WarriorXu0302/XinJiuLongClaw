@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.mall.base import (
     MallClaimAction,
+    MallInventoryFlowType,
     MallOrderStatus,
     MallSkipAlertStatus,
     MallSkipType,
@@ -296,7 +297,11 @@ async def list_my_orders(
 ) -> tuple[list[MallOrder], int]:
     from sqlalchemy import desc, func
 
-    stmt = select(MallOrder).where(MallOrder.user_id == user.id)
+    stmt = (
+        select(MallOrder)
+        .where(MallOrder.user_id == user.id)
+        .where(MallOrder.consumer_deleted_at.is_(None))  # 软删订单不进列表
+    )
     if status_filter:
         stmt = stmt.where(MallOrder.status == status_filter)
     stmt = stmt.order_by(desc(MallOrder.created_at))
@@ -344,6 +349,7 @@ async def cancel_order(
     user: MallUser,
     order_no: str,
     reason: Optional[str] = None,
+    request=None,
 ) -> MallOrder:
     """C 端取消订单。只有 pending_assignment 状态（还没业务员接单）可自取消。
 
@@ -367,16 +373,31 @@ async def cancel_order(
             detail=f"订单状态 {order.status} 不可取消（仅待接单可取消）",
         )
 
-    # 退回库存
-    warehouse = await get_default_warehouse(db)
-    if warehouse is None:
-        raise HTTPException(status_code=500, detail="未找到仓库，无法退回库存")
-
+    # 退回库存 — 按原出库 flow 定位扣库存时的仓（而非当前默认仓，避免默认仓被换过后退错仓）
+    from app.models.mall.inventory import MallInventory, MallInventoryFlow
     items = await get_order_items(db, order.id)
+    # 先拉出本订单的所有出库 flow：inventory_id → warehouse_id/sku_id
+    flows = (await db.execute(
+        select(MallInventoryFlow, MallInventory)
+        .join(MallInventory, MallInventoryFlow.inventory_id == MallInventory.id)
+        .where(MallInventoryFlow.ref_type == "order")
+        .where(MallInventoryFlow.ref_id == order.id)
+        .where(MallInventoryFlow.flow_type == MallInventoryFlowType.OUT.value)
+    )).all()
+    # 按 sku 聚合原仓（防同 sku 被多次扣出）
+    sku_to_warehouse: dict[int, str] = {inv.sku_id: inv.warehouse_id for _, inv in flows}
+
     for it in items:
+        src_wh = sku_to_warehouse.get(it.sku_id)
+        if src_wh is None:
+            # 无出库 flow（理论不该发生：order 要么未扣库存要么一定有 flow）
+            raise HTTPException(
+                status_code=500,
+                detail=f"找不到 SKU {it.sku_id} 的原出库流水，无法退回",
+            )
         await restock_for_cancel(
             db,
-            warehouse_id=warehouse.id,
+            warehouse_id=src_wh,
             sku_id=it.sku_id,
             quantity=it.quantity,
             order_id=order.id,
@@ -386,6 +407,22 @@ async def cancel_order(
     order.status = MallOrderStatus.CANCELLED.value
     order.cancellation_reason = reason
     order.cancelled_at = datetime.now(timezone.utc)
+
+    # 审计：C 端取消涉及退库存 + 金额冲销，客诉争议追溯
+    from app.services.audit_service import log_audit
+    await log_audit(
+        db, action="mall_order.consumer_cancel",
+        entity_type="MallOrder", entity_id=order.id,
+        mall_user_id=user.id, actor_type="mall_user",
+        request=request,
+        changes={
+            "order_no": order.order_no,
+            "pay_amount": str(order.pay_amount),
+            "item_count": len(items),
+            "reason": reason,
+        },
+    )
+
     await db.flush()
     # 通知 referrer：您推荐的客户取消了订单
     if order.referrer_salesman_id:
@@ -400,14 +437,69 @@ async def cancel_order(
     return order
 
 
+async def delete_my_order(
+    db: AsyncSession, user: MallUser, order_no: str, request=None,
+) -> None:
+    """C 端从订单列表"删除"订单。实际上软删（consumer_deleted_at=now），
+    订单本身保留给利润/审计/业务员视角。
+
+    只允许终态订单被删：
+      - completed（已完成，订单闭环结束）
+      - cancelled（已取消）
+      - partial_closed（坏账折损关单）
+
+    其他状态（在途/待付款）禁止删除，避免用户误操作隐藏未处理订单。
+    幂等：已删过不抛错。
+    """
+    order = (await db.execute(
+        select(MallOrder)
+        .where(MallOrder.order_no == order_no)
+        .where(MallOrder.user_id == user.id)
+    )).scalar_one_or_none()
+    if order is None:
+        raise HTTPException(status_code=404, detail="订单不存在")
+
+    if order.consumer_deleted_at is not None:
+        return  # 幂等
+
+    if order.status not in (
+        MallOrderStatus.COMPLETED.value,
+        MallOrderStatus.CANCELLED.value,
+        MallOrderStatus.PARTIAL_CLOSED.value,
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=f"订单状态 {order.status} 不可删除（仅已完成/已取消订单可从列表移除）",
+        )
+
+    order.consumer_deleted_at = datetime.now(timezone.utc)
+
+    from app.services.audit_service import log_audit
+    await log_audit(
+        db, action="mall_order.consumer_delete",
+        entity_type="MallOrder", entity_id=order.id,
+        mall_user_id=user.id, actor_type="mall_user",
+        request=request,
+        changes={
+            "order_no": order.order_no,
+            "prev_status": order.status,
+        },
+    )
+    await db.flush()
+
+
 async def confirm_receipt(
-    db: AsyncSession, user: MallUser, order_no: str
+    db: AsyncSession, user: MallUser, order_no: str, request=None,
 ) -> MallOrder:
     """C 端"确认收货"。
 
-    注意：订单状态流转真正由 业务员送达 → 业务员传凭证 → 财务确认收款 驱动，
-    用户端确认收货本身**不改变订单状态**（避免和业务员流程冲突），仅作为用户行为
-    记录。M4 可加 customer_confirmed_at 字段。M3 版只要求处于 delivered 状态。
+    状态不由此推进（真正驱动：业务员送达 → 上传凭证 → 财务确认收款）；
+    但必须记录 customer_confirmed_at，出现"我明明点过确认"争议时有 DB 凭证。
+
+    规则：
+      - 必须处于 delivered（其他状态都不合逻辑）
+      - 幂等：重复点不抛错，不更新时间（保留首次点击时间）
+      - 通知配送业务员：客户已确认收货，尽快收款
     """
     order = await get_my_order(db, user, order_no)
     if order.status != MallOrderStatus.DELIVERED.value:
@@ -415,7 +507,39 @@ async def confirm_receipt(
             status_code=400,
             detail=f"订单状态 {order.status} 不可确认收货",
         )
-    # M3：不改状态，仅允许调用通过；后续增加 customer_confirmed_at 字段时再写入
+
+    # 幂等：已确认过就直接返回
+    if order.customer_confirmed_at is not None:
+        return order
+
+    now = datetime.now(timezone.utc)
+    order.customer_confirmed_at = now
+
+    # 审计：客户明示已收货，事后争议追溯
+    from app.services.audit_service import log_audit
+    await log_audit(
+        db, action="mall_order.customer_confirm_receipt",
+        entity_type="MallOrder", entity_id=order.id,
+        mall_user_id=user.id, actor_type="mall_user",
+        request=request,
+        changes={
+            "order_no": order.order_no,
+            "pay_amount": str(order.pay_amount),
+            "delivered_at": order.delivered_at.isoformat() if order.delivered_at else None,
+        },
+    )
+
+    # 通知配送业务员
+    if order.assigned_salesman_id:
+        from app.services.notification_service import notify_mall_user
+        await notify_mall_user(
+            db, mall_user_id=order.assigned_salesman_id,
+            title="客户已确认收货",
+            content=f"订单 {order.order_no} 客户已确认收货，请尽快完成收款。",
+            entity_type="MallOrder", entity_id=order.id,
+        )
+
+    await db.flush()
     return order
 
 
@@ -510,6 +634,101 @@ async def list_order_pool(
     return list(rows), total
 
 
+def _mask_phone(phone: Optional[str]) -> Optional[str]:
+    """138****1234 风格脱敏；位数不够就整串脱敏保留首末。"""
+    if not phone:
+        return None
+    s = str(phone)
+    if len(s) < 7:
+        return s[:1] + "*" * (len(s) - 2) + s[-1:] if len(s) >= 2 else "***"
+    return f"{s[:3]}****{s[-4:]}"
+
+
+def _brief_address(snap: Optional[dict]) -> Optional[str]:
+    """省市区 + 街道（不含门牌号）。"""
+    if not snap:
+        return None
+    parts = [snap.get("province"), snap.get("city"), snap.get("area")]
+    return " ".join(p for p in parts if p) or None
+
+
+async def enrich_list_items(
+    db: AsyncSession, rows: list[MallOrder], *, include_contact: bool = False
+) -> list[dict]:
+    """把 MallOrder 列表补上业务员工作台展示字段。
+
+    include_contact=False：抢单池场景（还没抢到）— 手机号脱敏、地址去门牌号
+    include_contact=True：已抢到的订单（我的订单 tab）— 手机号完整、地址完整
+    """
+    if not rows:
+        return []
+
+    # 批量拉订单项（按 order_id 聚合 brief）
+    order_ids = [o.id for o in rows]
+    items_rows = (
+        await db.execute(
+            select(MallOrderItem).where(MallOrderItem.order_id.in_(order_ids))
+        )
+    ).scalars().all()
+    items_by_order: dict[str, list[MallOrderItem]] = {}
+    for it in items_rows:
+        items_by_order.setdefault(it.order_id, []).append(it)
+
+    # 批量拉客户昵称
+    user_ids = list({o.user_id for o in rows})
+    users_rows = (
+        await db.execute(select(MallUser).where(MallUser.id.in_(user_ids)))
+    ).scalars().all()
+    user_by_id = {u.id: u for u in users_rows}
+
+    out: list[dict] = []
+    for o in rows:
+        items = items_by_order.get(o.id, [])
+        # items_brief：取前 2 个 SKU 名 + 数量
+        brief_parts: list[str] = []
+        for it in items[:2]:
+            snap = it.sku_snapshot or {}
+            name = snap.get("product_name") or snap.get("sku_name") or ""
+            brief_parts.append(f"{name}×{it.quantity}")
+        if len(items) > 2:
+            brief_parts.append(f"等{len(items)}件")
+        items_brief = "，".join(brief_parts) if brief_parts else None
+
+        cust = user_by_id.get(o.user_id)
+        addr = o.address_snapshot or {}
+        full_mobile = addr.get("mobile")
+
+        # 独占期到期时间（仅 pending_assignment 阶段有意义）
+        expires_at = None
+        if (
+            o.status == MallOrderStatus.PENDING_ASSIGNMENT.value
+            and o.created_at is not None
+        ):
+            expires_at = o.created_at + timedelta(
+                minutes=settings.MALL_UNCLAIMED_TIMEOUT_MINUTES
+            )
+
+        d = {
+            "id": o.id,
+            "order_no": o.order_no,
+            "status": o.status,
+            "payment_status": o.payment_status,
+            "pay_amount": o.pay_amount,
+            "total_amount": o.total_amount,
+            "created_at": o.created_at,
+            "remarks": o.remarks,
+            "customer_nick": (cust.nickname if cust else None) or addr.get("receiver"),
+            "masked_phone": full_mobile if include_contact else _mask_phone(full_mobile),
+            "brief_address": _brief_address(addr) if not include_contact else (
+                _brief_address(addr) + (" " + (addr.get("addr") or "") if addr.get("addr") else "")
+            ),
+            "items_brief": items_brief,
+            "expires_at": expires_at,
+        }
+        out.append(d)
+    return out
+
+
 async def _require_order_for_claim(
     db: AsyncSession, order_id: str
 ) -> MallOrder:
@@ -576,19 +795,25 @@ async def claim_order(
 
 
 async def release_order(
-    db: AsyncSession, salesman: MallUser, order_id: str, reason: Optional[str] = None
+    db: AsyncSession, salesman: MallUser, order_id: str,
+    reason: Optional[str] = None, request=None,
 ) -> MallOrder:
-    """业务员主动释放。订单回到 pending_assignment，若原业务员是推荐人则记 skip_log。"""
+    """业务员主动释放。订单回到 pending_assignment，若原业务员是推荐人则记 skip_log。
+
+    仅允许 `assigned` 状态释放：shipped 后条码已 OUTBOUND 绑定到原业务员，
+    若允许释放会导致新接单人的库存状态和条码归属不一致，须走"管理员改派"路径。
+    """
     order = await _require_order_for_claim(db, order_id)
     if order.assigned_salesman_id != salesman.id:
         raise HTTPException(status_code=403, detail="只能释放自己接的订单")
-    if order.status not in (MallOrderStatus.ASSIGNED.value, MallOrderStatus.SHIPPED.value):
+    if order.status != MallOrderStatus.ASSIGNED.value:
         raise HTTPException(
             status_code=409,
-            detail=f"订单状态 {order.status} 不可释放",
+            detail=f"订单状态 {order.status} 不可释放（仅刚接单未出库可释放，出库后请联系管理员改派）",
         )
 
     prev_salesman = order.assigned_salesman_id
+    prev_status = order.status
     order.assigned_salesman_id = None
     order.status = MallOrderStatus.PENDING_ASSIGNMENT.value
     order.claimed_at = None
@@ -604,10 +829,26 @@ async def release_order(
     ))
 
     # 如果释放人是推荐人，对该客户记一条 skip_log
-    if order.referrer_salesman_id == prev_salesman:
+    is_referrer = order.referrer_salesman_id == prev_salesman
+    if is_referrer:
         await _record_skip_log(
             db, order, prev_salesman, MallSkipType.RELEASED.value
         )
+
+    # 合规审计：业务员释放订单属于异常动作（直接触发 skip_log）
+    from app.services.audit_service import log_audit
+    await log_audit(
+        db, action="mall_order.release",
+        entity_type="MallOrder", entity_id=order.id,
+        mall_user_id=salesman.id, actor_type="mall_user",
+        request=request,
+        changes={
+            "order_no": order.order_no,
+            "prev_status": prev_status,
+            "is_referrer": is_referrer,  # True 会触发 skip_log
+            "reason": reason,
+        },
+    )
 
     await db.flush()
     return order
@@ -619,6 +860,8 @@ async def admin_reassign(
     target_salesman_id: str,
     operator_erp_user_id: str,
     reason: Optional[str] = None,
+    request=None,  # 可选 Request 用于记审计 IP
+    actor_employee_id: Optional[str] = None,  # 操作人的 employee_id，用于审计
 ) -> MallOrder:
     """管理员强制改派。"""
     target = (
@@ -661,6 +904,21 @@ async def admin_reassign(
     # 不管从 pending 还是 assigned 改派，都以当前时刻作为新业务员的接单时间
     order.claimed_at = now
 
+    # 出库后改派：把原业务员名下的 OUTBOUND 条码过户到新业务员，避免归属错乱
+    # （归属错乱会导致 HR 追溯"谁真正送达"时 outbound_by ≠ assigned 互相不对）
+    if prev_salesman and prev_salesman != target.id and order.status in (
+        MallOrderStatus.SHIPPED.value,
+        MallOrderStatus.DELIVERED.value,
+        MallOrderStatus.PENDING_PAYMENT_CONFIRMATION.value,
+    ):
+        from sqlalchemy import update as sa_update
+        from app.models.mall.inventory import MallInventoryBarcode
+        await db.execute(
+            sa_update(MallInventoryBarcode)
+            .where(MallInventoryBarcode.outbound_order_id == order.id)
+            .values(outbound_by_user_id=target.id)
+        )
+
     db.add(MallOrderClaimLog(
         order_id=order.id,
         action=MallClaimAction.ADMIN_ASSIGN.value if prev_salesman is None else MallClaimAction.REASSIGN.value,
@@ -676,6 +934,20 @@ async def admin_reassign(
         await _record_skip_log(
             db, order, prev_salesman, MallSkipType.ADMIN_REASSIGNED.value
         )
+
+    # 合规审计（管理员强制改派是敏感操作）
+    from app.services.audit_service import log_audit
+    await log_audit(
+        db, action="mall_order.admin_reassign",
+        entity_type="MallOrder", entity_id=order.id,
+        actor_id=actor_employee_id, request=request,
+        changes={
+            "order_no": order.order_no,
+            "from_salesman_id": prev_salesman,
+            "to_salesman_id": target.id,
+            "reason": reason,
+        },
+    )
 
     # 通知新业务员接单 + 旧业务员订单被改派
     from app.services.notification_service import notify_mall_user
@@ -823,7 +1095,8 @@ async def list_skip_alerts_for_salesman(
 
 
 async def appeal_skip_alert(
-    db: AsyncSession, salesman: MallUser, alert_id: str, reason: str
+    db: AsyncSession, salesman: MallUser, alert_id: str, reason: str,
+    request=None,
 ) -> MallSkipAlert:
     alert = (await db.execute(
         select(MallSkipAlert).where(MallSkipAlert.id == alert_id).with_for_update()
@@ -834,6 +1107,17 @@ async def appeal_skip_alert(
         raise HTTPException(status_code=409, detail="告警已处理")
     alert.appeal_reason = reason
     alert.appeal_at = datetime.now(timezone.utc)
+
+    # 审计（业务员申诉是单向表达，后续管理员裁决有独立 resolve 审计）
+    from app.services.audit_service import log_audit
+    await log_audit(
+        db, action="mall_skip_alert.appeal",
+        entity_type="MallSkipAlert", entity_id=alert.id,
+        mall_user_id=salesman.id, actor_type="mall_user",
+        request=request,
+        changes={"reason": reason, "skip_count": alert.skip_count},
+    )
+
     await db.flush()
     return alert
 
@@ -845,6 +1129,8 @@ async def resolve_skip_alert(
     operator_type: str,
     resolution_status: str,  # resolved / dismissed
     note: Optional[str] = None,
+    request=None,
+    actor_employee_id: Optional[str] = None,  # operator_type='erp_user' 时传
 ) -> MallSkipAlert:
     """管理员处理告警。dismissed=True 时把关联 skip_logs 标 dismissed 不计入后续阈值。"""
     if resolution_status not in (
@@ -867,13 +1153,33 @@ async def resolve_skip_alert(
     alert.resolution_note = note
 
     # 驳回告警 → 对应 skip_logs 标 dismissed
+    dismissed_log_count = 0
     if resolution_status == MallSkipAlertStatus.DISMISSED.value and alert.trigger_log_ids:
         from sqlalchemy import update as sql_update
-        await db.execute(
+        res = await db.execute(
             sql_update(MallCustomerSkipLog)
             .where(MallCustomerSkipLog.id.in_(alert.trigger_log_ids))
             .values(dismissed=True)
         )
+        dismissed_log_count = int(res.rowcount or 0)
+
+    # 审计（裁决业务员申诉是合规必留痕）
+    from app.services.audit_service import log_audit
+    await log_audit(
+        db, action=f"mall_skip_alert.{resolution_status}",
+        entity_type="MallSkipAlert", entity_id=alert.id,
+        actor_id=actor_employee_id if operator_type == "erp_user" else None,
+        actor_type=operator_type,
+        request=request,
+        changes={
+            "salesman_user_id": alert.salesman_user_id,
+            "customer_user_id": alert.customer_user_id,
+            "skip_count": alert.skip_count,
+            "appeal_reason": alert.appeal_reason,
+            "resolution_note": note,
+            "dismissed_skip_logs": dismissed_log_count,
+        },
+    )
 
     await db.flush()
     return alert
@@ -888,20 +1194,108 @@ async def ship_order(
     salesman: MallUser,
     order_id: str,
     warehouse_id: Optional[str] = None,
+    scanned_barcodes: Optional[list[str]] = None,
+    request=None,
 ) -> MallOrder:
-    """业务员标记出库。assigned → shipped。"""
+    """业务员扫码出库。assigned → shipped。
+
+    对齐 ERP 扫码规则：
+      (1) 每个 SKU 的订单数量必须被恰好 N 个条码覆盖
+      (2) 条码必须 status='in_stock' 且指向同一 SKU
+      (3) 扫码成功 → 条码 IN_STOCK → OUTBOUND；回填 outbound_order_id / user / at
+      (4) 全部核销通过 → 订单 assigned → shipped
+      (5) 任一校验失败整笔回滚，不允许"扫一半"
+
+    业务员如果不传 scanned_barcodes（老客户端）则保留旧行为（直接 ship），
+    但日志里留痕 M5 可以改为硬校验。
+    """
+    from app.models.mall.base import MallInventoryBarcodeStatus, MallInventoryBarcodeType
+    from app.models.mall.inventory import MallInventoryBarcode
+    from app.models.mall.order import MallShipment
+
     order = await _require_order_for_claim(db, order_id)
     if order.assigned_salesman_id != salesman.id:
         raise HTTPException(status_code=403, detail="只能操作自己接的订单")
     if order.status != MallOrderStatus.ASSIGNED.value:
         raise HTTPException(status_code=409, detail=f"订单状态 {order.status} 不可出库")
 
-    from app.models.mall.order import MallShipment
+    now = datetime.now(timezone.utc)
+
+    # ── 扫码核销 ────────────────────────────────────────────
+    if scanned_barcodes is not None:
+        # 按 SKU 统计订单应发数量
+        order_items = await get_order_items(db, order.id)
+        required_by_sku: dict[int, int] = {}
+        for oi in order_items:
+            required_by_sku[oi.sku_id] = required_by_sku.get(oi.sku_id, 0) + oi.quantity
+
+        if len(scanned_barcodes) != sum(required_by_sku.values()):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"扫码数量不符：应发 {sum(required_by_sku.values())} 瓶，"
+                    f"实际扫 {len(scanned_barcodes)} 瓶"
+                ),
+            )
+
+        # 查条码 + FOR UPDATE 锁
+        bcs = (await db.execute(
+            select(MallInventoryBarcode)
+            .where(MallInventoryBarcode.barcode.in_(scanned_barcodes))
+            .with_for_update()
+        )).scalars().all()
+        bc_by_code = {b.barcode: b for b in bcs}
+        missing = [c for c in scanned_barcodes if c not in bc_by_code]
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"以下条码不存在：{', '.join(missing[:5])}",
+            )
+
+        # 所有条码状态 = in_stock
+        not_in_stock = [
+            b.barcode for b in bcs
+            if b.status != MallInventoryBarcodeStatus.IN_STOCK.value
+        ]
+        if not_in_stock:
+            raise HTTPException(
+                status_code=400,
+                detail=f"以下条码状态异常，不可出库：{', '.join(not_in_stock[:5])}",
+            )
+
+        # 重复扫同一条码
+        if len(set(scanned_barcodes)) != len(scanned_barcodes):
+            raise HTTPException(status_code=400, detail="扫码包含重复条码")
+
+        # 按 SKU 核对数量
+        scanned_by_sku: dict[int, int] = {}
+        for b in bcs:
+            scanned_by_sku[b.sku_id] = scanned_by_sku.get(b.sku_id, 0) + 1
+        for sku_id, req in required_by_sku.items():
+            got = scanned_by_sku.get(sku_id, 0)
+            if got != req:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"SKU {sku_id} 扫码数 {got} ≠ 应发数 {req}",
+                )
+        extra_skus = set(scanned_by_sku) - set(required_by_sku)
+        if extra_skus:
+            raise HTTPException(
+                status_code=400,
+                detail=f"扫到了订单外的 SKU：{sorted(extra_skus)}",
+            )
+
+        # 所有校验通过 → 批量核销
+        for b in bcs:
+            b.status = MallInventoryBarcodeStatus.OUTBOUND.value
+            b.outbound_order_id = order.id
+            b.outbound_by_user_id = salesman.id
+            b.outbound_at = now
+
+    # ── 物流记录 ────────────────────────────────────────────
     ship = (await db.execute(
         select(MallShipment).where(MallShipment.order_id == order.id)
     )).scalar_one_or_none()
-
-    now = datetime.now(timezone.utc)
     if ship is None:
         ship = MallShipment(
             order_id=order.id,
@@ -917,6 +1311,22 @@ async def ship_order(
 
     order.status = MallOrderStatus.SHIPPED.value
     order.shipped_at = now
+
+    # 审计：出库涉及库存流动，供应链合规必记
+    from app.services.audit_service import log_audit
+    await log_audit(
+        db, action="mall_order.ship",
+        entity_type="MallOrder", entity_id=order.id,
+        mall_user_id=salesman.id, actor_type="mall_user",
+        request=request,
+        changes={
+            "order_no": order.order_no,
+            "warehouse_id": warehouse_id,
+            "scanned_barcode_count": len(scanned_barcodes) if scanned_barcodes else 0,
+            "used_scan_verification": scanned_barcodes is not None,
+        },
+    )
+
     await db.flush()
     return order
 
@@ -975,6 +1385,20 @@ async def deliver_order(
 
     order.status = MallOrderStatus.DELIVERED.value
     order.delivered_at = now
+
+    # 审计：送达照片 sha256 入库，合规留痕
+    from app.services.audit_service import log_audit
+    await log_audit(
+        db, action="mall_order.deliver",
+        entity_type="MallOrder", entity_id=order.id,
+        mall_user_id=salesman.id, actor_type="mall_user",
+        ip_address=request_ip,
+        changes={
+            "order_no": order.order_no,
+            "photo_count": len(delivery_photos),
+            "photo_sha256": [p.get("sha256") for p in delivery_photos][:5],
+        },
+    )
 
     from app.services.notification_service import notify_mall_user
     await notify_mall_user(
@@ -1081,6 +1505,23 @@ async def upload_payment_voucher(
 
     order.status = MallOrderStatus.PENDING_PAYMENT_CONFIRMATION.value
     order.payment_status = "pending_confirmation"
+
+    # 合规审计（凭证上传=真金白银入账前的最后一步，必记）
+    from app.services.audit_service import log_audit
+    await log_audit(
+        db, action="mall_payment.upload_voucher",
+        entity_type="MallPayment", entity_id=payment.id,
+        mall_user_id=salesman.id, actor_type="mall_user",
+        ip_address=request_ip,
+        changes={
+            "order_no": order.order_no,
+            "amount": str(amount),
+            "payment_method": payment_method,
+            "voucher_count": len(vouchers),
+            "sha256_list": [v.get("sha256") for v in vouchers][:5],  # 最多留 5 个便于追溯
+        },
+    )
+
     await db.flush()
     return payment
 
@@ -1093,6 +1534,7 @@ async def confirm_payment(
     db: AsyncSession,
     order_id: str,
     operator_employee_id: str,
+    request=None,  # 可选：记审计 IP
 ) -> MallOrder:
     """财务批量确认该订单的所有 pending payments。
 
@@ -1150,8 +1592,22 @@ async def confirm_payment(
         )).scalar_one_or_none()
         if user:
             user.last_order_at = now
+
+        # 累加商品销量（每个 product 按订单里的总数量）
+        items = await get_order_items(db, order.id)
+        qty_by_product: dict[int, int] = {}
+        for it in items:
+            qty_by_product[it.product_id] = qty_by_product.get(it.product_id, 0) + it.quantity
+        for pid, qty in qty_by_product.items():
+            prod = await db.get(MallProduct, pid)
+            if prod is not None:
+                prod.total_sales = (prod.total_sales or 0) + qty
+
         await db.flush()
         await post_commission_for_order(db, order)
+
+        # 标记已入利润台账（实时聚合，表本身不存；这个标志让报表查询能 WHERE 过滤）
+        order.profit_ledger_posted = True
 
         # 通知 consumer + 业务员
         await notify_mall_user(
@@ -1181,5 +1637,20 @@ async def confirm_payment(
                 ),
                 entity_type="MallOrder", entity_id=order.id,
             )
+
+    # 合规审计：财务确认真金白银入账，必记
+    from app.services.audit_service import log_audit
+    await log_audit(
+        db, action="mall_order.confirm_payment",
+        entity_type="MallOrder", entity_id=order.id,
+        actor_id=operator_employee_id, request=request,
+        changes={
+            "order_no": order.order_no,
+            "pay_amount": str(order.pay_amount),
+            "received_amount": str(new_received),
+            "status_after": order.status,
+            "confirmed_count": len(payments),
+        },
+    )
 
     return order

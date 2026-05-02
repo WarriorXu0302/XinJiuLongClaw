@@ -130,6 +130,20 @@ async def job_archive_inactive_consumers() -> dict:
             archived_ids.append(user.id)
             archived += 1
 
+            # 审计：定时任务自动归档，合规追溯（actor=system）
+            from app.services.audit_service import log_audit
+            await log_audit(
+                s, action="mall_user.auto_archive",
+                entity_type="MallUser", entity_id=user.id,
+                actor_type="system",
+                changes={
+                    "nickname": user.nickname,
+                    "order_count": order_count,
+                    "threshold_days": days_threshold,
+                    "inactive_days": int(elapsed.days),
+                },
+            )
+
         # 批量清购物车（避免循环里每次单独 SQL）
         if archived_ids:
             await s.execute(
@@ -217,7 +231,37 @@ async def job_detect_partial_close() -> dict:
                 "partially_paid" if (order.received_amount or 0) > 0 else "unpaid"
             )
             order.completed_at = datetime.now(timezone.utc)
+            order.profit_ledger_posted = True  # 折损关单也入报表
             closed += 1
+
+            # 审计：坏账折损（资金状态强制切换，必记）
+            from app.services.audit_service import log_audit
+            await log_audit(
+                s, action="mall_order.partial_close",
+                entity_type="MallOrder", entity_id=order.id,
+                actor_type="system",
+                changes={
+                    "order_no": order.order_no,
+                    "pay_amount": str(order.pay_amount),
+                    "received_amount": str(order.received_amount or 0),
+                    "bad_debt": str(order.pay_amount - (order.received_amount or Decimal("0"))),
+                    "days_since_delivered": int(
+                        (datetime.now(timezone.utc) - order.delivered_at).days
+                    ) if order.delivered_at else None,
+                },
+            )
+
+            # 累加商品销量（partial_closed 也算成交，只是没全款）
+            from app.models.mall.product import MallProduct
+            from app.services.mall import order_service
+            items = await order_service.get_order_items(s, order.id)
+            qty_by_product: dict[int, int] = {}
+            for it in items:
+                qty_by_product[it.product_id] = qty_by_product.get(it.product_id, 0) + it.quantity
+            for pid, qty in qty_by_product.items():
+                prod = await s.get(MallProduct, pid)
+                if prod is not None:
+                    prod.total_sales = (prod.total_sales or 0) + qty
 
             # 有已收才生成提成，且只生成一次
             if (order.received_amount or 0) > 0 and not order.commission_posted:

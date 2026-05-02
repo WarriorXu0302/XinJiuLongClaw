@@ -75,6 +75,8 @@ class MallOrderListItemVO(BaseModel):
     """订单列表项。"""
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
+    # 订单 PK（供业务员抢单池等场景用 order_id 调 claim/release/ship/deliver/…）
+    order_id: str = Field(alias="id", serialization_alias="orderId")
     order_no: str = Field(serialization_alias="orderNo")
     status: str
     payment_status: str = Field(serialization_alias="paymentStatus")
@@ -83,14 +85,36 @@ class MallOrderListItemVO(BaseModel):
     created_at: Optional[Any] = Field(default=None, serialization_alias="createTime")
     remarks: Optional[str] = None
 
+    # 业务员工作台列表展示字段（None 时前端显示空即可）
+    customer_nick: Optional[str] = None
+    masked_phone: Optional[str] = None
+    brief_address: Optional[str] = None
+    items_brief: Optional[str] = None
+    expires_at: Optional[Any] = Field(default=None, serialization_alias="expiresAt")
+
     @field_serializer("pay_amount", "total_amount", when_used="always")
     def _mask_price(self, v):
         return mask_price(v)
 
 
+class MallCourierVO(BaseModel):
+    """订单配送员信息（C 端订单详情 / "联系配送员"入口用）。
+
+    mall 没有第三方物流，业务员自提自送 → "物流"信息 = 配送业务员本人。
+    """
+    nickname: Optional[str] = None
+    mobile: Optional[str] = None
+    wechat_qr_url: Optional[str] = Field(default=None, serialization_alias="wechatQrUrl")
+    alipay_qr_url: Optional[str] = Field(default=None, serialization_alias="alipayQrUrl")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class MallOrderDetailVO(MallOrderListItemVO):
     """订单详情。"""
-    address: Optional[dict] = Field(default=None, alias="address_snapshot")
+    address: Optional[dict] = Field(
+        default=None, alias="address_snapshot", serialization_alias="address"
+    )
     items: List[MallOrderItemVO] = Field(default_factory=list)
     claimed_at: Optional[Any] = Field(default=None, serialization_alias="claimedAt")
     shipped_at: Optional[Any] = Field(default=None, serialization_alias="shippedAt")
@@ -98,6 +122,12 @@ class MallOrderDetailVO(MallOrderListItemVO):
     paid_at: Optional[Any] = Field(default=None, serialization_alias="paidAt")
     completed_at: Optional[Any] = Field(default=None, serialization_alias="completedAt")
     cancelled_at: Optional[Any] = Field(default=None, serialization_alias="cancelledAt")
+    customer_confirmed_at: Optional[Any] = Field(
+        default=None, serialization_alias="customerConfirmedAt"
+    )
+
+    # 配送员信息：pending_assignment 时为 null（还没人接单）
+    courier: Optional[MallCourierVO] = None
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 

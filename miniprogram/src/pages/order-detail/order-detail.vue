@@ -68,6 +68,52 @@
         </block>
       </view>
 
+      <!-- 配送员信息（接单后才显示）-->
+      <view
+        v-if="courier"
+        class="order-msg courier-box"
+      >
+        <view class="msg-item">
+          <view class="item courier-row">
+            <text class="item-tit">配送员：</text>
+            <text class="item-txt">{{ courier.nickname || '业务员' }}</text>
+            <text
+              class="courier-action"
+              @tap="onCallCourier"
+            >
+              📞 拨打电话
+            </text>
+          </view>
+          <view
+            v-if="courier.mobile"
+            class="item courier-row"
+          >
+            <text class="item-tit">手机号：</text>
+            <text class="item-txt">{{ courier.mobile }}</text>
+          </view>
+          <view
+            v-if="courier.wechatQrUrl || courier.alipayQrUrl"
+            class="item courier-row courier-qr"
+          >
+            <text class="item-tit">收款码：</text>
+            <text
+              v-if="courier.wechatQrUrl"
+              class="courier-qr-btn"
+              @tap="onPreviewPayQr(courier.wechatQrUrl)"
+            >
+              微信
+            </text>
+            <text
+              v-if="courier.alipayQrUrl"
+              class="courier-qr-btn"
+              @tap="onPreviewPayQr(courier.alipayQrUrl)"
+            >
+              支付宝
+            </text>
+          </view>
+        </view>
+      </view>
+
       <!-- 订单信息 -->
       <view class="order-msg">
         <view class="msg-item">
@@ -234,31 +280,46 @@ const userAddrDto = ref(null)
 const orderNumber = ref('')
 const createTime = ref('')
 const total = ref(0) // 商品总额
+const courier = ref(null)  // 配送员：{nickname, mobile, wechatQrUrl, alipayQrUrl}
+const showPayQr = ref(false)
 /**
  * 加载订单数据
  */
 const loadOrderDetail = (orderNum) => {
   uni.showLoading() // 加载订单详情
   http.request({
-    url: '/p/myOrder/orderDetail',
+    url: '/api/mall/orders/' + orderNum,
     method: 'GET',
-    data: {
-      orderNumber: orderNum
-    }
+    data: {}
   })
     .then(({ data }) => {
+      // 后端 MallOrderDetailVO 字段：orderNo/status/payAmount/totalAmount/createTime/address/items/...
       orderNumber.value = orderNum
-      actualTotal.value = data.actualTotal
-      userAddrDto.value = data.userAddrDto
+      actualTotal.value = data.payAmount ?? data.actualTotal ?? 0
+      userAddrDto.value = data.address || data.userAddrDto
       remarks.value = data.remarks
-      orderItemDtos.value = data.orderItemDtos
+      orderItemDtos.value = data.items || data.orderItemDtos || []
       createTime.value = data.createTime
       status.value = data.status
-      transfee.value = data.transfee
-      reduceAmount.value = data.reduceAmount
-      total.value = data.total
+      transfee.value = data.shippingFee ?? data.transfee ?? 0
+      reduceAmount.value = data.discountAmount ?? data.reduceAmount ?? 0
+      total.value = data.totalAmount ?? data.total ?? 0
+      courier.value = data.courier || null
       uni.hideLoading()
     })
+}
+
+const onCallCourier = () => {
+  if (!courier.value?.mobile) {
+    uni.showToast({ title: '暂无配送员手机号', icon: 'none' })
+    return
+  }
+  uni.makePhoneCall({ phoneNumber: courier.value.mobile })
+}
+
+const onPreviewPayQr = (url) => {
+  if (!url) return
+  uni.previewImage({ urls: [url], current: url })
 }
 
 /**
@@ -273,7 +334,7 @@ const delOrderList = () => {
       if (res.confirm) {
         uni.showLoading()
         http.request({
-          url: '/p/myOrder/' + orderNumber.value,
+          url: '/api/mall/orders/' + orderNumber.value,
           method: 'DELETE'
         })
           .then(() => {

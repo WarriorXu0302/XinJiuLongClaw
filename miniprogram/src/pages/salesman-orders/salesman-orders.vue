@@ -44,13 +44,13 @@
 
     <view
       v-for="o in orders"
-      :key="o.order_no"
+      :key="o.orderNo || o.order_no"
       class="card"
       @tap="toDetail(o)"
     >
       <view class="card__top">
         <text class="card__order">
-          {{ o.order_no }}
+          {{ o.orderNo || o.order_no }}
         </text>
         <text :class="['card__status', 'card__status--' + o.status]">
           {{ statusLabel(o.status) }}
@@ -69,10 +69,10 @@
 
       <view class="card__bottom">
         <text class="card__time">
-          {{ relativeTime(o.created_at) }}
+          {{ relativeTime(o.createTime || o.created_at) }}
         </text>
         <text class="card__amount">
-          {{ fmtMoney(o.amount) }}
+          {{ fmtMoney(o.payAmount || o.amount) }}
         </text>
       </view>
 
@@ -86,10 +86,13 @@
         </text>
       </view>
     </view>
+    <SalesmanTabbar active="orders" />
   </view>
 </template>
 
 <script setup>
+import SalesmanTabbar from '@/components/salesman-tabbar/salesman-tabbar.vue'
+
 const activeTab = ref('in_transit')
 const orders = ref([])
 const loading = ref(false)
@@ -108,13 +111,22 @@ const nextAction = (status) => {
   return ''
 }
 
+// 前端 tab key → 后端 MallOrderStatus 过滤；后端 status 支持逗号分隔多值
+const TAB_STATUS_MAP = {
+  in_transit: 'assigned,shipped',
+  awaiting_payment: 'delivered',
+  awaiting_finance: 'pending_payment_confirmation',
+  completed: 'completed'
+}
+
 const loadOrders = async () => {
   loading.value = true
   try {
+    const status = TAB_STATUS_MAP[activeTab.value]
     const res = await http.request({
       url: '/api/mall/salesman/orders',
       method: 'GET',
-      data: { status_filter: activeTab.value }
+      data: status ? { status } : {}
     })
     orders.value = res.data?.records || []
   } finally {
@@ -124,14 +136,14 @@ const loadOrders = async () => {
 
 const loadBadges = async () => {
   const res = await http.request({
-    url: '/api/mall/salesman/order-count-badges',
+    url: '/api/mall/salesman/stats/order-count-badges',
     method: 'GET',
     dontTrunLogin: true
   })
   const d = res.data || {}
   badge.value = {
     in_transit: d.in_transit || 0,
-    awaiting_payment: 0,
+    awaiting_payment: d.awaiting_payment || 0,
     awaiting_finance: d.awaiting_finance || 0,
     completed: 0
   }
@@ -144,8 +156,11 @@ const onTabChange = (k) => {
 }
 
 const toDetail = (o) => {
+  // 详情页需要 order_id 调后端 GET/POST 接口；order_no 仅做展示用
+  const orderId = o.orderId || o.order_id
+  const orderNo = o.orderNo || o.order_no
   uni.navigateTo({
-    url: `/pages/salesman-order-detail/salesman-order-detail?order_no=${o.order_no}`
+    url: `/pages/salesman-order-detail/salesman-order-detail?order_id=${orderId}&order_no=${orderNo}`
   })
 }
 
@@ -171,7 +186,7 @@ onPullDownRefresh(async () => {
 .page {
   min-height: 100vh;
   background: $color-cream;
-  padding-bottom: 40rpx;
+  padding-bottom: calc(150rpx + env(safe-area-inset-bottom));
 }
 
 .tabs {

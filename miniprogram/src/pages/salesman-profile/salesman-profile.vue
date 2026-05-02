@@ -181,11 +181,13 @@
         @tap="onLogout"
       />
     </view>
+    <SalesmanTabbar active="profile" />
   </view>
 </template>
 
 <script setup>
 import MenuItem from './_MenuItem.vue'
+import SalesmanTabbar from '@/components/salesman-tabbar/salesman-tabbar.vue'
 
 const profile = ref({})
 const stats = ref({
@@ -246,7 +248,7 @@ const loadUnread = async () => {
 }
 
 const toPage = (url) => uni.navigateTo({ url })
-const toWorkspace = () => uni.switchTab({ url: '/pages/salesman-workspace/salesman-workspace' })
+const toWorkspace = () => uni.navigateTo({ url: '/pages/salesman-workspace/salesman-workspace' })
 
 const onToggleAccepting = async (e) => {
   const checked = e.detail.value
@@ -296,7 +298,7 @@ onShow(() => {
 .page {
   min-height: 100vh;
   background: $color-cream;
-  padding-bottom: 40rpx;
+  padding-bottom: calc(150rpx + env(safe-area-inset-bottom));
 }
 
 .hero {

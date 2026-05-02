@@ -159,5 +159,6 @@ class MallRegionVO(BaseModel):
 
     area_code: str = Field(serialization_alias="areaId")
     parent_code: Optional[str] = Field(default=None, serialization_alias="parentId")
-    name: str
+    # 对齐 mall4j 小程序模板里的 `item.areaName`
+    name: str = Field(serialization_alias="areaName")
     level: int

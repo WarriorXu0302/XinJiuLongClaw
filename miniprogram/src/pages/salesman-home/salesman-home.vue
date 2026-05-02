@@ -6,8 +6,8 @@
     - 抢单广场（public）— 开放期订单，所有业务员都能抢
 
   数据：GET /api/mall/salesman/orders/pool?scope=my|public
-  操作：POST /api/mall/salesman/orders/{order_no}/claim
-  角标：GET /api/mall/salesman/order-count-badges → my_pool 数
+  操作：POST /api/mall/salesman/orders/{order_id}/claim
+  角标：GET /api/mall/salesman/stats/order-count-badges → my_pool 数
 -->
 <template>
   <view class="page">
@@ -52,15 +52,15 @@
 
     <view
       v-for="o in orders"
-      :key="o.order_no"
+      :key="o.orderNo || o.order_no"
       class="card"
     >
       <view class="card__top">
         <text class="card__order">
-          {{ o.order_no }}
+          {{ o.orderNo || o.order_no }}
         </text>
         <text class="card__time">
-          {{ relativeTime(o.created_at) }}
+          {{ relativeTime(o.createTime || o.created_at) }}
         </text>
       </view>
 
@@ -74,11 +74,7 @@
       </view>
 
       <view class="card__addr">
-        <image
-          class="card__icon"
-          src="/static/images/icon/location.png"
-          mode="aspectFit"
-        />
+        <text class="card__icon">📍</text>
         <text>{{ o.brief_address }}</text>
       </view>
 
@@ -88,14 +84,14 @@
 
       <view class="card__bottom">
         <text class="card__amount">
-          {{ fmtMoney(o.amount) }}
+          {{ fmtMoney(o.payAmount || o.amount) }}
         </text>
         <view class="card__actions">
           <text
             v-if="o.expires_at"
             class="card__timer"
           >
-            独占 {{ countdownMap[o.order_no] || '00:00:00' }}
+            独占 {{ countdownMap[o.orderNo || o.order_no] || '00:00:00' }}
           </text>
           <view
             class="card__claim"
@@ -106,10 +102,13 @@
         </view>
       </view>
     </view>
+    <SalesmanTabbar active="home" />
   </view>
 </template>
 
 <script setup>
+import SalesmanTabbar from '@/components/salesman-tabbar/salesman-tabbar.vue'
+
 const activeTab = ref('my')
 const orders = ref([])
 const loading = ref(false)
@@ -134,7 +133,8 @@ const loadPool = async () => {
       method: 'GET',
       data: { scope: activeTab.value }
     })
-    orders.value = res.data?.records || []
+    const body = res.data ?? res
+    orders.value = body?.records || []
     refreshCountdowns()
   } finally {
     loading.value = false
@@ -143,7 +143,7 @@ const loadPool = async () => {
 
 const loadBadges = async () => {
   const res = await http.request({
-    url: '/api/mall/salesman/order-count-badges',
+    url: '/api/mall/salesman/stats/order-count-badges',
     method: 'GET',
     dontTrunLogin: true
   })
@@ -158,7 +158,8 @@ const loadBadges = async () => {
 const refreshCountdowns = () => {
   const m = {}
   orders.value.forEach(o => {
-    if (o.expires_at) m[o.order_no] = salesman.countdown(o.expires_at)
+    const key = o.orderNo || o.order_no
+    if (o.expires_at) m[key] = salesman.countdown(o.expires_at)
   })
   countdownMap.value = m
 }
@@ -170,14 +171,17 @@ const onTabChange = (key) => {
 }
 
 const onClaim = (o) => {
+  // 后端 claim 接口路径参数是 order_id（非 order_no），
+  // 对应 MallOrderListItemVO.orderId（schema 已加 serialization_alias）。
+  const orderId = o.orderId || o.order_id
   uni.showModal({
     title: '确认抢单',
-    content: `确定接 ${o.customer_nick} 的订单 ${o.order_no}？`,
+    content: `确定接 ${o.customer_nick || '客户'} 的订单 ${o.orderNo || o.order_no}？`,
     success: async (res) => {
       if (!res.confirm) return
       try {
         await http.request({
-          url: `/api/mall/salesman/orders/${o.order_no}/claim`,
+          url: `/api/mall/salesman/orders/${orderId}/claim`,
           method: 'POST',
           data: {}
         })
@@ -221,7 +225,7 @@ onPullDownRefresh(async () => {
 .page {
   min-height: 100vh;
   background: $color-cream;
-  padding-bottom: 40rpx;
+  padding-bottom: calc(150rpx + env(safe-area-inset-bottom));
 }
 
 .header {

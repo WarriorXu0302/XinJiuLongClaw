@@ -312,40 +312,54 @@ onShareAppMessage(() => {
 
 const isCollection = ref(false)
 /**
- * 获取是否关注信息
+ * 查询当前商品是否已收藏
  */
 const getCollection = () => {
   if (!uni.getStorageSync('Token')) {
     return
   }
-  uni.showLoading()
   http.request({
-    url: '/p/user/collection/isCollection',
+    url: '/api/mall/collections/check',
     method: 'GET',
-    data: {
-      prodId
-    }
+    data: { product_id: prodId }
+  }).then(({ data }) => {
+    isCollection.value = Array.isArray(data?.collected)
+      && data.collected.map(String).includes(String(prodId))
+  }).catch(() => {
+    isCollection.value = false
   })
-    .then(({ data }) => {
-      isCollection.value = data
-      uni.hideLoading()
-    })
 }
 
 /**
- * 添加或者取消收藏商品
+ * 添加或取消收藏
  */
 const addOrCannelCollection = () => {
-  uni.showLoading()
-  http.request({
-    url: '/p/user/collection/addOrCancel',
-    method: 'POST',
-    data: prodId
-  })
-    .then(() => {
-      isCollection.value = !isCollection.value
-      uni.hideLoading()
+  if (!uni.getStorageSync('Token')) {
+    uni.navigateTo({ url: '/pages/accountLogin/accountLogin' })
+    return
+  }
+  if (isCollection.value) {
+    http.request({
+      url: `/api/mall/collections/${prodId}`,
+      method: 'DELETE'
+    }).then(() => {
+      isCollection.value = false
+      uni.showToast({ title: '已取消收藏', icon: 'none' })
+    }).catch(() => {
+      uni.showToast({ title: '操作失败', icon: 'none' })
     })
+  } else {
+    http.request({
+      url: '/api/mall/collections',
+      method: 'POST',
+      data: { product_id: Number(prodId) }
+    }).then(() => {
+      isCollection.value = true
+      uni.showToast({ title: '已收藏', icon: 'none' })
+    }).catch(() => {
+      uni.showToast({ title: '操作失败', icon: 'none' })
+    })
+  }
 }
 
 const skuList = ref([])
@@ -362,11 +376,9 @@ const content = ref('')
 const getProdInfo = () => {
   uni.showLoading()
   http.request({
-    url: '/prod/prodInfo',
+    url: `/api/mall/products/${prodId}`,
     method: 'GET',
-    data: {
-      prodId // userType: 0
-    }
+    data: {}
   })
     .then(({ data }) => {
       uni.hideLoading()
@@ -565,13 +577,11 @@ const addToCart = () => {
     mask: true
   })
   http.request({
-    url: '/p/shopCart/changeItem',
+    url: '/api/mall/cart/change',
     method: 'POST',
     data: {
-      basketId: 0,
       count: prodNum.value,
       prodId,
-      shopId,
       skuId: defaultSku.value.skuId
     }
   })

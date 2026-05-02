@@ -901,10 +901,13 @@ const routes = [
 ]
 
 // ─── 对外：在 http 层调用 ─────────────────────────────────
-export const enabled = import.meta.env.VITE_APP_ENV === 'development'
+// M1-M5 后端接通后默认关 mock；需要离线调 UI 时手工把环境变量改 'mock'
+export const enabled = import.meta.env.VITE_APP_ENV === 'mock'
 
 export function tryMock (params) {
   const url = params.url || ''
+  // 后端已接通的 mall 真路径一律不走 mock，直接打后端
+  if (url.startsWith('/api/mall/') || url.startsWith('/api/auth/')) return null
   const hit = routes.find(r => r.match.test(url))
   if (!hit) return null
   const delay = 120 + Math.floor(Math.random() * 180)

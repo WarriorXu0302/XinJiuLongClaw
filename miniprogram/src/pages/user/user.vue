@@ -248,13 +248,17 @@ const orderAmount = ref('')
  * 生命周期函数--监听页面显示
  */
 onShow(() => {
+  if (uni.getStorageSync('userType') === 'salesman') {
+    uni.reLaunch({ url: '/pages/salesman-profile/salesman-profile' })
+    return
+  }
   loginResult.value = uni.getStorageSync('loginResult')
   isAuthInfo.value = !!loginResult.value
   // 加载订单数字
   if (isAuthInfo.value) {
     uni.showLoading()
     http.request({
-      url: '/p/myOrder/orderCount',
+      url: '/api/mall/orders/stats',
       method: 'GET',
       data: {}
     })
@@ -308,16 +312,18 @@ const collectionCount = ref(0)
  * 查询所有的收藏量
  */
 const showCollectionCount = () => {
-  uni.showLoading()
+  if (!uni.getStorageSync('Token')) {
+    collectionCount.value = 0
+    return
+  }
   http.request({
-    url: '/p/user/collection/count',
-    method: 'GET',
-    data: {}
+    url: '/api/mall/collections/count',
+    method: 'GET'
+  }).then(({ data }) => {
+    collectionCount.value = data?.total || 0
+  }).catch(() => {
+    collectionCount.value = 0
   })
-    .then(({ data }) => {
-      uni.hideLoading()
-      collectionCount.value = data
-    })
 }
 
 /**
@@ -349,13 +355,17 @@ const toLogin = () => {
  */
 const logout = () => {
   http.request({
-    url: '/logOut',
-    method: 'post'
+    url: '/api/mall/auth/logout',
+    method: 'POST'
   })
-    .then(() => {
+    .catch(() => {})
+    .finally(() => {
       util.removeTabBadge()
       uni.removeStorageSync('loginResult')
-      uni.removeStorageSync('token')
+      uni.removeStorageSync('Token')
+      uni.removeStorageSync('RefreshToken')
+      uni.removeStorageSync('hadLogin')
+      uni.removeStorageSync('userType')
       uni.showToast({
         title: '退出成功',
         icon: 'none'

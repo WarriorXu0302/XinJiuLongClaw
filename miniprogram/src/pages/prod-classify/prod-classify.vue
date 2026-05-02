@@ -100,40 +100,38 @@ const loadProdData = (options) => {
     // 分组标签商品列表
     getTagProd()
   } else if (stsParam == 1) {
-    // 新品推荐
-    const url = '/prod/lastedProdPage'
-    getActProd(url)
+    // 新品推荐 → filter=lasted
+    getActProd({ filter: 'lasted' })
   } else if (stsParam == 2) {
-    // 限时特惠
-    const url = '/prod/discountProdList'
-    getActProd(url)
+    // 限时特惠 → filter=discount
+    getActProd({ filter: 'discount' })
   } else if (stsParam == 3) {
-    // 每日疯抢
-    const url = '/prod/moreBuyProdList'
-    getActProd(url)
+    // 每日疯抢 → filter=hot
+    getActProd({ filter: 'hot' })
   } else if (stsParam == 4) {
-    // 优惠券商品列表
-    getProdByCouponId(options.tagid)
+    // 优惠券商品列表 — 后端未实现 coupon 路由
+    getProdByCouponId(options?.tagid)
   } else if (stsParam == 5) {
-    // 收藏商品列表
+    // 我的收藏商品列表
     getCollectionProd()
   }
 }
 
 const prodList = ref([])
-const getActProd = (url) => {
+const getActProd = (extraParams) => {
   uni.showLoading()
   http.request({
-    url,
+    url: '/api/mall/products',
     method: 'GET',
     data: {
-      current: current.value,
-      size: size.value
+      skip: (current.value - 1) * size.value,
+      limit: size.value,
+      ...(extraParams || {})
     }
   })
     .then(({ data }) => {
       let list
-      if (data.current === 1) {
+      if ((data.current || 1) === 1) {
         list = data.records
       } else {
         list = prodList.value
@@ -151,25 +149,34 @@ const getActProd = (url) => {
 const getCollectionProd = () => {
   uni.showLoading()
   http.request({
-    url: '/p/user/collection/prods',
+    url: '/api/mall/collections',
     method: 'GET',
     data: {
-      current: current.value,
-      size: size.value
+      skip: (current.value - 1) * size.value,
+      limit: size.value
     }
-  })
-    .then(({ data }) => {
-      let list
-      if (data.current == 1) {
-        list = data.records
-      } else {
-        list = prodList.value
-        list = list.concat(data.records)
-      }
+  }).then(({ data }) => {
+    // 后端返回 {records, total}；records 已是商品维度（展开 product 字段）
+    const list = (data.records || []).map(r => ({
+      prodId: r.product_id,
+      prodName: r.name,
+      brief: r.brief,
+      pic: r.main_image,
+      price: r.min_price,
+      origPrice: r.max_price
+    }))
+    if (current.value === 1) {
       prodList.value = list
-      pages.value = data.pages
-      uni.hideLoading()
-    })
+    } else {
+      prodList.value = prodList.value.concat(list)
+    }
+    pages.value = Math.max(1, Math.ceil((data.total || 0) / size.value))
+    uni.hideLoading()
+  }).catch(() => {
+    prodList.value = []
+    pages.value = 0
+    uni.hideLoading()
+  })
 }
 
 /**
@@ -178,17 +185,17 @@ const getCollectionProd = () => {
 const getTagProd = () => {
   uni.showLoading()
   http.request({
-    url: '/prod/prodListByTagId',
+    url: '/api/mall/products',
     method: 'GET',
     data: {
-      tagId: tagid.value,
-      current: current.value,
-      size: size.value
+      tag_id: tagid.value,
+      skip: (current.value - 1) * size.value,
+      limit: size.value
     }
   })
     .then(({ data }) => {
       let list
-      if (data.current === 1) {
+      if ((data.current || 1) === 1) {
         list = data.records
       } else {
         list = prodList.value.concat(data.records)
@@ -201,29 +208,11 @@ const getTagProd = () => {
 
 /**
  * 获取优惠券商品列表
+ * TODO: 后端 coupon 路由未实现，空占位。
  */
-const getProdByCouponId = (id) => {
-  uni.showLoading()
-  http.request({
-    url: '/coupon/prodListByCouponId',
-    method: 'GET',
-    data: {
-      couponId: id,
-      current: current.value,
-      size: size.value
-    }
-  })
-    .then(({ data }) => {
-      let list
-      if (data.current === 1) {
-        list = data.records
-      } else {
-        list = prodList.value.concat(data.records)
-      }
-      prodList.value = list
-      pages.value = data.pages
-      uni.hideLoading()
-    })
+const getProdByCouponId = () => {
+  prodList.value = []
+  pages.value = 0
 }
 </script>
 

@@ -340,3 +340,41 @@
     font-weight: 500;
   }
 }
+
+/* ── 配送员卡片 ── */
+.courier-box {
+  border-left: 6rpx solid #C9A961;
+
+  .courier-row {
+    display: flex;
+    align-items: center;
+    gap: 12rpx;
+
+    .item-tit {
+      min-width: 140rpx;
+    }
+
+    .courier-action {
+      margin-left: auto;
+      padding: 10rpx 24rpx;
+      background: #0E0E0E;
+      color: #C9A961;
+      font-size: 24rpx;
+      border-radius: 32rpx;
+      line-height: 1.2;
+      letter-spacing: 1rpx;
+    }
+
+    &.courier-qr {
+      .courier-qr-btn {
+        padding: 8rpx 20rpx;
+        border: 1rpx solid #C9A961;
+        color: #C9A961;
+        border-radius: 8rpx;
+        font-size: 24rpx;
+        margin-right: 12rpx;
+        line-height: 1.2;
+      }
+    }
+  }
+}

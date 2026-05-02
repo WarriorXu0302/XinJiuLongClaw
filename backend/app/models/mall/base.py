@@ -125,3 +125,19 @@ class MallAttachmentType(str, enum.Enum):
     """附件类型。"""
     PAYMENT_VOUCHER = "payment_voucher"
     DELIVERY_PHOTO = "delivery_photo"
+
+
+class MallInventoryBarcodeType(str, enum.Enum):
+    """库存条码类型（对齐 ERP InventoryBarcode）。
+
+    M4a MVP: 只用 BOTTLE（1 码 = 1 瓶）；CASE 预留给后续整箱场景。
+    """
+    BOTTLE = "bottle"
+    CASE = "case"
+
+
+class MallInventoryBarcodeStatus(str, enum.Enum):
+    """条码生命周期状态。"""
+    IN_STOCK = "in_stock"   # 在库可用
+    OUTBOUND = "outbound"    # 已扫码出库（订单关联）
+    DAMAGED = "damaged"      # 盘亏/损耗注销

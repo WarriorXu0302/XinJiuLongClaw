@@ -107,10 +107,10 @@ const subCategoryList = ref([])
  */
 const getSubCategory = () => {
   http.request({
-    url: '/category/categoryInfo',
+    url: '/api/mall/categories',
     method: 'GET',
     data: {
-      parentId: parentId.value
+      parent_id: parentId.value
     }
   })
     .then(({ data }) => {
@@ -130,20 +130,19 @@ const getProdList = () => {
   isLoaded.value = false
 
   http.request({
-    url: '/prod/pageProd',
+    url: '/api/mall/products',
     method: 'GET',
     data: {
-      categoryId: categoryId.value,
-      current: current.value,
-      size: 10,
-      sort: 0,
-      isAllProdType: true
+      category_id: categoryId.value,
+      skip: (current.value - 1) * 10,
+      limit: 10
     }
   })
     .then(({ data }) => {
       isLoaded.value = true
-      prodList.value = data.current == 1 ? data.records : prodList.value.concat(data.records)
-      current.value = data.current
+      const cur = data.current || current.value
+      prodList.value = cur == 1 ? data.records : prodList.value.concat(data.records)
+      current.value = cur
       pages.value = data.pages
     })
 }

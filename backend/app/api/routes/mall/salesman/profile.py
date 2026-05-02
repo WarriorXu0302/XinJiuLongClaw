@@ -9,7 +9,7 @@ POST /change-password      改密码（主动或首次登录强制）
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +19,7 @@ from app.core.security import (
     get_password_hash,
     verify_password,
 )
+from app.services.audit_service import log_audit
 from app.services.mall import auth_service
 
 router = APIRouter()
@@ -134,11 +135,13 @@ def _assert_password_strength(pwd: str) -> None:
 async def change_password(
     body: _ChangePwdBody,
     current: CurrentMallUser,
+    request: Request,
     db: AsyncSession = Depends(get_mall_db),
 ):
     _require_salesman(current)
     user = await auth_service.verify_token_and_load_user(db, current)
     _assert_password_strength(body.new_password)
+    was_forced = user.must_change_password
     if user.hashed_password and not user.must_change_password:
         if not body.old_password:
             raise HTTPException(status_code=400, detail="旧密码必填")
@@ -151,5 +154,15 @@ async def change_password(
     user.must_change_password = False
     # 改密码后 bump token_version，所有旧 token 失效
     user.token_version = (user.token_version or 0) + 1
+
+    # 合规审计（密码修改属于账户安全敏感操作）
+    await log_audit(
+        db, action="mall_user.change_password",
+        entity_type="MallUser", entity_id=user.id,
+        mall_user_id=user.id, actor_type="mall_user",
+        request=request,
+        changes={"forced_first_login": was_forced},
+    )
+
     await db.flush()
     return {"success": True}

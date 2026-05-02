@@ -30,7 +30,7 @@ from app.models.mall.product import (  # noqa: F401
     MallProduct, MallProductSku, MallCollection,
 )
 from app.models.mall.inventory import (  # noqa: F401
-    MallWarehouse, MallInventory, MallInventoryFlow,
+    MallWarehouse, MallInventory, MallInventoryFlow, MallInventoryBarcode,
 )
 from app.models.mall.content import MallNotice  # noqa: F401
 from app.models.mall.order import (  # noqa: F401

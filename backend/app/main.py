@@ -57,6 +57,16 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # 审计 middleware：把当前 Request 注入 ContextVar，log_audit 自动取 IP
+    @app.middleware("http")
+    async def audit_request_middleware(request, call_next):
+        from app.services.audit_service import set_current_request
+        set_current_request(request)
+        try:
+            return await call_next(request)
+        finally:
+            set_current_request(None)
+
     # Health check endpoint
     @app.get("/health")
     async def health_check() -> dict:
@@ -133,6 +143,7 @@ def create_app() -> FastAPI:
         addresses as mall_addresses,
         cart as mall_cart,
         categories as mall_categories,
+        collections as mall_collections,
         notices as mall_notices,
         orders as mall_orders,
         products as mall_products,
@@ -148,6 +159,7 @@ def create_app() -> FastAPI:
     app.include_router(mall_cart.router, prefix="/api/mall/cart", tags=["Mall-Cart"])
     app.include_router(mall_addresses.router, prefix="/api/mall/addresses", tags=["Mall-Addresses"])
     app.include_router(mall_orders.router, prefix="/api/mall/orders", tags=["Mall-Orders"])
+    app.include_router(mall_collections.router, prefix="/api/mall/collections", tags=["Mall-Collections"])
 
     # M4a: 履约闭环（抢单/出库/送达/凭证/财务确认/跳单告警）
     from app.api.routes.mall import attachments as mall_attachments
@@ -173,9 +185,14 @@ def create_app() -> FastAPI:
     from app.api.routes.mall.admin import housekeeping as ma_housekeeping
     app.include_router(ma_housekeeping.router, prefix="/api/mall/admin/housekeeping", tags=["Mall-Admin"])
 
-    # M4c: workspace 薄转发（ERP 复用模块 — 通知 / 打卡 / 拜访）
+    # M4c: workspace 薄转发（ERP 复用模块 — 通知 / 打卡 / 拜访 / 请假 / 报销 / 稽查 / KPI / 客户）
     from app.api.routes.mall.workspace import (
         attendance as mw_attendance,
+        customers as mw_customers,
+        expense as mw_expense,
+        inspection as mw_inspection,
+        kpi as mw_kpi,
+        leave as mw_leave,
         notifications as mw_notifications,
     )
     app.include_router(
@@ -188,12 +205,46 @@ def create_app() -> FastAPI:
         prefix="/api/mall/workspace/attendance",
         tags=["Mall-Workspace"],
     )
+    app.include_router(
+        mw_leave.router,
+        prefix="/api/mall/workspace/leave-requests",
+        tags=["Mall-Workspace"],
+    )
+    app.include_router(
+        mw_expense.router,
+        prefix="/api/mall/workspace/expense-claims",
+        tags=["Mall-Workspace"],
+    )
+    app.include_router(
+        mw_inspection.router,
+        prefix="/api/mall/workspace/inspection-cases",
+        tags=["Mall-Workspace"],
+    )
+    app.include_router(
+        mw_kpi.router,
+        prefix="/api/mall/workspace/sales-targets",
+        tags=["Mall-Workspace"],
+    )
+    app.include_router(
+        mw_customers.router,
+        prefix="/api/mall/workspace/customers",
+        tags=["Mall-Workspace"],
+    )
 
-    # M5: 管理后台（users / salesmen / payments）+ 业务员工作台剩余页
+    # M5: 管理后台（users / salesmen / payments / warehouses / inventory / categories / tags）+ 业务员工作台剩余页
     from app.api.routes.mall.admin import (
+        audit_logs as ma_audit_logs,
+        categories as ma_categories,
+        dashboard as ma_dashboard,
+        inventory as ma_inventory,
+        invite_codes as ma_invite_codes,
+        login_logs as ma_login_logs,
+        notices as ma_notices,
         payments as ma_payments,
+        products as ma_products,
         salesmen as ma_salesmen,
         users as ma_users,
+        warehouses as ma_warehouses,
     )
     from app.api.routes.mall.salesman import (
         invite as ms_invite,
@@ -204,12 +255,23 @@ def create_app() -> FastAPI:
     app.include_router(ma_users.router, prefix="/api/mall/admin/users", tags=["Mall-Admin"])
     app.include_router(ma_payments.router, prefix="/api/mall/admin/payments", tags=["Mall-Admin"])
     app.include_router(ma_salesmen.router, prefix="/api/mall/admin/salesmen", tags=["Mall-Admin"])
+    app.include_router(ma_warehouses.router, prefix="/api/mall/admin/warehouses", tags=["Mall-Admin"])
+    app.include_router(ma_inventory.router, prefix="/api/mall/admin/inventory", tags=["Mall-Admin"])
+    app.include_router(ma_categories.router, prefix="/api/mall/admin/categories", tags=["Mall-Admin"])
+    app.include_router(ma_categories.tag_router, prefix="/api/mall/admin/tags", tags=["Mall-Admin"])
+    app.include_router(ma_products.router, prefix="/api/mall/admin/products", tags=["Mall-Admin"])
+    app.include_router(ma_products.sku_router, prefix="/api/mall/admin/skus", tags=["Mall-Admin"])
+    app.include_router(ma_dashboard.router, prefix="/api/mall/admin/dashboard", tags=["Mall-Admin"])
+    app.include_router(ma_invite_codes.router, prefix="/api/mall/admin/invite-codes", tags=["Mall-Admin"])
+    app.include_router(ma_audit_logs.router, prefix="/api/mall/admin/audit-logs", tags=["Mall-Admin"])
+    app.include_router(ma_login_logs.router, prefix="/api/mall/admin/login-logs", tags=["Mall-Admin"])
+    app.include_router(ma_notices.router, prefix="/api/mall/admin/notices", tags=["Mall-Admin"])
     app.include_router(ms_invite.router, prefix="/api/mall/salesman/invite-codes", tags=["Mall-Salesman"])
     app.include_router(ms_customers.router, prefix="/api/mall/salesman/my-customers", tags=["Mall-Salesman"])
     app.include_router(ms_stats.router, prefix="/api/mall/salesman/stats", tags=["Mall-Salesman"])
     app.include_router(ms_profile.router, prefix="/api/mall/salesman/profile", tags=["Mall-Salesman"])
 
-    # TODO(M5 后续): collections / admin audit-logs / login-logs / dashboard / products / warehouses / categories / inventory / invite-codes / notices 等
+    # TODO(M5 后续): collections / notices 等
 
     return app
 

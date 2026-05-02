@@ -26,6 +26,13 @@ class AuditLog(Base):
     actor_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("employees.id"), nullable=True
     )
+    # 业务员/消费者等 mall_user 发起的操作用此列；FK 强约束。
+    # actor_type 决定该选 actor_id 还是 mall_user_id：
+    #   'employee' → actor_id 指向 employees.id
+    #   'mall_user' → mall_user_id 指向 mall_users.id
+    mall_user_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("mall_users.id"), nullable=True
+    )
     actor_type: Mapped[str] = mapped_column(
         String(20), default="employee", nullable=False
     )

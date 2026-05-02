@@ -85,12 +85,7 @@
           >
             <image src="@/static/images/icon/toDelivery.png" />
             <text>待发货</text>
-            <text
-              v-if="orderAmount.payed>0"
-              class="num-badge"
-            >
-              {{ orderAmount.payed }}
-            </text>
+            <!-- 待发货数 = 未付（unPay）- 配送中（consignment）- 已完成（payed） ≈ assigned/等财务确认 -->
           </view>
           <view
             class="items"
@@ -113,6 +108,12 @@
           >
             <image src="@/static/images/icon/toComment.png" />
             <text>已完成</text>
+            <text
+              v-if="orderAmount.payed>0"
+              class="num-badge"
+            >
+              {{ orderAmount.payed }}
+            </text>
           </view>
         </view>
       </view>

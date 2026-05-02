@@ -3,10 +3,16 @@
     <!-- 顶部品牌 + 搜索 -->
     <view class="topbar">
       <view class="topbar__brand">
-        <text class="topbar__logo">鑫久隆</text>
+        <text class="topbar__logo">
+          鑫久隆
+        </text>
       </view>
       <view class="topbar__search">
-        <image class="topbar__searchIcon" src="@/static/images/icon/search.png" mode="aspectFit" />
+        <image
+          class="topbar__searchIcon"
+          src="@/static/images/icon/search.png"
+          mode="aspectFit"
+        />
         <input
           class="topbar__searchInput"
           type="text"
@@ -16,13 +22,22 @@
           confirm-type="search"
           @input="onKeywordInput"
           @confirm="onSearchConfirm"
-        />
-        <text v-if="keyword" class="topbar__searchClear" @tap="onSearchClear">✕</text>
+        >
+        <text
+          v-if="keyword"
+          class="topbar__searchClear"
+          @tap="onSearchClear"
+        >
+          ✕
+        </text>
       </view>
     </view>
 
     <!-- Banner 广告轮播 -->
-    <view v-if="!searchSearched" class="banner">
+    <view
+      v-if="!searchSearched"
+      class="banner"
+    >
       <swiper
         class="banner__swiper"
         :autoplay="true"
@@ -33,15 +48,35 @@
         indicator-active-color="#C9A961"
         indicator-color="rgba(250, 248, 245, 0.55)"
       >
-        <block v-for="(b, idx) in banners" :key="idx">
-          <swiper-item class="banner__item" :data-prodid="b.prodId" @tap="onBannerTap">
-            <view class="banner__card" :style="{ background: b.bg }">
-              <image class="banner__img" :src="b.img" mode="aspectFill" />
+        <block
+          v-for="(b, idx) in banners"
+          :key="idx"
+        >
+          <swiper-item
+            class="banner__item"
+            :data-prodid="b.prodId"
+            @tap="onBannerTap"
+          >
+            <view
+              class="banner__card"
+              :style="{ background: b.bg }"
+            >
+              <image
+                class="banner__img"
+                :src="b.img"
+                mode="aspectFill"
+              />
               <view class="banner__mask" />
               <view class="banner__text">
-                <text class="banner__tag">{{ b.tag }}</text>
-                <text class="banner__title">{{ b.title }}</text>
-                <text class="banner__sub">{{ b.sub }}</text>
+                <text class="banner__tag">
+                  {{ b.tag }}
+                </text>
+                <text class="banner__title">
+                  {{ b.title }}
+                </text>
+                <text class="banner__sub">
+                  {{ b.sub }}
+                </text>
               </view>
             </view>
           </swiper-item>
@@ -50,7 +85,10 @@
     </view>
 
     <!-- 品类导航 -->
-    <scroll-view class="nav" scroll-x="true">
+    <scroll-view
+      class="nav"
+      scroll-x="true"
+    >
       <view class="nav__inner">
         <view
           v-for="(item, index) in taglist"
@@ -65,23 +103,45 @@
     </scroll-view>
 
     <!-- 搜索结果 -->
-    <view v-if="searchSearched" class="search-result">
+    <view
+      v-if="searchSearched"
+      class="search-result"
+    >
       <view class="search-result__head">
-        <text class="search-result__title">搜索结果</text>
-        <text class="search-result__count">{{ searchProdList.length }} 件商品</text>
+        <text class="search-result__title">
+          搜索结果
+        </text>
+        <text class="search-result__count">
+          {{ searchProdList.length }} 件商品
+        </text>
       </view>
-      <view v-if="!searchProdList.length" class="search-result__empty">
+      <view
+        v-if="!searchProdList.length"
+        class="search-result__empty"
+      >
         暂无搜索结果
       </view>
-      <view v-else class="search-result__list">
-        <block v-for="(item, idx) in searchProdList" :key="idx">
-          <production :item="item" sts="6" />
+      <view
+        v-else
+        class="search-result__list"
+      >
+        <block
+          v-for="(item, idx) in searchProdList"
+          :key="idx"
+        >
+          <production
+            :item="item"
+            sts="6"
+          />
         </block>
       </view>
     </view>
 
     <!-- 商品列表 -->
-    <view v-if="!searchSearched" class="goods">
+    <view
+      v-if="!searchSearched"
+      class="goods"
+    >
       <block
         v-for="(item, index) in taglist"
         :key="index"
@@ -91,7 +151,9 @@
           class="goods__section"
         >
           <view class="goods__head">
-            <text class="goods__title">{{ item.title }}</text>
+            <text class="goods__title">
+              {{ item.title }}
+            </text>
           </view>
 
           <view class="goods__grid">
@@ -111,13 +173,33 @@
                   />
                 </view>
                 <view class="goods__info">
-                  <text class="goods__name">{{ prod.prodName }}</text>
-                  <view class="goods__price" v-if="prod.price !== null && prod.price !== undefined">
-                    <text class="goods__priceSymbol">¥</text>
-                    <text class="goods__priceNum">{{ wxs.parsePrice(prod.price)[0] }}</text>
-                    <text class="goods__priceDec">.{{ wxs.parsePrice(prod.price)[1] }}</text>
+                  <text class="goods__name">
+                    {{ prod.prodName }}
+                  </text>
+                  <view
+                    v-if="prod.price !== null && prod.price !== undefined"
+                    class="goods__price"
+                  >
+                    <text class="goods__priceSymbol">
+                      ¥
+                    </text>
+                    <text class="goods__priceNum">
+                      {{ wxs.parsePrice(prod.price)[0] }}
+                    </text>
+                    <text class="goods__priceDec">
+                      .{{ wxs.parsePrice(prod.price)[1] }}
+                    </text>
                   </view>
-                  <text class="goods__stock" v-if="prod.totalStocks !== null && prod.totalStocks !== undefined">
+                  <text
+                    v-else
+                    class="goods__price-hint"
+                  >
+                    联系业务员获取价格
+                  </text>
+                  <text
+                    v-if="prod.totalStocks !== null && prod.totalStocks !== undefined"
+                    class="goods__stock"
+                  >
                     库存 {{ prod.totalStocks }}
                   </text>
                 </view>
@@ -128,8 +210,13 @@
       </block>
 
       <!-- 空态 -->
-      <view v-if="taglist.length === 0" class="goods__empty">
-        <text class="goods__emptyText">暂无商品</text>
+      <view
+        v-if="taglist.length === 0"
+        class="goods__empty"
+      >
+        <text class="goods__emptyText">
+          暂无商品
+        </text>
       </view>
     </view>
   </view>

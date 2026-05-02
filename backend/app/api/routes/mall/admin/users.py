@@ -355,6 +355,26 @@ async def change_referrer(
         changes={"from": old, "to": body.new_referrer_id, "reason": body.reason},
     )
     await db.flush()
+
+    # 通知涉及的两个业务员：原推荐人 + 新推荐人（可能为空 = 解绑）
+    # 推荐关系变更会影响后续订单的抢单独占期 + 提成归属，业务员需被告知
+    from app.services.notification_service import notify_mall_user
+    customer_nick = u.nickname or u.username or "客户"
+    if old and old != body.new_referrer_id:
+        await notify_mall_user(
+            db, mall_user_id=old,
+            title="客户推荐关系变更",
+            content=f"客户「{customer_nick}」已由管理员调整推荐关系，原因：{body.reason}",
+            entity_type="MallUser", entity_id=u.id,
+        )
+    if body.new_referrer_id and body.new_referrer_id != old:
+        await notify_mall_user(
+            db, mall_user_id=body.new_referrer_id,
+            title="新增推荐客户",
+            content=f"管理员将客户「{customer_nick}」的推荐关系绑定到您。",
+            entity_type="MallUser", entity_id=u.id,
+        )
+
     return _user_dict(u)
 
 

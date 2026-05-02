@@ -44,6 +44,22 @@
 - `create_case`（mall inspection）补提交审计 + barcode|qrcode 至少一项 + quantity > 0 校验
 - mall 打卡复用 ERP 的 `_get_rule_for_employee` + `_haversine`：统一**地理围栏 + 迟到判定规则**（原 mall 硬编码 9:10、无围栏，导致业务员走 mall 绕过工资制度）
 - mall 拜访离店判定统一用 `_get_rule_for_employee`（原 `select(AttendanceRule).limit(1)` 随便拿一条，个人规则失效）
+- 凭证被驳回通知文案用 `order_no`（原 `p.order_id` UUID，业务员看不懂）
+- admin dashboard `low_stock_count` + `low_stock` 列表过滤下架 SKU/商品（原把下架商品当告警虚增工作量）
+- admin 作废邀请码 + 换绑推荐人补通知：老/新业务员都要被告知推荐关系变动（影响提成归属）
+- `disable_warehouse` 前置校验：仓内有库存或在途订单时拒绝禁用（避免库存挂空 / 退货找不到原仓）
+- **小程序 C 端订单列表 UI 全错**：orderList.vue 用 `item.status==1/2/3/5/6`（数字）比较，但后端返字符串 → 所有订单都显示"已取消"；字段用 `orderNumber`/`orderItemDtos`/`actualTotal` mall4j 老协议，后端返 `orderNo`/`items_brief`/`payAmount`。重写 UI + 状态映射（覆盖 8 个 status 和 partial_closed/refunded）；detail 页"删除订单"按钮同样问题已修
+- 小程序 `list_my_orders` 后端支持逗号分隔多值 status（与业务员端一致）；orderList tab "已完成" 合并 `completed + partial_closed`、"已取消" 合并 `cancelled + refunded`
+- `user.vue` 首页订单角标映射错位：原 `payed`（已完成）显示在"待发货"位置，改显示在"已完成"位置
+- `preview_order` 返回 items 字段对齐驼峰 alias（`prodId/skuId/prodName/skuName/count/price/subtotal`），让 submit-order + order-detail 用同一套字段读取（原 snake_case 让 submit-order 的 `item.prodName`/`prodCount` 读不到）
+- `submit-order.vue` 下单时 `addrId` 兼容 `id`（preview 返的 address snapshot 字段是 `id`，老地址对象是 `addrId`）
+- `order-detail.vue` 商品数量模板改读 `count` 优先（VO serialization_alias="count"），原读 `prodCount` 永远为空
+- `order-detail.vue` 地址栏 `userAddrDto.area` 重复渲染两次，删掉重复
+- **`parsePrice`（wxs/number.js）**：后端 Decimal 序列化为字符串，前端 `.toFixed()` 直接崩。加 `Number()` 转换 + NaN 兜底（影响全站所有价格展示）
+- `prod.vue` 商品详情轮播图 `data.imgs.split(',')` 崩（后端返数组，老协议返逗号字符串）→ 兼容两种格式
+- `prod.vue` groupSkuProp 多 SKU 时 `properties.split` 崩（后端无 properties 字段）→ 加兜底，无 properties 跳过
+- 首页 + 商品详情：价格为 null（未绑推荐人）时显示"联系业务员获取价格"，原状态整块空白
+- 加购接口补**消费者必须已绑定推荐人**校验（与 create_order 一致），避免加购后下单 403 的破 UX
 - `cancel_order` 退库存按原出库流水的 inventory 定位目标仓，不再依赖 `get_default_warehouse()`。**修复**：默认仓换过后，取消订单会把货退到错的仓
 - `release_order` 仅允许在 `assigned` 状态释放；`shipped` 后条码已 OUTBOUND 绑定原业务员，不再允许自行释放（出库后须走管理员改派）
 - `admin_reassign` 在 shipped/delivered/pending_payment_confirmation 状态改派时，同步把本订单的 OUTBOUND 条码 `outbound_by_user_id` 过户到新业务员，避免归属数据错乱

@@ -56,6 +56,12 @@
           .{{ wxs.parsePrice(defaultSku.price)[1] }}
         </text>
         <text
+          v-else-if="defaultSku"
+          class="price-hint"
+        >
+          联系业务员获取价格
+        </text>
+        <text
           v-if="defaultSku && defaultSku.oriPrice"
           class="ori-price"
         >
@@ -323,8 +329,8 @@ const getCollection = () => {
     method: 'GET',
     data: { product_id: prodId }
   }).then(({ data }) => {
-    isCollection.value = Array.isArray(data?.collected)
-      && data.collected.map(String).includes(String(prodId))
+    isCollection.value = Array.isArray(data?.collected) &&
+      data.collected.map(String).includes(String(prodId))
   }).catch(() => {
     isCollection.value = false
   })
@@ -388,7 +394,8 @@ const getProdInfo = () => {
         }, 1000)
         return
       }
-      imgs.value = data.imgs?.split(',')
+      // 后端返数组（JSONB），老协议是逗号字符串；两种都兼容
+      imgs.value = Array.isArray(data.imgs) ? data.imgs : (typeof data.imgs === 'string' ? data.imgs.split(',') : [])
       content.value = util.formatHtml(data.content)
       price.value = data.price
       prodName.value = data.prodName
@@ -433,8 +440,11 @@ const groupSkuProp = (skuList, defaultPrice) => {
       defaultSkuParam = skuList[i]
       isDefault = true
     }
-    const properties = skuList[i].properties // 版本:公开版;颜色:金色;内存:64GB
+    // 后端 MallSkuVO 无 properties 字段；当前 mall SKU 都是单规格不走本分支
+    // 老 mall4j 协议下 properties 是 "版本:公开版;颜色:金色" 分号分隔字符串
+    const properties = skuList[i].properties || ''
     _allProperties.push(properties)
+    if (!properties) continue // 没规格属性跳过（避免 split 崩）
     const propList = properties.split(';') // ["版本:公开版","颜色:金色","内存:64GB"]
     for (let j = 0; j < propList.length; j++) {
       const propval = propList[j].split(':') // ["版本","公开版"]

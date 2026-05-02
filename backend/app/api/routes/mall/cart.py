@@ -37,6 +37,12 @@ async def change_cart_item(
     db: AsyncSession = Depends(get_mall_db),
 ):
     user = await auth_service.verify_token_and_load_user(db, current)
+    # 消费者必须已绑定推荐人才能加购（下单前置条件；与 create_order 保持一致的拦截点）
+    if user.user_type != "salesman" and not user.referrer_salesman_id:
+        raise HTTPException(
+            status_code=403,
+            detail="请先输入业务员邀请码绑定推荐人后再加购",
+        )
 
     sku = (
         await db.execute(select(MallProductSku).where(MallProductSku.id == body.sku_id))

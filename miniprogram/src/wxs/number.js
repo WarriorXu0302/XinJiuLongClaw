@@ -12,9 +12,13 @@ function number () {
       val = Number(val)
       return val.toFixed(2)
     },
-    // 价格展示
+    // 价格展示（后端 Decimal 序列化是字符串，必须先 Number 化避免 toFixed 报错）
     parsePrice: (val) => {
-      if (!val) {
+      if (!val && val !== 0) {
+        val = 0
+      }
+      val = Number(val)
+      if (isNaN(val)) {
         val = 0
       }
       return val.toFixed(2).split('.')

@@ -14,9 +14,7 @@
           </text>
         </view>
         <view class="addr">
-          {{ userAddrDto.province }}{{ userAddrDto.city }}{{ userAddrDto.area }}{{
-            userAddrDto.area
-          }}{{ userAddrDto.addr }}
+          {{ userAddrDto.province }}{{ userAddrDto.city }}{{ userAddrDto.area }}{{ userAddrDto.addr }}
         </view>
       </view>
 
@@ -43,7 +41,7 @@
               </view>
               <view class="prod-info-cont">
                 <text class="number">
-                  数量：{{ item.prodCount }}
+                  数量：{{ item.count || item.prodCount || item.quantity || 0 }}
                 </text>
                 <text class="info-item">
                   {{ item.skuName }}
@@ -75,8 +73,12 @@
       >
         <view class="msg-item">
           <view class="item courier-row">
-            <text class="item-tit">配送员：</text>
-            <text class="item-txt">{{ courier.nickname || '业务员' }}</text>
+            <text class="item-tit">
+              配送员：
+            </text>
+            <text class="item-txt">
+              {{ courier.nickname || '业务员' }}
+            </text>
             <text
               class="courier-action"
               @tap="onCallCourier"
@@ -88,14 +90,20 @@
             v-if="courier.mobile"
             class="item courier-row"
           >
-            <text class="item-tit">手机号：</text>
-            <text class="item-txt">{{ courier.mobile }}</text>
+            <text class="item-tit">
+              手机号：
+            </text>
+            <text class="item-txt">
+              {{ courier.mobile }}
+            </text>
           </view>
           <view
             v-if="courier.wechatQrUrl || courier.alipayQrUrl"
             class="item courier-row courier-qr"
           >
-            <text class="item-tit">收款码：</text>
+            <text class="item-tit">
+              收款码：
+            </text>
             <text
               v-if="courier.wechatQrUrl"
               class="courier-qr-btn"
@@ -232,13 +240,12 @@
         </view>
       </view>
 
-      <!-- 底部栏 -->
+      <!-- 底部栏：仅终态订单（已完成/已取消/坏账关单/已退款）显示软删按钮 -->
       <view
-        v-if="status==5||status==6"
+        v-if="isTerminalStatus"
         class="order-detail-footer"
       >
         <text
-          v-if="status==5||status==6"
           class="dele-order"
           @tap="delOrderList"
         >
@@ -280,8 +287,10 @@ const userAddrDto = ref(null)
 const orderNumber = ref('')
 const createTime = ref('')
 const total = ref(0) // 商品总额
-const courier = ref(null)  // 配送员：{nickname, mobile, wechatQrUrl, alipayQrUrl}
+const courier = ref(null) // 配送员：{nickname, mobile, wechatQrUrl, alipayQrUrl}
 const showPayQr = ref(false)
+// 终态订单 = 可从列表软删（completed / cancelled / partial_closed / refunded）
+const isTerminalStatus = computed(() => ['completed', 'cancelled', 'partial_closed', 'refunded'].includes(status.value))
 /**
  * 加载订单数据
  */

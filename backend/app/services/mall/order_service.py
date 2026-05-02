@@ -101,16 +101,18 @@ async def preview_order(
 
         subtotal = (sku.price * qty).quantize(Decimal("0.01"))
         total_amount += subtotal
+        # 字段对齐 MallOrderItemVO 的驼峰 alias（prodId/skuId/prodName/skuName/count）
+        # → 前端 submit-order + order-detail 能用同一套字段读取
         detailed_items.append({
-            "sku_id": sku_id,
-            "product_id": prod.id,
-            "product_name": prod.name,
-            "sku_name": sku.spec,
-            "price": sku.price,
-            "quantity": qty,
-            "subtotal": subtotal,
+            "skuId": sku_id,
+            "prodId": prod.id,
+            "prodName": prod.name,
+            "skuName": sku.spec,
+            "price": str(sku.price),
+            "count": qty,
+            "subtotal": str(subtotal),
             "pic": sku.image or prod.main_image,
-            "brand_id": prod.brand_id,
+            "brandId": prod.brand_id,
         })
 
     shipping_fee = Decimal("0")  # M3 不做运费，M5 管理后台可配
@@ -315,6 +317,7 @@ async def list_my_orders(
     skip: int = 0,
     limit: int = 20,
 ) -> tuple[list[MallOrder], int]:
+    """C 端订单列表。status_filter 支持逗号分隔多值（与业务员端保持一致）。"""
     from sqlalchemy import desc, func
 
     stmt = (
@@ -323,7 +326,11 @@ async def list_my_orders(
         .where(MallOrder.consumer_deleted_at.is_(None))  # 软删订单不进列表
     )
     if status_filter:
-        stmt = stmt.where(MallOrder.status == status_filter)
+        parts = [s.strip() for s in status_filter.split(",") if s.strip()]
+        if len(parts) == 1:
+            stmt = stmt.where(MallOrder.status == parts[0])
+        elif parts:
+            stmt = stmt.where(MallOrder.status.in_(parts))
     stmt = stmt.order_by(desc(MallOrder.created_at))
 
     total = int((

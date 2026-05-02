@@ -75,7 +75,7 @@
                     </text>
                   </text>
                   <text class="prodcount">
-                    x{{ item.prodCount }}
+                    x{{ item.count || item.prodCount || item.quantity || 0 }}
                   </text>
                 </view>
               </view>
@@ -418,7 +418,13 @@ const submitOrder = () => {
     skuId: it.skuId || it.sku_id,
     count: it.count || it.quantity || 1
   }))
-  const addrId = userAddr.value?.addrId
+  // 后端 address_snapshot 返 `id`（未 alias），兼容 addrId 历史写法
+  const addrId = userAddr.value?.addrId || userAddr.value?.id
+  if (!addrId) {
+    uni.hideLoading()
+    uni.showToast({ title: '地址信息异常，请重选地址', icon: 'none' })
+    return
+  }
   http.request({
     url: '/api/mall/orders',
     method: 'POST',

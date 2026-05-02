@@ -113,9 +113,14 @@ async def dashboard_summary(
         .where(MallSkipAlert.status == "open")
     )).scalar() or 0)
 
+    # 低库存仅统计 active SKU 且所属商品 on_sale；下架商品库存低不算告警
     low_stock_count = int((await db.execute(
         select(sa_func.count(MallInventory.id))
+        .join(MallProductSku, MallProductSku.id == MallInventory.sku_id)
+        .join(MallProduct, MallProduct.id == MallProductSku.product_id)
         .where(MallInventory.quantity <= 10)
+        .where(MallProductSku.status == "active")
+        .where(MallProduct.status == "on_sale")
     )).scalar() or 0)
 
     # ── 本月 ──────────────────────────────────────────────
@@ -248,12 +253,14 @@ async def dashboard_summary(
             "amount": str(amount or 0),
         })
 
-    # ── 低库存 5 个 ───────────────────────────────────────
+    # ── 低库存 5 个（只显示在售商品，下架的不参与告警）─────
     low_rows = (await db.execute(
         select(MallInventory, MallProductSku, MallProduct)
         .join(MallProductSku, MallInventory.sku_id == MallProductSku.id)
         .join(MallProduct, MallProductSku.product_id == MallProduct.id)
         .where(MallInventory.quantity <= 10)
+        .where(MallProductSku.status == "active")
+        .where(MallProduct.status == "on_sale")
         .order_by(MallInventory.quantity.asc())
         .limit(5)
     )).all()

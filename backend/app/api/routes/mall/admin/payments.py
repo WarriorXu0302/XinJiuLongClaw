@@ -166,10 +166,12 @@ async def reject(
     # 通知业务员
     if p.uploaded_by_user_id:
         from app.services.notification_service import notify_mall_user
+        # 用 order_no（业务员看得懂的单号）而不是 order_id（UUID）
+        order_no = order.order_no if order else p.order_id
         await notify_mall_user(
             db, mall_user_id=p.uploaded_by_user_id,
             title="收款凭证被驳回",
-            content=f"您上传的订单 {p.order_id} 凭证被驳回：{body.reason}",
+            content=f"您上传的订单 {order_no} 凭证被驳回：{body.reason}",
             entity_type="MallPayment", entity_id=p.id,
         )
 

@@ -53,102 +53,50 @@
       >
         <view class="prod-item">
           <view class="order-num">
-            <text>订单编号：{{ item.orderNumber }}</text>
+            <text>订单编号：{{ item.orderNo }}</text>
             <view class="order-state">
               <text
-                :class="'order-sts  ' + (item.status==1?'red':'') + '  ' + ((item.status==5||item.status==6)?'gray':'')"
+                :class="['order-sts', statusClass(item.status)]"
               >
-                {{
-                  item.status == 1 ? '待支付' : (item.status == 2 ? '待发货' : (item.status == 3 ? '待收货' : (item.status == 5 ? '已完成' : '已取消')))
-                }}
+                {{ statusLabel(item.status) }}
               </text>
 
               <view
-                v-if="item.status==5 || item.status==6"
+                v-if="isDeletable(item.status)"
                 class="clear-btn"
               >
                 <image
                   src="@/static/images/icon/clear-his.png"
                   class="clear-list-btn"
-                  :data-ordernum="item.orderNumber"
+                  :data-ordernum="item.orderNo"
                   @tap="delOrderList"
                 />
               </view>
             </view>
           </view>
 
-          <!-- 商品列表 -->
-          <!-- 一个订单单个商品的显示 -->
-          <block v-if="item.orderItemDtos.length==1">
-            <block
-              v-for="(prod, index2) in item.orderItemDtos"
-              :key="index2"
-            >
-              <view>
-                <view
-                  class="item-cont"
-                  :data-ordernum="item.orderNumber"
-                  @tap="toOrderDetailPage"
-                >
-                  <view class="prod-pic">
-                    <image :src="prod.pic" />
-                  </view>
-                  <view class="prod-info">
-                    <view class="prodname">
-                      {{ prod.prodName }}
-                    </view>
-                    <view class="prod-info-cont">
-                      {{ prod.skuName }}
-                    </view>
-                    <view class="price-nums">
-                      <text class="prodprice">
-                        <text class="symbol">
-                          ￥
-                        </text>
-                        <text class="big-num">
-                          {{ wxs.parsePrice(prod.price)[0] }}
-                        </text>
-                        <text class="small-num">
-                          .{{ wxs.parsePrice(prod.price)[1] }}
-                        </text>
-                      </text>
-                      <text class="prodcount">
-                        x{{ prod.prodCount }}
-                      </text>
-                    </view>
-                  </view>
-                </view>
+          <!-- 订单摘要（列表只展示商品简介，详情页看明细） -->
+          <view
+            class="item-cont"
+            :data-ordernum="item.orderNo"
+            @tap="toOrderDetailPage"
+          >
+            <view class="prod-info">
+              <view class="prodname">
+                {{ item.items_brief || '订单详情' }}
               </view>
-            </block>
-          </block>
-          <!-- 一个订单多个商品时的显示 -->
-          <block v-else>
-            <view
-              class="item-cont"
-              :data-ordernum="item.orderNumber"
-              @tap="toOrderDetailPage"
-            >
-              <scroll-view
-                scroll-x="true"
-                scroll-left="0"
-                scroll-with-animation="false"
-                class="categories"
+              <view
+                v-if="item.remarks"
+                class="prod-info-cont"
               >
-                <block
-                  v-for="(prod, index2) in item.orderItemDtos"
-                  :key="index2"
-                >
-                  <view class="prod-pic">
-                    <image :src="prod.pic" />
-                  </view>
-                </block>
-              </scroll-view>
+                备注：{{ item.remarks }}
+              </view>
             </view>
-          </block>
+          </view>
 
           <view class="total-num">
             <text class="prodcount">
-              共1件商品
+              下单时间：{{ (item.createTime || '').toString().slice(0, 10) }}
             </text>
             <view class="prodprice">
               合计：
@@ -156,47 +104,46 @@
                 ￥
               </text>
               <text class="big-num">
-                {{ wxs.parsePrice(item.actualTotal)[0] }}
+                {{ wxs.parsePrice(item.payAmount || '0')[0] }}
               </text>
               <text class="small-num">
-                .{{ wxs.parsePrice(item.actualTotal)[1] }}
+                .{{ wxs.parsePrice(item.payAmount || '0')[1] }}
               </text>
             </view>
           </view>
-          <!-- end 商品列表 -->
           <view class="prod-foot">
             <view class="btn">
               <text
-                v-if="item.status==1"
+                v-if="item.status === 'pending_assignment'"
                 class="button"
-                :data-ordernum="item.orderNumber"
+                :data-ordernum="item.orderNo"
                 hover-class="none"
                 @tap="onCancelOrder"
               >
                 取消订单
               </text>
               <text
-                v-if="item.status==1"
+                v-if="item.status === 'pending_assignment'"
                 class="button warn"
-                :data-ordernum="item.orderNumber"
+                :data-ordernum="item.orderNo"
                 hover-class="none"
                 @tap="toOrderDetailPage"
               >
                 查看订单
               </text>
               <text
-                v-if="item.status==3 || item.status==5"
+                v-if="['assigned','shipped','delivered','pending_payment_confirmation','completed'].includes(item.status)"
                 class="button"
-                :data-ordernum="item.orderNumber"
+                :data-ordernum="item.orderNo"
                 hover-class="none"
                 @tap="toOrderDetailPage"
               >
                 联系配送员
               </text>
               <text
-                v-if="item.status==3"
+                v-if="item.status === 'delivered'"
                 class="button warn"
-                :data-ordernum="item.orderNumber"
+                :data-ordernum="item.orderNo"
                 hover-class="none"
                 @tap="onConfirmReceive"
               >
@@ -240,15 +187,38 @@ onReachBottom(() => {
 
 const list = ref([])
 
-// 前端 tab 数字状态 → 后端 MallOrderStatus 字符串
+// 前端 tab 数字状态 → 后端 MallOrderStatus 字符串（支持逗号分隔多值）
 const STS_MAP = {
   0: null, // 全部
-  1: 'pending_assignment', // 待支付/待接单（C 端暂按 pending_assignment 展示）
-  2: 'assigned',           // 待发货
-  3: 'shipped',            // 待收货/在途
-  5: 'completed',          // 已完成
-  6: 'cancelled'
+  1: 'pending_assignment', // 待接单
+  2: 'assigned,shipped', // 待发货/配送中（多状态合并展示）
+  3: 'delivered,pending_payment_confirmation', // 待收货/待财务确认
+  5: 'completed,partial_closed', // 已完成（含折损关单）
+  6: 'cancelled,refunded'
 }
+
+// 展示映射：后端字符串 → 中文标签 + 颜色
+const STATUS_LABELS = {
+  pending_assignment: '待接单',
+  assigned: '待发货',
+  shipped: '配送中',
+  delivered: '待收款',
+  pending_payment_confirmation: '待财务确认',
+  completed: '已完成',
+  partial_closed: '已关单（坏账）',
+  cancelled: '已取消',
+  refunded: '已退款'
+}
+const statusLabel = (s) => STATUS_LABELS[s] || s || ''
+
+const statusClass = (s) => {
+  if (s === 'pending_assignment') return 'red'
+  if (['completed', 'partial_closed', 'cancelled', 'refunded'].includes(s)) return 'gray'
+  return ''
+}
+
+// 仅已完成/已取消/已退款/已关单可从列表软删（调用 DELETE 接口）
+const isDeletable = (s) => ['completed', 'partial_closed', 'cancelled', 'refunded'].includes(s)
 
 /**
  * 加载订单数据

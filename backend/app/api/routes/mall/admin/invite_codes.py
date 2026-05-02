@@ -221,6 +221,17 @@ async def invalidate_code(
         },
     )
     await db.flush()
+
+    # 通知业务员：你发的邀请码被管理员作废了
+    if c.issuer_salesman_id:
+        from app.services.notification_service import notify_mall_user
+        await notify_mall_user(
+            db, mall_user_id=c.issuer_salesman_id,
+            title="邀请码已被作废",
+            content=f"您签发的邀请码 {c.code} 已被管理员作废。原因：{body.reason or '未注明'}",
+            entity_type="MallInviteCode", entity_id=c.id,
+        )
+
     return {
         "id": c.id, "code": c.code, "status": "invalidated",
         "invalidated_at": c.invalidated_at,

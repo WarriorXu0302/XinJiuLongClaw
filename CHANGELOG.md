@@ -60,6 +60,19 @@
 - `prod.vue` groupSkuProp 多 SKU 时 `properties.split` 崩（后端无 properties 字段）→ 加兜底，无 properties 跳过
 - 首页 + 商品详情：价格为 null（未绑推荐人）时显示"联系业务员获取价格"，原状态整块空白
 - 加购接口补**消费者必须已绑定推荐人**校验（与 create_order 一致），避免加购后下单 403 的破 UX
+- **业务员订单详情多处字段错位**：`total_amount / shipping_fee / discount_amount / pay_amount` + 时间线 6 个节点（created_at/claimed_at/...） + item 字段（prod_name/sku_spec/quantity）全按 snake_case 读，后端序列化为驼峰 → 全显示空；兼容两种命名
+- `onCall` 拨号读 `order.customer_phone`（不存在字段）→ 改读 `address.mobile`
+- 业务员凭证上传补 `size / mime_type`（后端 schema 支持但前端漏传）
+- **`salesman-alerts.vue` 客户/申诉字段全错**：`a.customer_nick` → `a.customer?.nickname`，`a.customer_phone_mask` → `a.customer?.masked_phone`；移除后端不返的 `first_at/last_at/logs`，改展示 `appeal_reason` + `resolution_note`
+- **`salesman-attendance.vue` 月汇总字段完全不匹配**：前端读 `late_count/absence_count/visit_count/valid_visit_count`，后端返 `late_times/late_over30_times/leave_days/valid_visits/is_full_attendance`；重写 5 个格子对齐后端口径
+- **`salesman-kpi.vue` 结构不匹配**：前端期望 `{target,actual,completion}` 嵌套，后端返扁平列表 `[{sales_target, actual_sales, sales_completion, ...}]`；重构前端按列表首项展示
+- 业务员邀请码：后端 create 返回补 `remaining_today`，history 批量 join 出 `used_by_nick`（被谁使用的昵称）— 原前端模板引用的字段后端完全没返
+- `salesman-checkin.vue` 客户地址字段 `pickedCustomer.address` → `contact_address`（后端返 `contact_address`）
+- `salesman-expense.vue` 列表项时间格式化用 `relativeTime`（原直接渲染 ISO 字符串）
+- 公告路由过滤 `publish_at > now` 的未来公告（原状态=published 就立即展示，直链可泄漏预发内容）
+- `ship_order` 补通知消费者"订单已出库"（原只记审计不推通知，用户要自己查状态）
+- `create_salesman` (admin) 移除冗余 `db.rollback()`（和 C 端 register 同样的事务 bug）
+- `confirm_receipt` 放宽状态：`delivered / pending_payment_confirmation / completed / partial_closed` 都允许点确认收货（原仅 delivered，客户晚点点会 400）
 - `cancel_order` 退库存按原出库流水的 inventory 定位目标仓，不再依赖 `get_default_warehouse()`。**修复**：默认仓换过后，取消订单会把货退到错的仓
 - `release_order` 仅允许在 `assigned` 状态释放；`shipped` 后条码已 OUTBOUND 绑定原业务员，不再允许自行释放（出库后须走管理员改派）
 - `admin_reassign` 在 shipped/delivered/pending_payment_confirmation 状态改派时，同步把本订单的 OUTBOUND 条码 `outbound_by_user_id` 过户到新业务员，避免归属数据错乱

@@ -123,10 +123,10 @@
         >
           <view class="item__main">
             <text class="item__name">
-              {{ it.prod_name }}
+              {{ it.prodName || it.prod_name }}
             </text>
             <text class="item__spec">
-              {{ it.sku_spec }}
+              {{ it.skuName || it.sku_name }}
             </text>
           </view>
           <view class="item__price">
@@ -134,7 +134,7 @@
               {{ fmtMoney(it.price) }}
             </text>
             <text class="item__qty">
-              × {{ it.quantity }}
+              × {{ it.count || it.quantity }}
             </text>
           </view>
         </view>
@@ -150,7 +150,7 @@
             商品合计
           </text>
           <text class="section__val">
-            {{ fmtMoney(order.total_amount) }}
+            {{ fmtMoney(order.totalAmount || order.total_amount) }}
           </text>
         </view>
         <view class="section__row">
@@ -158,18 +158,18 @@
             运费
           </text>
           <text class="section__val">
-            {{ fmtMoney(order.shipping_fee) }}
+            {{ fmtMoney(order.shippingFee || order.shipping_fee) }}
           </text>
         </view>
         <view
-          v-if="order.discount_amount"
+          v-if="order.discountAmount || order.discount_amount"
           class="section__row"
         >
           <text class="section__key">
             优惠
           </text>
           <text class="section__val">
-            -{{ fmtMoney(order.discount_amount) }}
+            -{{ fmtMoney(order.discountAmount || order.discount_amount) }}
           </text>
         </view>
         <view class="section__row section__row--total">
@@ -177,7 +177,7 @@
             应收
           </text>
           <text class="section__val section__val--total">
-            {{ fmtMoney(order.pay_amount) }}
+            {{ fmtMoney(order.payAmount || order.pay_amount) }}
           </text>
         </view>
       </view>
@@ -247,14 +247,22 @@ const nextStepHint = computed(() => {
 const timeline = computed(() => {
   if (!order.value) return []
   const o = order.value
+  // 兼容后端两种命名：驼峰 alias（createTime/shippedAt/...）+ snake_case 历史兜底
+  const pick = (camel, snake) => o[camel] ?? o[snake]
   const done = (t) => !!t
+  const createdAt = pick('createTime', 'created_at')
+  const claimedAt = pick('claimedAt', 'claimed_at')
+  const shippedAt = pick('shippedAt', 'shipped_at')
+  const deliveredAt = pick('deliveredAt', 'delivered_at')
+  const paidAt = pick('paidAt', 'paid_at')
+  const completedAt = pick('completedAt', 'completed_at')
   return [
-    { label: '下单', time: o.created_at, done: done(o.created_at) },
-    { label: '已接单', time: o.claimed_at, done: done(o.claimed_at) },
-    { label: '已出库', time: o.shipped_at, done: done(o.shipped_at) },
-    { label: '已送达', time: o.delivered_at, done: done(o.delivered_at) },
-    { label: '财务确认', time: o.paid_at, done: done(o.paid_at) },
-    { label: '已完成', time: o.completed_at, done: done(o.completed_at) }
+    { label: '下单', time: createdAt, done: done(createdAt) },
+    { label: '已接单', time: claimedAt, done: done(claimedAt) },
+    { label: '已出库', time: shippedAt, done: done(shippedAt) },
+    { label: '已送达', time: deliveredAt, done: done(deliveredAt) },
+    { label: '财务确认', time: paidAt, done: done(paidAt) },
+    { label: '已完成', time: completedAt, done: done(completedAt) }
   ]
 })
 
@@ -274,8 +282,14 @@ const loadOrder = async () => {
 }
 
 const onCall = () => {
+  // 业务员抢单后可见完整手机号：优先 address.mobile（订单快照），兜底 customer_phone（旧字段）
+  const phone = order.value?.address?.mobile || order.value?.customer_phone
+  if (!phone) {
+    uni.showToast({ title: '缺少客户手机号', icon: 'none' })
+    return
+  }
   uni.makePhoneCall({
-    phoneNumber: order.value.customer_phone,
+    phoneNumber: phone,
     fail: () => {}
   })
 }

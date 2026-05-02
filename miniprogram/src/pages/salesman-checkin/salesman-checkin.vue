@@ -97,7 +97,7 @@
           class="visit__meta"
         >
           <text>{{ pickedCustomer.code }} · {{ pickedCustomer.contact_name }}</text>
-          <text>{{ pickedCustomer.address }}</text>
+          <text>{{ pickedCustomer.contact_address || pickedCustomer.address }}</text>
         </view>
         <view
           class="visit__btn"

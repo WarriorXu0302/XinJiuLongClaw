@@ -22,24 +22,24 @@
         </text>
       </view>
       <view class="grid__cell">
-        <text :class="['grid__num', summary.late_count > 0 && 'grid__num--warn']">
-          {{ summary.late_count }}
+        <text :class="['grid__num', (summary.late_times || 0) > 0 && 'grid__num--warn']">
+          {{ summary.late_times || 0 }}
         </text>
         <text class="grid__label">
           迟到次数
         </text>
       </view>
       <view class="grid__cell">
-        <text :class="['grid__num', summary.absence_count > 0 && 'grid__num--err']">
-          {{ summary.absence_count }}
+        <text :class="['grid__num', (summary.late_over30_times || 0) > 0 && 'grid__num--err']">
+          {{ summary.late_over30_times || 0 }}
         </text>
         <text class="grid__label">
-          旷工次数
+          超 30 分钟
         </text>
       </view>
       <view class="grid__cell">
         <text class="grid__num">
-          {{ summary.leave_days }}
+          {{ summary.leave_days || 0 }}
         </text>
         <text class="grid__label">
           请假天数
@@ -47,18 +47,18 @@
       </view>
       <view class="grid__cell">
         <text class="grid__num">
-          {{ summary.visit_count }}
-        </text>
-        <text class="grid__label">
-          拜访次数
-        </text>
-      </view>
-      <view class="grid__cell">
-        <text class="grid__num">
-          {{ summary.valid_visit_count }}
+          {{ summary.valid_visits || 0 }}
         </text>
         <text class="grid__label">
           有效拜访
+        </text>
+      </view>
+      <view class="grid__cell">
+        <text :class="['grid__num', summary.is_full_attendance && 'grid__num--ok']">
+          {{ summary.is_full_attendance ? '是' : '否' }}
+        </text>
+        <text class="grid__label">
+          全勤
         </text>
       </view>
     </view>

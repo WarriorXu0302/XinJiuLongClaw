@@ -51,7 +51,14 @@ async def create(
     _require_salesman(current)
     user = await auth_service.verify_token_and_load_user(db, current)
     invite = await invite_service.generate_invite_code(db, user)
-    return _invite_to_dict(invite)
+    # 附带"今日剩余额度"给前端展示
+    from app.core.config import settings
+    today_used = await invite_service._count_today_codes(db, user.id)
+    result = _invite_to_dict(invite)
+    result["remaining_today"] = max(
+        0, settings.MALL_INVITE_CODE_DAILY_LIMIT - today_used,
+    )
+    return result
 
 
 @router.get("/history")
@@ -63,7 +70,23 @@ async def history(
     _require_salesman(current)
     user = await auth_service.verify_token_and_load_user(db, current)
     rows = await invite_service.list_recent_codes(db, user, limit=limit)
-    return {"records": [_invite_to_dict(r) for r in rows]}
+    # 批量拉使用人昵称
+    from sqlalchemy import select
+    from app.models.mall.user import MallUser
+    used_by_ids = list({r.used_by_user_id for r in rows if r.used_by_user_id})
+    nick_map: dict[str, str] = {}
+    if used_by_ids:
+        users = (await db.execute(
+            select(MallUser.id, MallUser.nickname, MallUser.username)
+            .where(MallUser.id.in_(used_by_ids))
+        )).all()
+        nick_map = {u.id: (u.nickname or u.username) for u in users}
+    records = []
+    for r in rows:
+        d = _invite_to_dict(r)
+        d["used_by_nick"] = nick_map.get(r.used_by_user_id) if r.used_by_user_id else None
+        records.append(d)
+    return {"records": records}
 
 
 class _InvalidateBody(BaseModel):

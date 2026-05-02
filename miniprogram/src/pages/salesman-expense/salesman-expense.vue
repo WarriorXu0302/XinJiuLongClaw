@@ -119,7 +119,7 @@
           </text>
         </view>
         <view class="row__meta">
-          {{ r.created_at }}
+          {{ relativeTime(r.created_at) }}
         </view>
       </view>
     </view>
@@ -127,6 +127,8 @@
 </template>
 
 <script setup>
+const relativeTime = salesman.relativeTime
+
 const showForm = ref(false)
 const form = ref({
   typeIndex: 0,

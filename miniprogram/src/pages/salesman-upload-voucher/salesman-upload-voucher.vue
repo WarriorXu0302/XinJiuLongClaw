@@ -236,7 +236,12 @@ const uploadOne = (localPath) => {
           const body = typeof r.data === 'string' ? JSON.parse(r.data) : r.data
           // 2xx 成功直接给裸 body；4xx/5xx 后端返 {detail:"..."}
           if (r.statusCode >= 200 && r.statusCode < 300 && body.url && body.sha256) {
-            resolve({ remote_url: body.url, sha256: body.sha256, size: body.size })
+            resolve({
+              remote_url: body.url,
+              sha256: body.sha256,
+              size: body.size,
+              mime_type: body.mime_type
+            })
           } else {
             reject(new Error(body.detail || body.msg || '上传失败'))
           }
@@ -263,6 +268,8 @@ const onChoosePhoto = () => {
           url: localPath, // 预览用本地路径
           remote_url: null,
           sha256: null,
+          size: null,
+          mime_type: null,
           uploading: true,
           error: null
         })
@@ -271,6 +278,8 @@ const onChoosePhoto = () => {
           .then((r) => {
             item.remote_url = r.remote_url
             item.sha256 = r.sha256
+            item.size = r.size
+            item.mime_type = r.mime_type
             item.uploading = false
           })
           .catch((err) => {
@@ -329,7 +338,12 @@ const onSubmit = async () => {
         data: {
           amount: amt,
           payment_method: form.value.payment_method,
-          vouchers: form.value.vouchers.map(v => ({ url: v.remote_url, sha256: v.sha256 })),
+          vouchers: form.value.vouchers.map(v => ({
+            url: v.remote_url,
+            sha256: v.sha256,
+            size: v.size,
+            mime_type: v.mime_type
+          })),
           remarks: form.value.remarks || null
         }
       })

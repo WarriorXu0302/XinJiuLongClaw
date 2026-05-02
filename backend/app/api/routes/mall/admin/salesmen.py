@@ -198,7 +198,8 @@ async def create_salesman(
     try:
         await db.flush()
     except IntegrityError as e:
-        await db.rollback()
+        # 不手动 rollback：get_db 依赖在请求结束时会统一回滚；
+        # 手动 rollback 会把当前事务的其他已改动标脏/丢失（和 C 端 register 一致的修法）
         raise HTTPException(status_code=409, detail="账号冲突，请稍后重试") from e
 
     await log_audit(

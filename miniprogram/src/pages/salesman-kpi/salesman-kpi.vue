@@ -121,7 +121,26 @@
 </template>
 
 <script setup>
-const data = ref({ target: {}, actual: {}, completion: {} })
+// 后端 /my-dashboard 返 list[{target_year, target_month, brand_id, sales_target,
+// receipt_target, actual_sales, actual_receipt, sales_completion, receipt_completion}]
+// mall 单品牌场景取第一条，多品牌后续扩展
+const items = ref([])
+const current = computed(() => items.value[0] || {})
+const data = computed(() => ({
+  target: {
+    sales_target: current.value.sales_target,
+    receipt_target: current.value.receipt_target,
+    bonus_metric: 'receipt' // mall 默认看回款（见后端 _calc_mall_actual 注释）
+  },
+  actual: {
+    actual_sales: current.value.actual_sales,
+    actual_receipt: current.value.actual_receipt
+  },
+  completion: {
+    sales_completion: current.value.sales_completion,
+    receipt_completion: current.value.receipt_completion
+  }
+}))
 
 const fmtMoney = salesman.fmtMoney
 
@@ -142,7 +161,7 @@ const actual = computed(() => {
 
 const percent = computed(() => {
   if (!target.value) return 0
-  return Math.round((actual.value / target.value) * 100)
+  return Math.round((Number(actual.value) / Number(target.value)) * 100)
 })
 
 const load = async () => {
@@ -150,7 +169,7 @@ const load = async () => {
     url: '/api/mall/workspace/sales-targets/my-dashboard',
     method: 'GET'
   })
-  data.value = res.data || { target: {}, actual: {}, completion: {} }
+  items.value = Array.isArray(res.data) ? res.data : []
 }
 
 onMounted(() => load())

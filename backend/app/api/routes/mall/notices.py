@@ -3,8 +3,10 @@
 
 匿名可访问。
 """
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import desc, select
+from sqlalchemy import desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_mall_db
@@ -19,10 +21,13 @@ router = APIRouter()
 async def list_notices(
     db: AsyncSession = Depends(get_mall_db),
 ):
+    # 过滤 publish_at：未来发布时间的公告不给 C 端展示（即使 status=published）
+    now = datetime.now(timezone.utc)
     rows = (
         await db.execute(
             select(MallNotice)
             .where(MallNotice.status == MallNoticeStatus.PUBLISHED.value)
+            .where(or_(MallNotice.publish_at.is_(None), MallNotice.publish_at <= now))
             .order_by(desc(MallNotice.sort_order), desc(MallNotice.publish_at))
         )
     ).scalars().all()
@@ -41,5 +46,8 @@ async def get_notice(
         await db.execute(select(MallNotice).where(MallNotice.id == notice_id))
     ).scalar_one_or_none()
     if row is None or row.status != MallNoticeStatus.PUBLISHED.value:
+        raise HTTPException(status_code=404, detail="公告不存在")
+    # 未到发布时间同样 404 —— 避免通过直链泄漏预发公告内容
+    if row.publish_at is not None and row.publish_at > datetime.now(timezone.utc):
         raise HTTPException(status_code=404, detail="公告不存在")
     return MallNoticeVO.model_validate(row, from_attributes=True)

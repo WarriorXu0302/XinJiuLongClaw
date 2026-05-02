@@ -529,7 +529,14 @@ async def confirm_receipt(
       - 通知配送业务员：客户已确认收货，尽快收款
     """
     order = await get_my_order(db, user, order_no)
-    if order.status != MallOrderStatus.DELIVERED.value:
+    # 允许状态：delivered / pending_payment_confirmation / completed / partial_closed
+    # 客户点确认可能晚于业务员上传凭证或财务确认，都应接受并记录时间戳
+    if order.status not in (
+        MallOrderStatus.DELIVERED.value,
+        MallOrderStatus.PENDING_PAYMENT_CONFIRMATION.value,
+        MallOrderStatus.COMPLETED.value,
+        MallOrderStatus.PARTIAL_CLOSED.value,
+    ):
         raise HTTPException(
             status_code=400,
             detail=f"订单状态 {order.status} 不可确认收货",
@@ -1398,6 +1405,15 @@ async def ship_order(
             "scanned_barcode_count": len(scanned_barcodes) if scanned_barcodes else 0,
             "used_scan_verification": scanned_barcodes is not None,
         },
+    )
+
+    # 通知消费者：订单已出库
+    from app.services.notification_service import notify_mall_user
+    await notify_mall_user(
+        db, mall_user_id=order.user_id,
+        title="订单已出库",
+        content=f"您的订单 {order.order_no} 商品已出库，业务员正在为您配送。",
+        entity_type="MallOrder", entity_id=order.id,
     )
 
     await db.flush()

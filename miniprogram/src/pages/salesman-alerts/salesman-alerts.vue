@@ -40,10 +40,10 @@
       <view class="card__top">
         <view class="card__left">
           <text class="card__customer">
-            {{ a.customer_nick }}
+            {{ a.customer?.nickname || '—' }}
           </text>
           <text class="card__phone">
-            {{ a.customer_phone_mask }}
+            {{ a.customer?.masked_phone }}
           </text>
         </view>
         <text :class="['card__status', 'card__status--' + a.status]">
@@ -56,30 +56,36 @@
           {{ a.skip_count }}
         </text> 次跳单
         <text class="card__range">
-          （{{ formatRange(a.first_at, a.last_at) }}）
+          · {{ relativeTime(a.created_at) }}
         </text>
       </view>
 
-      <view class="card__logs">
-        <view
-          v-for="l in a.logs"
-          :key="l.id"
-          class="log"
-        >
-          <text class="log__type">
-            {{ skipTypeMap[l.skip_type] }}
-          </text>
-          <text class="log__order">
-            {{ l.order_no }}
-          </text>
-          <text class="log__time">
-            {{ relativeTime(l.created_at) }}
-          </text>
-        </view>
+      <view
+        v-if="a.appeal_reason"
+        class="card__appeal-info"
+      >
+        <text class="card__appeal-label">
+          已提交申诉：
+        </text>
+        <text class="card__appeal-text">
+          {{ a.appeal_reason }}
+        </text>
       </view>
 
       <view
-        v-if="a.status === 'open'"
+        v-if="a.resolution_note"
+        class="card__appeal-info"
+      >
+        <text class="card__appeal-label">
+          运营回复：
+        </text>
+        <text class="card__appeal-text">
+          {{ a.resolution_note }}
+        </text>
+      </view>
+
+      <view
+        v-if="a.status === 'open' && !a.appeal_reason"
         class="card__actions"
       >
         <view
@@ -98,13 +104,7 @@ const alerts = ref([])
 const loading = ref(false)
 
 const statusMap = salesman.SKIP_ALERT_STATUS_LABEL
-const skipTypeMap = salesman.SKIP_TYPE_LABEL
 const relativeTime = salesman.relativeTime
-
-const formatRange = (first, last) => {
-  if (!first || !last) return ''
-  return `${String(first).slice(5, 10)} ~ ${String(last).slice(5, 10)}`
-}
 
 const load = async () => {
   loading.value = true

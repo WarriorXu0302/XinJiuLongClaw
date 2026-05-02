@@ -197,6 +197,8 @@ const form = ref({
   delivery_address: '',
   business_license_url: ''
 })
+// 省市区 parts（从 picker 页取，审批通过后写入默认收货地址）
+const addressParts = ref(null)
 const submitting = ref(false)
 const licenseUploading = ref(false)
 // URL 带来的邀请码锁定展示；手动进入则允许用户输入
@@ -222,6 +224,14 @@ onShow(() => {
   const picked = uni.getStorageSync('pickedAddress')
   if (picked) {
     form.value.delivery_address = picked
+    const partsStr = uni.getStorageSync('pickedAddressParts')
+    if (partsStr) {
+      try {
+        addressParts.value = JSON.parse(partsStr)
+      } catch (e) {
+        addressParts.value = null
+      }
+    }
     uni.removeStorageSync('pickedAddress')
     uni.removeStorageSync('pickedAddressParts')
   }
@@ -340,7 +350,8 @@ const onWechatRegister = () => {
         real_name: form.value.real_name.trim(),
         contact_phone: form.value.contact_phone.trim(),
         delivery_address: form.value.delivery_address.trim(),
-        business_license_url: form.value.business_license_url
+        business_license_url: form.value.business_license_url,
+        address_parts: addressParts.value
       }
     }).then(({ data }) => {
       submitting.value = false

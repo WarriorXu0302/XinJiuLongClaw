@@ -31,7 +31,7 @@ from app.models.mall.base import (
     MallUserStatus,
     MallUserType,
 )
-from app.models.mall.user import MallLoginLog, MallUser
+from app.models.mall.user import MallAddress, MallLoginLog, MallUser
 from app.services.mall.invite_service import (
     consume_invite_code,
     mark_invite_used,
@@ -146,6 +146,7 @@ async def register_mall_user(
     phone: Optional[str] = None,
     nickname: Optional[str] = None,
     avatar_url: Optional[str] = None,
+    address_parts: Optional[dict] = None,
 ) -> MallUser:
     """事务内原子：消费邀请码 + 建 MallUser（application_status=pending）+ 绑定推荐人。
 
@@ -210,6 +211,28 @@ async def register_mall_user(
 
     # 4. 回填邀请码 used 状态
     await mark_invite_used(db, invite, user.id)
+
+    # 5. 自动生成默认收货地址（审批未通过也写；通过后登录即可直接用）
+    #    没传 address_parts 时按 delivery_address 字段兜底存为 addr
+    parts = address_parts or {}
+    # pydantic model 和 dict 都兼容
+    if hasattr(parts, "model_dump"):
+        parts = parts.model_dump()
+    addr = MallAddress(
+        user_id=user.id,
+        receiver=real_name,
+        mobile=contact_phone,
+        province_code=parts.get("provinceCode") if parts else None,
+        city_code=parts.get("cityCode") if parts else None,
+        area_code=parts.get("areaCode") if parts else None,
+        province=parts.get("province") if parts else None,
+        city=parts.get("city") if parts else None,
+        area=parts.get("area") if parts else None,
+        addr=(parts.get("detail") or delivery_address)[:200] if parts else delivery_address[:200],
+        is_default=True,
+    )
+    db.add(addr)
+    await db.flush()
 
     return user
 

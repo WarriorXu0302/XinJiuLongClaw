@@ -217,6 +217,7 @@ async def wechat_register(
         contact_phone=payload.contact_phone,
         delivery_address=payload.delivery_address,
         business_license_url=payload.business_license_url,
+        address_parts=payload.address_parts,
     )
     await log_audit(
         db, action="mall_user.register",

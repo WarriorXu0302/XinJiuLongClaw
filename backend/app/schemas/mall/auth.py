@@ -20,6 +20,17 @@ class MallWechatLoginRequest(BaseModel):
     device_info: Optional[dict] = None
 
 
+class MallAddressParts(BaseModel):
+    """注册时地址 picker 返回的省市区结构（用于生成默认收货地址）。"""
+    province: Optional[str] = None
+    city: Optional[str] = None
+    area: Optional[str] = None
+    provinceCode: Optional[str] = None
+    cityCode: Optional[str] = None
+    areaCode: Optional[str] = None
+    detail: Optional[str] = None
+
+
 class MallWechatRegisterRequest(BaseModel):
     """首次微信注册。必传 invite_code + 审批资料。"""
     code: str = Field(min_length=1, max_length=128)
@@ -29,6 +40,8 @@ class MallWechatRegisterRequest(BaseModel):
     contact_phone: str = Field(min_length=7, max_length=20)
     delivery_address: str = Field(min_length=5, max_length=500)
     business_license_url: str = Field(min_length=1, max_length=500)
+    # 前端 picker 带的省市区 parts，用于审批通过后建默认收货地址
+    address_parts: Optional[MallAddressParts] = None
 
     nickname: Optional[str] = Field(default=None, max_length=100)
     avatar_url: Optional[str] = Field(default=None, max_length=500)

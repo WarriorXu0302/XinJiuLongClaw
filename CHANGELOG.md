@@ -87,13 +87,14 @@
 - **register.vue 加顶部 tab 切换微信/账密注册**（mp-weixin 默认微信）：微信注册 = 输邀请码 + uni.login + `/wechat-register`；账密注册 = 用户名密码 + 邀请码 + `/register`；两种方式都强制校验邀请码
 - **C 端注册走审批流**（重要变更）：
   - `mall_users` 加字段 `application_status / real_name / contact_phone / delivery_address / business_license_url / rejection_reason / approved_at / approved_by_employee_id`（migration m5a5）；业务员账号 default='approved' 跳过审批
-  - 注册 `/register` + `/wechat-register` 必填姓名/电话/配送地址/营业执照 URL，**不签发 token**，返 `{application_id, application_status}`；通知 admin/boss 待审批
+  - 注册 `/wechat-register` 必填姓名/电话/配送地址/营业执照 URL，**不签发 token**，返 `{application_id, application_status}`；通知 admin/boss 待审批
   - 新建 `/api/mall/public-uploads/upload` 匿名上传端点（kind=business_license 白名单，单 IP 5 次/分钟限流）
   - 登录端点对 `application_status != approved` 消费者返 403 `{reason, application_id, application_status, rejection_reason}` 让前端跳"审批中"页
   - `/application-status?application_id=` 匿名查询端点供 pending 页 10s 轮询
   - ERP 管理台 `/api/mall/admin/user-applications` 列表/详情/approve/reject；驳回自动作废邀请码 + 推驳回通知
   - 小程序新 `pages/pending-approval` 轮询页；`register-by-scan` 改为跳 register 填资料；register 页加姓名/电话/配送地址/营业执照 4 个必填字段
   - ERP 前端新菜单"注册审批"（`/mall/user-applications`）+ 详情抽屉看营业执照 + 通过/驳回按钮
+- **C 端账号必绑微信**：register.vue 重构为仅微信注册（移除账密 tab，品牌卡片 UI + 邀请码锁定卡 + 必填资料表单 + 绿色微信 CTA）；配送地址拆到独立 `pages/register-address-picker`（3 列省市区 picker + 门牌号 textarea，`getCurrentPages` 回写主页）；后端对应删除 `/api/mall/auth/register`（账密注册端点）+ `MallRegisterRequest` schema。业务员账号由 ERP 后台 `/api/mall/admin/salesmen` 创建，不受影响
 - `cancel_order` 退库存按原出库流水的 inventory 定位目标仓，不再依赖 `get_default_warehouse()`。**修复**：默认仓换过后，取消订单会把货退到错的仓
 - `release_order` 仅允许在 `assigned` 状态释放；`shipped` 后条码已 OUTBOUND 绑定原业务员，不再允许自行释放（出库后须走管理员改派）
 - `admin_reassign` 在 shipped/delivered/pending_payment_confirmation 状态改派时，同步把本订单的 OUTBOUND 条码 `outbound_by_user_id` 过户到新业务员，避免归属数据错乱

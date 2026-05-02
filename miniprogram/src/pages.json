@@ -26,6 +26,12 @@
       }
     },
     {
+      "path": "pages/register-address-picker/register-address-picker",
+      "style": {
+        "navigationBarTitleText": "选择配送地址"
+      }
+    },
+    {
       "path": "pages/user/user",
       "style": {
         "navigationBarTitleText": "个人中心"

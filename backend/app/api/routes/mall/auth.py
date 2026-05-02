@@ -2,14 +2,16 @@
 /api/mall/auth/*
 
 端点：
-  POST /login-password       账密登录（业务员 + 有账密的 consumer）
-  POST /register             邀请码注册（必传 invite_code）
+  POST /login-password       账密登录（业务员专用；C 端必走微信）
   POST /wechat-login         微信 code → 已注册用户登录（未注册返 404 引导走注册）
-  POST /wechat-register      首次微信注册（必传 invite_code）
+  POST /wechat-register      C 端首次微信注册（必传 invite_code + 审批资料）
   POST /refresh              刷新 token
   POST /logout               退出登录（bump token_version，所有在途 JWT 失效）
 
 协议：ERP 原生（200 + body；失败 HTTPException → `{detail}`）
+
+注：C 端账号必绑微信（不再提供 `/register` 账密注册入口）。
+    业务员账号由 ERP 后台 `/api/mall/admin/salesmen` 创建。
 """
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +24,6 @@ from app.schemas.mall.auth import (
     MallApplicationStatusResponse,
     MallLoginPasswordRequest,
     MallRefreshRequest,
-    MallRegisterRequest,
     MallTokenResponse,
     MallWechatLoginRequest,
     MallWechatRegisterRequest,
@@ -83,54 +84,8 @@ async def login_password(
 
 
 # =============================================================================
-# 账密注册
+# 通知 helper（仅供 wechat_register 使用）
 # =============================================================================
-
-@router.post("/register", response_model=MallApplicationResponse)
-async def register(
-    payload: MallRegisterRequest,
-    request: Request,
-    db: AsyncSession = Depends(get_mall_db),
-):
-    """账密注册。**不签发 token**，账户进入 pending_approval 审批流。
-
-    用户需凭 application_id 轮询 /application-status 查审批结果；
-    审批通过后用 /login-password 登录。
-    """
-    user = await auth_service.register_mall_user(
-        db,
-        invite_code=payload.invite_code,
-        username=payload.username,
-        password=payload.password,
-        phone=payload.phone,
-        nickname=payload.nickname,
-        real_name=payload.real_name,
-        contact_phone=payload.contact_phone,
-        delivery_address=payload.delivery_address,
-        business_license_url=payload.business_license_url,
-    )
-    await log_audit(
-        db, action="mall_user.register",
-        entity_type="MallUser", entity_id=user.id,
-        mall_user_id=user.id, actor_type="mall_user",
-        request=request,
-        changes={
-            "method": "password",
-            "username": payload.username,
-            "real_name": payload.real_name,
-            "contact_phone": payload.contact_phone,
-            "referrer_salesman_id": user.referrer_salesman_id,
-        },
-    )
-    # 通知 admin/boss 待审批
-    await _notify_admins_new_application(db, user)
-    return MallApplicationResponse(
-        application_id=user.id,
-        application_status=user.application_status,
-        username=user.username,
-        nickname=user.nickname,
-    )
-
 
 async def _notify_admins_new_application(db, user):
     """通知 admin/boss 有新注册待审批。"""

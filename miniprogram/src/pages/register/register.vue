@@ -1,220 +1,173 @@
 <!--
-  C 端注册页
-    两种注册方式：
-      1. 微信一键注册（mp-weixin 推荐）：邀请码 + uni.login → /wechat-register
-      2. 账密注册：用户名 + 密码 + 邀请码 → /register
+  C 端用户注册页
 
-    invite_code 必填，可从 query ?code= / ?invite_code= / ?scene= 预填并锁定
+  决策：
+    - C 端必绑微信（openid 作为唯一身份），不再提供账密注册入口
+    - 审批资料必填：真实姓名 / 联系电话 / 配送地址 / 营业执照
+    - 配送地址跳独立选择页（register-address-picker）
+    - 业务员账号不走此流程（ERP 管理员后台创建，走账密登录）
 -->
 <template>
-  <view class="register">
-    <view class="con">
-      <view class="brand">
-        <text class="brand__mark">
-          鑫
+  <view class="page">
+    <!-- 品牌头 -->
+    <view class="hero">
+      <view class="hero__logo">
+        鑫
+      </view>
+      <view class="hero__title">
+        欢迎加入鑫久隆
+      </view>
+      <view class="hero__sub">
+        完善资料后提交审核，通常 1 个工作日内通过
+      </view>
+    </view>
+
+    <!-- 邀请码卡片（自动填入且锁定） -->
+    <view
+      v-if="form.invite_code"
+      class="invite-card"
+    >
+      <view class="invite-card__row">
+        <text class="invite-card__label">
+          推荐码
         </text>
-        <text class="brand__name">
-          鑫久隆
-        </text>
-        <text class="brand__sub">
-          XIN JIU LONG · 批发商城
+        <text class="invite-card__code">
+          {{ form.invite_code }}
         </text>
       </view>
+    </view>
 
-      <!-- 注册方式切换 tab -->
-      <!-- #ifdef MP-WEIXIN -->
-      <view class="method-tabs">
-        <view
-          :class="['method-tabs__item', method === 'wechat' && 'method-tabs__item--active']"
-          @tap="method = 'wechat'"
-        >
-          微信注册
-        </view>
-        <view
-          :class="['method-tabs__item', method === 'password' && 'method-tabs__item--active']"
-          @tap="method = 'password'"
-        >
-          账密注册
-        </view>
-      </view>
-      <!-- #endif -->
-
-      <view class="login-form">
-        <!-- 账密字段：仅 method=password 显示 -->
-        <block v-if="method === 'password'">
-          <view :class="['item', errorTips === 'account' && 'error']">
-            <view class="account">
-              <input
-                v-model="form.username"
-                type="text"
-                placeholder-class="inp-palcehoder"
-                placeholder="请输入账号名称"
-              >
-            </view>
-            <view
-              v-if="errorTips === 'account'"
-              class="error-text"
-            >
-              <text class="warning-icon">
-                !
-              </text>
-              请输入账号！
-            </view>
-          </view>
-
-          <view :class="['item', errorTips === 'password' && 'error']">
-            <view class="account">
-              <input
-                v-model="form.password"
-                type="password"
-                placeholder-class="inp-palcehoder"
-                placeholder="请输入密码"
-              >
-            </view>
-            <view
-              v-if="errorTips === 'password'"
-              class="error-text"
-            >
-              <text class="warning-icon">
-                !
-              </text>
-              请输入密码！
-            </view>
-          </view>
-        </block>
-
-        <!-- 邀请码：两种方式都要 -->
-        <view :class="['item', errorTips === 'invite' && 'error']">
-          <view class="account">
-            <input
-              v-model="form.invite_code"
-              type="text"
-              maxlength="8"
-              :disabled="inviteLocked"
-              placeholder-class="inp-palcehoder"
-              placeholder="邀请码（业务员提供，必填）"
-            >
-          </view>
-          <view
-            v-if="inviteLocked"
-            class="hint-text"
-          >
-            已自动填入业务员分享的邀请码
-          </view>
-          <view
-            v-if="errorTips === 'invite'"
-            class="error-text"
-          >
-            <text class="warning-icon">
-              !
-            </text>
-            请输入邀请码！
-          </view>
-        </view>
-
-        <!-- ─── 审批资料（必填） ─── -->
-        <view :class="['item', errorTips === 'real_name' && 'error']">
-          <view class="account">
-            <input
-              v-model="form.real_name"
-              type="text"
-              maxlength="50"
-              placeholder-class="inp-palcehoder"
-              placeholder="真实姓名（与营业执照一致）"
-            >
-          </view>
-        </view>
-        <view :class="['item', errorTips === 'contact_phone' && 'error']">
-          <view class="account">
-            <input
-              v-model="form.contact_phone"
-              type="number"
-              maxlength="11"
-              placeholder-class="inp-palcehoder"
-              placeholder="联系电话（11 位手机号）"
-            >
-          </view>
-        </view>
-        <view :class="['item', errorTips === 'delivery_address' && 'error']">
-          <view class="account">
-            <textarea
-              v-model="form.delivery_address"
-              maxlength="500"
-              auto-height
-              placeholder-class="inp-palcehoder"
-              placeholder="配送地址（详细到门牌号）"
-            />
-          </view>
-        </view>
-        <view :class="['item item--upload', errorTips === 'business_license_url' && 'error']">
-          <view class="upload-label">
-            营业执照（必传）
-          </view>
-          <view
-            class="upload-area"
-            @tap="onChooseLicense"
-          >
-            <image
-              v-if="form.business_license_url"
-              class="upload-preview"
-              :src="form.business_license_url"
-              mode="aspectFit"
-            />
-            <view
-              v-else
-              class="upload-placeholder"
-            >
-              <text class="upload-plus">+</text>
-              <text class="upload-hint">点击上传</text>
-            </view>
-            <view
-              v-if="licenseUploading"
-              class="upload-mask"
-            >
-              上传中…
-            </view>
-          </view>
-        </view>
-
-        <view class="operate">
-          <view
-            class="to-register"
-            @tap="toLogin"
-          >
-            已有账号？
-            <text>去登录></text>
-          </view>
-        </view>
-      </view>
-
-      <view>
-        <!-- #ifdef MP-WEIXIN -->
-        <button
-          v-if="method === 'wechat'"
-          class="authorized-btn wechat"
-          :disabled="submitting"
-          @tap="onWechatRegister"
-        >
-          <text class="wechat__icon">
-            💬
+    <!-- 必填资料表单 -->
+    <view class="form">
+      <view class="form__group">
+        <view class="form__label">
+          <text class="form__required">
+            *
           </text>
-          <text>{{ submitting ? '注册中…' : '微信一键注册' }}</text>
-        </button>
-        <!-- #endif -->
-        <button
-          v-if="method === 'password'"
-          class="authorized-btn"
-          :disabled="submitting"
-          @tap="onPasswordRegister"
+          真实姓名
+        </view>
+        <input
+          v-model="form.real_name"
+          class="form__input"
+          maxlength="50"
+          placeholder="与营业执照/身份证一致"
+          placeholder-class="form__placeholder"
         >
-          {{ submitting ? '注册中…' : '注册' }}
-        </button>
-        <button
-          class="to-idx-btn"
-          @tap="toIndex"
+      </view>
+
+      <view class="form__group">
+        <view class="form__label">
+          <text class="form__required">
+            *
+          </text>
+          联系电话
+        </view>
+        <input
+          v-model="form.contact_phone"
+          class="form__input"
+          type="number"
+          maxlength="11"
+          placeholder="11 位手机号"
+          placeholder-class="form__placeholder"
         >
-          回到首页
-        </button>
+      </view>
+
+      <view class="form__group">
+        <view class="form__label">
+          <text class="form__required">
+            *
+          </text>
+          配送地址
+        </view>
+        <view
+          class="form__input form__input--link"
+          @tap="toPickAddress"
+        >
+          <text
+            v-if="form.delivery_address"
+            class="form__value"
+          >
+            {{ form.delivery_address }}
+          </text>
+          <text
+            v-else
+            class="form__placeholder"
+          >
+            选择省/市/区，填写门牌号
+          </text>
+          <text class="form__arrow">
+            ›
+          </text>
+        </view>
+      </view>
+
+      <view class="form__group">
+        <view class="form__label">
+          <text class="form__required">
+            *
+          </text>
+          营业执照
+        </view>
+        <view
+          class="upload"
+          @tap="onChooseLicense"
+        >
+          <image
+            v-if="form.business_license_url"
+            class="upload__img"
+            :src="form.business_license_url"
+            mode="aspectFit"
+          />
+          <view
+            v-else
+            class="upload__placeholder"
+          >
+            <text class="upload__icon">
+              ＋
+            </text>
+            <text class="upload__hint">
+              点击上传
+            </text>
+            <text class="upload__note">
+              仅限 jpg / png / pdf，5MB 以内
+            </text>
+          </view>
+          <view
+            v-if="licenseUploading"
+            class="upload__mask"
+          >
+            <text>上传中…</text>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view class="agreement">
+      <text>点击下方按钮即表示同意</text>
+      <text class="agreement__link">
+        《服务协议》
+      </text>
+      <text>和</text>
+      <text class="agreement__link">
+        《隐私政策》
+      </text>
+    </view>
+
+    <view class="actions">
+      <button
+        class="btn btn--wechat"
+        :disabled="!canSubmit || submitting"
+        @tap="onWechatRegister"
+      >
+        <text class="btn__icon">
+          💬
+        </text>
+        <text>{{ submitting ? '提交中…' : '微信授权并提交' }}</text>
+      </button>
+      <view class="actions__sub">
+        <text @tap="toLogin">
+          已有账号，去登录
+        </text>
       </view>
     </view>
   </view>
@@ -222,19 +175,33 @@
 
 <script setup>
 const form = ref({
-  username: '',
-  password: '',
   invite_code: '',
-  // 审批资料（消费者必填）
   real_name: '',
   contact_phone: '',
   delivery_address: '',
   business_license_url: ''
 })
-const inviteLocked = ref(false)
-const errorTips = ref('')
 const submitting = ref(false)
 const licenseUploading = ref(false)
+
+onLoad((q) => {
+  uni.setNavigationBarTitle({ title: '注册' })
+  const raw = q?.code || q?.invite_code || q?.scene
+  if (raw) {
+    form.value.invite_code = String(raw).toUpperCase()
+  }
+})
+
+// 从地址选择页回来 —— 复用 onShow 读 $vm.pickedAddress
+onShow(() => {
+  // 从地址 picker 回来会通过 getCurrentPages 在本页实例上塞 pickedAddress
+  const current = getCurrentPages()?.[getCurrentPages().length - 1]
+  const picked = current?.$vm?.pickedAddress
+  if (picked) {
+    form.value.delivery_address = picked
+    delete current.$vm.pickedAddress
+  }
+})
 
 // 上传营业执照（匿名端点）
 const onChooseLicense = () => {
@@ -256,7 +223,6 @@ const onChooseLicense = () => {
             const body = typeof res.data === 'string' ? JSON.parse(res.data) : res.data
             if (res.statusCode >= 200 && res.statusCode < 300 && body.url) {
               form.value.business_license_url = body.url
-              errorTips.value = ''
               uni.showToast({ title: '上传成功', icon: 'success' })
             } else {
               uni.showToast({ title: body?.detail || '上传失败', icon: 'none' })
@@ -272,82 +238,49 @@ const onChooseLicense = () => {
   })
 }
 
-// 校验所有审批字段都填了
-const validateApproval = () => {
+const toPickAddress = () => {
+  uni.navigateTo({ url: '/pages/register-address-picker/register-address-picker' })
+}
+
+const canSubmit = computed(() => {
+  return !!(
+    form.value.invite_code &&
+    form.value.real_name.trim() &&
+    /^1[3-9]\d{9}$/.test(form.value.contact_phone.trim()) &&
+    form.value.delivery_address.trim().length >= 5 &&
+    form.value.business_license_url
+  )
+})
+
+const toLogin = () => uni.navigateTo({ url: '/pages/accountLogin/accountLogin' })
+
+const validate = () => {
+  if (!form.value.invite_code) {
+    uni.showToast({ title: '邀请码缺失', icon: 'none' })
+    return false
+  }
   if (!form.value.real_name.trim()) {
-    errorTips.value = 'real_name'
     uni.showToast({ title: '请填写真实姓名', icon: 'none' })
     return false
   }
   if (!/^1[3-9]\d{9}$/.test(form.value.contact_phone.trim())) {
-    errorTips.value = 'contact_phone'
     uni.showToast({ title: '请填写正确的手机号', icon: 'none' })
     return false
   }
   if (form.value.delivery_address.trim().length < 5) {
-    errorTips.value = 'delivery_address'
-    uni.showToast({ title: '请填写配送地址', icon: 'none' })
+    uni.showToast({ title: '请选择配送地址', icon: 'none' })
     return false
   }
   if (!form.value.business_license_url) {
-    errorTips.value = 'business_license_url'
     uni.showToast({ title: '请上传营业执照', icon: 'none' })
     return false
   }
   return true
 }
 
-// mp-weixin 默认微信注册，其他平台默认账密
-// 用运行时 process.env 判断而非条件编译，避免 ESLint 同标识符重复声明
-const method = ref(
-  // eslint-disable-next-line no-undef
-  (typeof process !== 'undefined' && process.env?.UNI_PLATFORM === 'mp-weixin') ? 'wechat' : 'password'
-)
-
-onLoad((q) => {
-  uni.setNavigationBarTitle({ title: '用户注册' })
-  // 兼容三种 query 命名：?code=（老链接）/ ?invite_code=（分享卡片）/ ?scene=（小程序码）
-  const raw = q?.code || q?.invite_code || q?.scene
-  if (raw) {
-    form.value.invite_code = String(raw).toUpperCase()
-    inviteLocked.value = true
-  }
-})
-
-const validateInvite = () => {
-  if (!form.value.invite_code.trim()) {
-    errorTips.value = 'invite'
-    return false
-  }
-  return true
-}
-
-/**
- * 微信一键注册（mp-weixin only）
- *
- * 流程：验证邀请码 → uni.login 拿 code → /wechat-register
- * 后端：code2session 拿 openid → 若已注册直接登录（不消耗邀请码）
- *      否则消费邀请码 + 创建账号 + 签 token
- */
-const approvalPayload = () => ({
-  invite_code: form.value.invite_code.trim().toUpperCase(),
-  real_name: form.value.real_name.trim(),
-  contact_phone: form.value.contact_phone.trim(),
-  delivery_address: form.value.delivery_address.trim(),
-  business_license_url: form.value.business_license_url
-})
-
-// 审批流注册：不签 token，跳 pending-approval 页
-const goPendingApproval = (applicationId) => {
-  uni.reLaunch({
-    url: `/pages/pending-approval/pending-approval?application_id=${applicationId}`
-  })
-}
-
+// 微信一键注册 + 提交资料
 const onWechatRegister = () => {
-  if (!validateInvite()) return
-  if (!validateApproval()) return
-  errorTips.value = ''
+  if (!validate()) return
   submitting.value = true
   uni.login({
     provider: 'weixin',
@@ -364,11 +297,14 @@ const onWechatRegister = () => {
         hasCatch: true,
         data: {
           code,
-          ...approvalPayload()
+          invite_code: form.value.invite_code.trim().toUpperCase(),
+          real_name: form.value.real_name.trim(),
+          contact_phone: form.value.contact_phone.trim(),
+          delivery_address: form.value.delivery_address.trim(),
+          business_license_url: form.value.business_license_url
         }
       }).then(({ data }) => {
         submitting.value = false
-        // 后端已注册 openid 会直接签 token；新账号会返 application_id
         if (data?.token) {
           http.loginSuccess(data, () => {
             uni.showToast({ title: '欢迎回来', icon: 'success' })
@@ -376,7 +312,11 @@ const onWechatRegister = () => {
           })
         } else if (data?.application_id) {
           uni.showToast({ title: '申请已提交', icon: 'success', duration: 1200 })
-          setTimeout(() => goPendingApproval(data.application_id), 1000)
+          setTimeout(() => {
+            uni.reLaunch({
+              url: `/pages/pending-approval/pending-approval?application_id=${data.application_id}`
+            })
+          }, 1000)
         }
       }).catch((e) => {
         submitting.value = false
@@ -389,138 +329,231 @@ const onWechatRegister = () => {
     }
   })
 }
-
-const onPasswordRegister = async () => {
-  if (!form.value.username.trim()) {
-    errorTips.value = 'account'
-    return
-  }
-  if (!form.value.password) {
-    errorTips.value = 'password'
-    return
-  }
-  if (!validateInvite()) return
-  if (!validateApproval()) return
-  errorTips.value = ''
-  submitting.value = true
-  uni.showLoading({ title: '提交中…' })
-  try {
-    const res = await http.request({
-      url: '/api/mall/auth/register',
-      method: 'POST',
-      login: true,
-      data: {
-        username: form.value.username.trim(),
-        password: form.value.password,
-        ...approvalPayload()
-      }
-    })
-    uni.hideLoading()
-    const data = res.data || {}
-    if (data.application_id) {
-      uni.showToast({ title: '申请已提交', icon: 'success', duration: 1200 })
-      setTimeout(() => goPendingApproval(data.application_id), 1000)
-    }
-  } catch (e) {
-    uni.hideLoading()
-    uni.showToast({ title: e?.msg || '注册失败', icon: 'none' })
-  } finally {
-    submitting.value = false
-  }
-}
-
-const toLogin = () => uni.navigateTo({ url: '/pages/accountLogin/accountLogin' })
-const toIndex = () => uni.switchTab({ url: '/pages/index/index' })
 </script>
 
 <style lang="scss" scoped>
-@import "./register.scss";
+@import '@/styles/variables.scss';
 
-.method-tabs {
-  display: flex;
-  margin: 0 60rpx 40rpx;
-  background: #f5f3ef;
+.page {
+  min-height: 100vh;
+  background: $color-cream;
+  padding: 40rpx 24rpx 48rpx;
+}
+
+.hero {
+  text-align: center;
+  margin-bottom: 32rpx;
+
+  &__logo {
+    width: 108rpx;
+    height: 108rpx;
+    line-height: 108rpx;
+    font-size: 56rpx;
+    font-weight: 700;
+    color: #fff;
+    background: $color-ink;
+    border-radius: 50%;
+    margin: 0 auto 24rpx;
+    letter-spacing: 0;
+  }
+  &__title {
+    font-size: 40rpx;
+    font-weight: 600;
+    color: $color-ink-soft;
+    margin-bottom: 8rpx;
+  }
+  &__sub {
+    font-size: 24rpx;
+    color: $color-hint;
+  }
+}
+
+.invite-card {
+  background: linear-gradient(135deg, #2A2013 0%, #0E0E0E 100%);
   border-radius: 16rpx;
-  padding: 6rpx;
+  padding: 28rpx 32rpx;
+  margin-bottom: 24rpx;
 
-  &__item {
-    flex: 1;
-    text-align: center;
-    padding: 20rpx 0;
-    font-size: 26rpx;
-    color: #666;
-    border-radius: 12rpx;
-    transition: all 0.2s;
+  &__row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  &__label {
+    font-size: 24rpx;
+    color: rgba(255, 255, 255, 0.6);
+  }
+  &__code {
+    font-size: 36rpx;
+    font-weight: 700;
+    color: $color-gold;
+    letter-spacing: 6rpx;
+  }
+}
 
-    &--active {
-      background: #fff;
-      color: #C9A961;
-      font-weight: 600;
-      box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.06);
+.form {
+  background: #fff;
+  border-radius: 16rpx;
+  padding: 8rpx 24rpx;
+
+  &__group {
+    padding: 24rpx 0;
+    border-bottom: 1rpx solid $color-line;
+
+    &:last-child {
+      border-bottom: none;
     }
   }
-}
 
-.hint-text {
-  margin-top: 8rpx;
-  font-size: 22rpx;
-  color: #C9A961;
-}
-
-.authorized-btn.wechat {
-  background: #07C160;
-  color: #fff;
-
-  .wechat__icon {
-    margin-right: 8rpx;
-  }
-}
-
-.item--upload {
-  .upload-label {
+  &__label {
     font-size: 26rpx;
-    color: #666;
-    margin-bottom: 12rpx;
+    color: $color-hint;
+    margin-bottom: 16rpx;
   }
-  .upload-area {
-    width: 240rpx;
-    height: 240rpx;
-    background: #fafafa;
-    border: 2rpx dashed #d9d9d9;
-    border-radius: 12rpx;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: relative;
-    overflow: hidden;
+
+  &__required {
+    color: $color-err;
+    margin-right: 6rpx;
   }
-  .upload-preview {
+
+  &__input {
+    font-size: 30rpx;
+    color: $color-ink-soft;
+    width: 100%;
+
+    &--link {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+  }
+
+  &__placeholder {
+    color: $color-hint;
+  }
+
+  &__value {
+    flex: 1;
+    font-size: 30rpx;
+    color: $color-ink-soft;
+    word-break: break-all;
+  }
+
+  &__arrow {
+    color: $color-hint;
+    font-size: 36rpx;
+    margin-left: 16rpx;
+  }
+}
+
+.upload {
+  width: 280rpx;
+  height: 280rpx;
+  position: relative;
+  background: $color-cream;
+  border: 2rpx dashed $color-line;
+  border-radius: 12rpx;
+  overflow: hidden;
+
+  &__img {
     width: 100%;
     height: 100%;
+    display: block;
   }
-  .upload-placeholder {
+
+  &__placeholder {
+    width: 100%;
+    height: 100%;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8rpx;
-    color: #999;
+    justify-content: center;
+    gap: 6rpx;
   }
-  .upload-plus {
-    font-size: 48rpx;
-    color: #C9A961;
+
+  &__icon {
+    font-size: 64rpx;
+    color: $color-gold;
+    line-height: 1;
   }
-  .upload-hint {
-    font-size: 22rpx;
+
+  &__hint {
+    font-size: 24rpx;
+    color: $color-ink-soft;
+    margin-top: 6rpx;
   }
-  .upload-mask {
+
+  &__note {
+    font-size: 20rpx;
+    color: $color-hint;
+    padding: 0 16rpx;
+    text-align: center;
+    line-height: 1.4;
+  }
+
+  &__mask {
     position: absolute;
     inset: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: rgba(0, 0, 0, 0.55);
     color: #fff;
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 24rpx;
+  }
+}
+
+.agreement {
+  margin-top: 32rpx;
+  text-align: center;
+  font-size: 22rpx;
+  color: $color-hint;
+
+  &__link {
+    color: $color-gold-deep;
+  }
+}
+
+.actions {
+  margin-top: 32rpx;
+
+  &__sub {
+    margin-top: 24rpx;
+    text-align: center;
+    font-size: 26rpx;
+    color: $color-gold-deep;
+  }
+}
+
+.btn {
+  width: 100%;
+  height: 96rpx;
+  line-height: 96rpx;
+  border-radius: 48rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+
+  &--wechat {
+    background: #07C160;
+    color: #fff;
+  }
+
+  &[disabled] {
+    background: $color-line !important;
+    color: $color-hint !important;
+  }
+
+  &__icon {
+    font-size: 30rpx;
+    margin-right: 8rpx;
+  }
+
+  &::after {
+    border: 0;
   }
 }
 </style>

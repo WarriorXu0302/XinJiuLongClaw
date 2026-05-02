@@ -302,13 +302,11 @@ const validate = () => {
   return true
 }
 
-// dev H5 下：如果设置了 devMockOpenid 就直接用（注册/登录共用同一个 mock openid）
+// H5 下：如果登录页存过 devMockOpenid 就用它（注册/登录共用同一个 mock 微信身份）
 const getDevMockCode = () => {
   // #ifdef H5
-  if (import.meta.env.DEV) {
-    const saved = uni.getStorageSync('devMockOpenid')
-    if (saved) return `devmock:${saved}`
-  }
+  const saved = uni.getStorageSync('devMockOpenid')
+  if (saved) return `devmock:${saved}`
   // #endif
   return null
 }

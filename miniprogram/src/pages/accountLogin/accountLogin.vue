@@ -89,26 +89,23 @@
         </text>
         <text>{{ wxLoading ? '登录中…' : '微信一键登录' }}</text>
       </button>
-      <!-- dev H5 调试：设置固定 mock openid 复用账号 -->
+      <!-- dev H5 调试：设置固定 mock openid 复用账号（H5 build 才编译进来） -->
       <!-- #ifdef H5 -->
-      <view
-        v-if="isDev"
-        class="dev-panel"
-      >
+      <view class="dev-panel">
         <view class="dev-panel__title">
-          [DEV] 开发模式 · 微信登录 mock
+          🛠 DEV · 微信登录 mock openid
         </view>
         <input
           v-model="devMockOpenid"
           class="dev-panel__input"
-          placeholder="微信 openid 后缀（去掉 mock_openid_ 前缀）"
+          placeholder="输入 openid 后缀（如 0b1KB0000gbh）"
         >
         <view class="dev-panel__row">
           <button
             class="dev-panel__btn"
-            @tap="saveDevMock"
+            @tap="saveAndLoginDevMock"
           >
-            保存并用此 openid 登录
+            保存并登录
           </button>
           <button
             class="dev-panel__btn dev-panel__btn--ghost"
@@ -121,7 +118,7 @@
           v-if="savedDevMock"
           class="dev-panel__saved"
         >
-          当前已保存：mock_openid_{{ savedDevMock }}
+          已存：mock_openid_{{ savedDevMock }}
         </view>
       </view>
       <!-- #endif -->
@@ -217,26 +214,24 @@ const toRegitser = () => {
  */
 const wxLoading = ref(false)
 
-// dev H5 下 uni.login 返的 code 每次随机，后端 mock openid 也跟着变 → 永远 404
-// 本地调试允许用 storage 里存一个 openid 固定复用账号
-const isDev = ref(false)
+// H5 dev 调试：uni.login 每次返随机 code → 后端 mock openid 跟着变 → 永远 404
+// 面板让用户存一个固定 openid，登录时后端 wechat_code2session 识别 'devmock:' 前缀返固定 openid
 const devMockOpenid = ref('')
 const savedDevMock = ref('')
 // #ifdef H5
-isDev.value = import.meta.env.DEV
 savedDevMock.value = uni.getStorageSync('devMockOpenid') || ''
 devMockOpenid.value = savedDevMock.value
 // #endif
 
-const saveDevMock = () => {
+const saveAndLoginDevMock = () => {
   const v = devMockOpenid.value.trim()
   if (!v) {
-    uni.showToast({ title: '请输入 openid', icon: 'none' })
+    uni.showToast({ title: '请先输入 openid', icon: 'none' })
     return
   }
   uni.setStorageSync('devMockOpenid', v)
   savedDevMock.value = v
-  uni.showToast({ title: '已保存，正在登录…', icon: 'success', duration: 800 })
+  uni.showToast({ title: '已保存，登录中…', icon: 'success', duration: 800 })
   setTimeout(() => onWechatLogin(), 800)
 }
 
@@ -249,10 +244,8 @@ const clearDevMock = () => {
 
 const getDevMockCode = () => {
   // #ifdef H5
-  if (import.meta.env.DEV) {
-    const saved = uni.getStorageSync('devMockOpenid')
-    if (saved) return `devmock:${saved}`
-  }
+  const saved = uni.getStorageSync('devMockOpenid')
+  if (saved) return `devmock:${saved}`
   // #endif
   return null
 }

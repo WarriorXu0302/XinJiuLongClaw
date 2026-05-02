@@ -3,7 +3,7 @@
  *
  * 状态时间线 / 商品清单 / 金额明细 / 收货地址 / 凭证图 / 物流 / claim 日志
  */
-import { Descriptions, Divider, Drawer, Empty, Space, Spin, Table, Tag, Timeline, Typography } from 'antd';
+import { Descriptions, Divider, Drawer, Empty, Image, Space, Spin, Table, Tag, Timeline, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../../../api/client';
@@ -216,6 +216,17 @@ export default function OrderDetail({ orderId, open, onClose }: Props) {
             { title: '上传时间', dataIndex: 'created_at', width: 150,
               render: (v: string) => dayjs(v).format('MM-DD HH:mm') },
           ]}
+          expandable={{
+            expandedRowRender: (r: any) => (
+              (r.vouchers || []).length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="无凭证图" /> :
+                <Space wrap>
+                  {r.vouchers.map((v: any, i: number) => (
+                    <Image key={i} src={v.url} width={120} height={120} style={{ objectFit: 'cover' }} />
+                  ))}
+                </Space>
+            ),
+            rowExpandable: (r: any) => (r.vouchers || []).length > 0,
+          }}
         />
       )}
 
@@ -239,6 +250,20 @@ export default function OrderDetail({ orderId, open, onClose }: Props) {
               render: (v: string) => fmt(v) },
           ]}
         />
+      )}
+
+      {/* 送达照片 */}
+      {(order.delivery_photos || []).length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <Typography.Text strong>送达照片：</Typography.Text>
+          <div style={{ marginTop: 8 }}>
+            <Space wrap>
+              {order.delivery_photos.map((p: any, i: number) => (
+                <Image key={i} src={p.url} width={120} height={120} style={{ objectFit: 'cover' }} />
+              ))}
+            </Space>
+          </div>
+        </div>
       )}
 
       <Divider />

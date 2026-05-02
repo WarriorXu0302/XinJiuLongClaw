@@ -42,8 +42,11 @@ async def my_customers(
     if not cust_ids:
         return {"records": []}
 
+    # 只返 active 客户（停用/归档的客户不该出现在打卡选择器和拜访下拉）
     customers = (await db.execute(
-        select(Customer).where(Customer.id.in_(cust_ids))
+        select(Customer)
+        .where(Customer.id.in_(cust_ids))
+        .where(Customer.status == "active")
     )).scalars().all()
     return {
         "records": [

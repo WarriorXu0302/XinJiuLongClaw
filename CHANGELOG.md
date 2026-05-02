@@ -75,6 +75,11 @@
 - `confirm_receipt` 放宽状态：`delivered / pending_payment_confirmation / completed / partial_closed` 都允许点确认收货（原仅 delivered，客户晚点点会 400）
 - ERP 前端 `OrderList` + `SkipAlertList` 支持 `?status=xxx` URL 参数（从 Dashboard 点击跳转时自动选中对应 Tab）
 - 购物车接口返回 `is_available` 标记下架商品；前端 basket 展示"已下架"红色标签 + 禁用勾选 + 结算自动跳过 + 合计不计入下架商品
+- 业务员收款码上传实装：miniprogram profile 页菜单用 `uni.showActionSheet` 选微信/支付宝、拍照/相册上传、支持清空；`attachments` 端点新增 `payment_qr` kind
+- `workspace/customers` 过滤 `status=active`：业务员打卡/拜访客户选择器不再显示停用/归档客户
+- admin OrderDetail 抽屉补展示**收款凭证图**（expandable 行展开）和**送达照片**（物流区下方九宫格）；后端补返 `payments[*].vouchers` + `delivery_photos`
+- **邀请码 H5 二维码**：后端 `/salesman/invite-codes` POST 返 `qr_svg`（SVG 字符串）+ `deeplink`；前端 H5 `v-html` 渲染，mp 端展示链接文本兜底
+- **邀请码小程序码（扫码一键注册骨架）**：后端 `wechat_service.py` 封装 access_token 缓存 + `wxacode.getUnlimited`；新端点 `GET /invite-codes/{id}/qr-mp` 返 PNG；小程序新页 `register-by-scan` 解析 scene → `uni.login` → `/wechat-register` 完成注册；409 已注册时自动降级到 `/wechat-login`；salesman-invite 加"下载小程序码"按钮（mp-weixin 编译条件）；onShareAppMessage 分享路径改为 `register-by-scan?invite_code=...`。**未配 MP_APPID 时返 1x1 占位 PNG 走 mock**，等生产 AppID 到位即可联调
 - `cancel_order` 退库存按原出库流水的 inventory 定位目标仓，不再依赖 `get_default_warehouse()`。**修复**：默认仓换过后，取消订单会把货退到错的仓
 - `release_order` 仅允许在 `assigned` 状态释放；`shipped` 后条码已 OUTBOUND 绑定原业务员，不再允许自行释放（出库后须走管理员改派）
 - `admin_reassign` 在 shipped/delivered/pending_payment_confirmation 状态改派时，同步把本订单的 OUTBOUND 条码 `outbound_by_user_id` 过户到新业务员，避免归属数据错乱

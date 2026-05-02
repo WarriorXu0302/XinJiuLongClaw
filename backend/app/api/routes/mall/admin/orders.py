@@ -180,6 +180,43 @@ async def get_order(
         .order_by(desc(MallPayment.created_at))
     )).scalars().all()
 
+    # 拉每个 payment 的凭证图（admin 详情页要能点开看）
+    from app.models.mall.base import MallAttachmentType
+    from app.models.mall.order import MallAttachment
+    vouchers_by_payment: dict[str, list] = {}
+    if payments:
+        attaches = (await db.execute(
+            select(MallAttachment)
+            .where(MallAttachment.kind == MallAttachmentType.PAYMENT_VOUCHER.value)
+            .where(MallAttachment.ref_type == "payment")
+            .where(MallAttachment.ref_id.in_([p.id for p in payments]))
+            .order_by(MallAttachment.created_at)
+        )).scalars().all()
+        for a in attaches:
+            vouchers_by_payment.setdefault(a.ref_id, []).append({
+                "url": a.file_url,
+                "sha256": a.sha256,
+                "file_size": a.file_size,
+                "mime_type": a.mime_type,
+            })
+
+    # 送达照片（ref_type='order' kind='delivery_photo'）
+    delivery_photos = [
+        {
+            "url": a.file_url,
+            "sha256": a.sha256,
+            "file_size": a.file_size,
+            "uploaded_at": a.created_at,
+        }
+        for a in (await db.execute(
+            select(MallAttachment)
+            .where(MallAttachment.kind == MallAttachmentType.DELIVERY_PHOTO.value)
+            .where(MallAttachment.ref_type == "order")
+            .where(MallAttachment.ref_id == order.id)
+            .order_by(MallAttachment.created_at)
+        )).scalars().all()
+    ]
+
     shipments = (await db.execute(
         select(MallShipment).where(MallShipment.order_id == order.id)
     )).scalars().all()
@@ -244,6 +281,7 @@ async def get_order(
                 "rejected_reason": p.rejected_reason,
                 "uploaded_by": _u(p.uploaded_by_user_id),
                 "created_at": p.created_at,
+                "vouchers": vouchers_by_payment.get(p.id, []),
             }
             for p in payments
         ],
@@ -270,6 +308,7 @@ async def get_order(
             }
             for l in claim_logs
         ],
+        "delivery_photos": delivery_photos,
         "created_at": order.created_at,
         "claimed_at": order.claimed_at,
         "shipped_at": order.shipped_at,

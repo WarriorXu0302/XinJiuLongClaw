@@ -28,7 +28,7 @@ router = APIRouter()
 ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic"}
 ALLOWED_MIMES = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}
 MAX_BYTES = settings.MALL_UPLOAD_MAX_SIZE_MB * 1024 * 1024
-VALID_KINDS = {"payment_voucher", "delivery_photo"}
+VALID_KINDS = {"payment_voucher", "delivery_photo", "payment_qr"}
 
 
 @router.post("/upload")

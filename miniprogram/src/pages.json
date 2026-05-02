@@ -14,6 +14,12 @@
       "path": "pages/accountLogin/accountLogin"
     },
     {
+      "path": "pages/register-by-scan/register-by-scan",
+      "style": {
+        "navigationBarTitleText": "欢迎注册"
+      }
+    },
+    {
       "path": "pages/user/user",
       "style": {
         "navigationBarTitleText": "个人中心"

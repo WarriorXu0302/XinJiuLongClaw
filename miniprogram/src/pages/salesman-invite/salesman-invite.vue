@@ -49,17 +49,34 @@
           </text>
         </view>
 
+        <!-- #ifdef H5 -->
         <view
-          v-if="!expired"
+          v-if="!expired && code.qr_svg"
+          class="card__qr"
+        >
+          <!-- eslint-disable-next-line vue/no-v-text-v-html-on-component, vue/no-v-html -->
+          <div class="card__qr-svg" v-html="code.qr_svg" />
+          <text class="card__qr-hint">
+            扫码直达注册页
+          </text>
+        </view>
+        <!-- #endif -->
+        <!-- #ifndef H5 -->
+        <view
+          v-if="!expired && code.deeplink"
           class="card__qr"
         >
           <view class="card__qr-placeholder">
-            <text>二维码</text>
-            <text class="card__qr-hint">
-              （uni-qrcode 占位）
+            <text>注册链接</text>
+            <text
+              class="card__qr-hint"
+              selectable
+            >
+              {{ code.deeplink }}
             </text>
           </view>
         </view>
+        <!-- #endif -->
       </view>
 
       <view class="card__actions">
@@ -78,6 +95,17 @@
         >
           分享给客户
         </button>
+        <!-- #ifdef MP-WEIXIN -->
+        <!-- 真实小程序码（客户扫码可直接拉起小程序完成注册）；H5 端当前无意义，只保留 mp-weixin -->
+        <button
+          v-if="code && !expired"
+          class="card__btn card__btn--share"
+          :disabled="mpQrLoading"
+          @tap="onSaveMpQr"
+        >
+          {{ mpQrLoading ? '下载中…' : '下载小程序码' }}
+        </button>
+        <!-- #endif -->
         <button
           class="card__btn card__btn--primary"
           :disabled="loading"
@@ -206,9 +234,43 @@ const onShare = () => {
   uni.showToast({ title: '点右上角菜单分享', icon: 'none' })
 }
 
+// 下载小程序码（mp-weixin only）。拿到 PNG → 保存到相册（用户分享到微信聊天即可扫码）
+const mpQrLoading = ref(false)
+const onSaveMpQr = () => {
+  if (!code.value?.id) return
+  mpQrLoading.value = true
+  const token = uni.getStorageSync('Token')
+  uni.downloadFile({
+    url: (import.meta.env.VITE_APP_BASE_API || '') + `/api/mall/salesman/invite-codes/${code.value.id}/qr-mp`,
+    header: token ? { Authorization: token.startsWith('Bearer ') ? token : `Bearer ${token}` } : {},
+    success: (r) => {
+      if (r.statusCode !== 200) {
+        mpQrLoading.value = false
+        uni.showToast({ title: '下载失败', icon: 'none' })
+        return
+      }
+      uni.saveImageToPhotosAlbum({
+        filePath: r.tempFilePath,
+        success: () => {
+          uni.showToast({ title: '已保存到相册', icon: 'success' })
+        },
+        fail: (err) => {
+          // 用户拒绝授权 / 已存在 etc
+          uni.showToast({ title: err?.errMsg || '保存失败', icon: 'none' })
+        },
+        complete: () => { mpQrLoading.value = false }
+      })
+    },
+    fail: () => {
+      mpQrLoading.value = false
+      uni.showToast({ title: '下载失败', icon: 'none' })
+    }
+  })
+}
+
 onShareAppMessage(() => ({
   title: `邀请您加入鑫久隆批发商城，邀请码 ${code.value?.code}`,
-  path: `/pages/register/register?code=${code.value?.code || ''}`
+  path: `/pages/register-by-scan/register-by-scan?invite_code=${code.value?.code || ''}`
 }))
 
 onMounted(() => {
@@ -305,11 +367,24 @@ onUnmounted(() => {
   &__qr {
     margin-top: 32rpx;
     display: flex;
-    justify-content: center;
+    flex-direction: column;
+    align-items: center;
+  }
+  &__qr-svg {
+    width: 320rpx;
+    height: 320rpx;
+    padding: 16rpx;
+    background: #fff;
+    border-radius: 12rpx;
+    :deep(svg) {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
   }
   &__qr-placeholder {
     width: 320rpx;
-    height: 320rpx;
+    padding: 24rpx;
     background: $color-cream;
     border: 4rpx dashed $color-line;
     display: flex;
@@ -319,10 +394,12 @@ onUnmounted(() => {
     color: $color-hint;
     font-size: 26rpx;
     border-radius: 12rpx;
+    word-break: break-all;
   }
   &__qr-hint {
     margin-top: 8rpx;
     font-size: 20rpx;
+    color: $color-hint;
   }
 
   &__actions {

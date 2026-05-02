@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     MALL_INVITE_CODE_TTL_MINUTES: int = 120  # 2 小时
     MALL_INVITE_CODE_DAILY_LIMIT: int = 20
     MALL_INVITE_CODE_EXHIBITION_LIMIT: int = 100
+    # 邀请码二维码深链接基址（扫码跳 H5 注册页自动填 code）
+    MALL_INVITE_DEEPLINK_BASE: str = "https://mall.xinjiulong.com/register"
+    # 小程序码扫码跳转到的小程序页面路径（不能带 query，scene 从 launch options 读）
+    MALL_INVITE_SCAN_PAGE: str = "pages/register-by-scan/register-by-scan"
     # 用户停用策略（3 级）
     MALL_INACTIVE_DAYS_NEW_USER: int = 30     # 注册未下单
     MALL_INACTIVE_DAYS_FEW_ORDERS: int = 90   # 1-2 次下单

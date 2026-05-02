@@ -265,8 +265,72 @@ const onToggleAccepting = async (e) => {
   }
 }
 
+// 上传单张收款码图到后端，拿到 URL
+const uploadQrImage = (localPath) => {
+  return new Promise((resolve, reject) => {
+    const token = uni.getStorageSync('Token')
+    uni.uploadFile({
+      url: (import.meta.env.VITE_APP_BASE_API || '') + '/api/mall/salesman/attachments/upload',
+      filePath: localPath,
+      name: 'file',
+      formData: { kind: 'payment_qr' },
+      header: token ? { Authorization: token.startsWith('Bearer ') ? token : `Bearer ${token}` } : {},
+      success: (r) => {
+        try {
+          const body = typeof r.data === 'string' ? JSON.parse(r.data) : r.data
+          if (r.statusCode >= 200 && r.statusCode < 300 && body.url) {
+            resolve(body.url)
+          } else {
+            reject(new Error(body.detail || '上传失败'))
+          }
+        } catch (e) { reject(e) }
+      },
+      fail: (err) => reject(err)
+    })
+  })
+}
+
 const onSetPaymentQr = () => {
-  uni.showToast({ title: '功能开发中', icon: 'none' })
+  uni.showActionSheet({
+    itemList: ['更新微信收款码', '更新支付宝收款码', '清空微信收款码', '清空支付宝收款码'],
+    success: async (r) => {
+      if (r.tapIndex === 0 || r.tapIndex === 1) {
+        const kind = r.tapIndex === 0 ? 'wechat_qr_url' : 'alipay_qr_url'
+        uni.chooseImage({
+          count: 1,
+          sizeType: ['compressed'],
+          sourceType: ['album', 'camera'],
+          success: async (ir) => {
+            if (!ir.tempFilePaths?.length) return
+            uni.showLoading({ title: '上传中…' })
+            try {
+              const url = await uploadQrImage(ir.tempFilePaths[0])
+              await http.request({
+                url: '/api/mall/salesman/profile/payment-qr',
+                method: 'PUT',
+                data: { [kind]: url }
+              })
+              uni.hideLoading()
+              uni.showToast({ title: '已更新', icon: 'success' })
+              loadProfile()
+            } catch (e) {
+              uni.hideLoading()
+              uni.showToast({ title: e?.message || '上传失败', icon: 'none' })
+            }
+          }
+        })
+      } else if (r.tapIndex === 2 || r.tapIndex === 3) {
+        const kind = r.tapIndex === 2 ? 'wechat_qr_url' : 'alipay_qr_url'
+        await http.request({
+          url: '/api/mall/salesman/profile/payment-qr',
+          method: 'PUT',
+          data: { [kind]: '' }
+        })
+        uni.showToast({ title: '已清空', icon: 'success' })
+        loadProfile()
+      }
+    }
+  })
 }
 
 const onLogout = () => {

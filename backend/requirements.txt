@@ -40,3 +40,6 @@ openpyxl>=3.1.0
 
 # 定时任务（mall housekeeping：超时未接单扫描 / 用户归档 / 订单折损 / 日志清理）
 apscheduler>=3.10.0
+
+# 邀请码二维码生成（SVG 输出，无 Pillow 依赖）
+qrcode>=7.4.0

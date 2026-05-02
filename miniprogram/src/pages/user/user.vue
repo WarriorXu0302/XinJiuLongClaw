@@ -305,11 +305,17 @@ const toLogin = () => {
 
 /**
  * 退出登录
+ *
+ * dontTrunLogin=true 让 http.js 在 401（token 已过期）时不弹"重新登录"模态
+ * hasCatch=true 吃掉 4xx toast —— 退出本来就期望 token 无效，不应该报错
+ * 跳转只走 .finally 里这一次 switchTab，避免和 http.js 的跳转互相 timeout
  */
 const logout = () => {
   http.request({
     url: '/api/mall/auth/logout',
-    method: 'POST'
+    method: 'POST',
+    dontTrunLogin: true,
+    hasCatch: true
   })
     .catch(() => {})
     .finally(() => {
@@ -319,16 +325,15 @@ const logout = () => {
       uni.removeStorageSync('RefreshToken')
       uni.removeStorageSync('hadLogin')
       uni.removeStorageSync('userType')
+      uni.removeStorageSync('userId')
       uni.showToast({
-        title: '退出成功',
+        title: '已退出',
         icon: 'none'
       })
       orderAmount.value = ''
       setTimeout(() => {
-        uni.switchTab({
-          url: '/pages/index/index'
-        })
-      }, 1000)
+        uni.switchTab({ url: '/pages/index/index' })
+      }, 600)
     })
 }
 </script>

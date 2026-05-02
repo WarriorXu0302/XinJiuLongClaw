@@ -107,6 +107,7 @@ async def cart_info(
     records = []
     total_price = Decimal("0")
     for cart, sku, prod in rows:
+        is_available = sku.status == "active" and prod.status == "on_sale"
         records.append(MallCartItemVO.model_validate({
             "id": cart.id,
             "product_id": prod.id,
@@ -117,8 +118,10 @@ async def cart_info(
             "price": sku.price,
             "quantity": cart.quantity,
             "selected": cart.selected,
+            "is_available": is_available,
         }))
-        if cart.selected:
+        # 已下架商品不计入合计（不能结算）
+        if cart.selected and is_available:
             total_price += (sku.price * cart.quantity)
 
     return MallCartInfoVO(

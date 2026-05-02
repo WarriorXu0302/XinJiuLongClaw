@@ -73,6 +73,8 @@
 - `ship_order` 补通知消费者"订单已出库"（原只记审计不推通知，用户要自己查状态）
 - `create_salesman` (admin) 移除冗余 `db.rollback()`（和 C 端 register 同样的事务 bug）
 - `confirm_receipt` 放宽状态：`delivered / pending_payment_confirmation / completed / partial_closed` 都允许点确认收货（原仅 delivered，客户晚点点会 400）
+- ERP 前端 `OrderList` + `SkipAlertList` 支持 `?status=xxx` URL 参数（从 Dashboard 点击跳转时自动选中对应 Tab）
+- 购物车接口返回 `is_available` 标记下架商品；前端 basket 展示"已下架"红色标签 + 禁用勾选 + 结算自动跳过 + 合计不计入下架商品
 - `cancel_order` 退库存按原出库流水的 inventory 定位目标仓，不再依赖 `get_default_warehouse()`。**修复**：默认仓换过后，取消订单会把货退到错的仓
 - `release_order` 仅允许在 `assigned` 状态释放；`shipped` 后条码已 OUTBOUND 绑定原业务员，不再允许自行释放（出库后须走管理员改派）
 - `admin_reassign` 在 shipped/delivered/pending_payment_confirmation 状态改派时，同步把本订单的 OUTBOUND 条码 `outbound_by_user_id` 过户到新业务员，避免归属数据错乱

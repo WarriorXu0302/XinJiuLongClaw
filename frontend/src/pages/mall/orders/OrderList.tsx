@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { Button, DatePicker, Input, message, Modal, Select, Space, Table, Tabs, Tag, Typography } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import api from '../../../api/client';
@@ -55,7 +56,10 @@ interface MallOrderRow {
 
 export default function MallOrderList() {
   const queryClient = useQueryClient();
-  const [statusTab, setStatusTab] = useState<string>('all');
+  // 支持从 Dashboard 跳转带 ?status=pending_assignment 自动选中对应 Tab
+  const [searchParams] = useSearchParams();
+  const initialStatus = searchParams.get('status') || 'all';
+  const [statusTab, setStatusTab] = useState<string>(initialStatus);
   const [orderNo, setOrderNo] = useState('');
   const [customerKw, setCustomerKw] = useState('');
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);

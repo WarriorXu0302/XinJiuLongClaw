@@ -11,6 +11,7 @@ import {
 } from 'antd';
 import { CheckOutlined, StopOutlined, EyeOutlined, WarningOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import api from '../../../api/client';
@@ -55,7 +56,10 @@ interface Alert {
 
 export default function SkipAlertList() {
   const queryClient = useQueryClient();
-  const [statusTab, setStatusTab] = useState<string>('open');
+  // 支持从 Dashboard 跳转带 ?status=open/resolved/dismissed 自动选中 Tab
+  const [searchParams] = useSearchParams();
+  const initialStatus = searchParams.get('status') || 'open';
+  const [statusTab, setStatusTab] = useState<string>(initialStatus);
   const [hasAppeal, setHasAppeal] = useState<boolean | undefined>();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);

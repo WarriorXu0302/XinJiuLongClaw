@@ -31,6 +31,7 @@
                     :data-index="index"
                     :value="prod.prodId"
                     :checked="prod.checked"
+                    :disabled="prod.isAvailable === false"
                     color="#C9A961"
                     @tap="onSelectedItem"
                   />
@@ -43,6 +44,12 @@
                 <view class="opt">
                   <view class="prod-name">
                     {{ prod.prodName }}
+                    <text
+                      v-if="prod.isAvailable === false"
+                      style="margin-left:8rpx;padding:2rpx 8rpx;background:#f5222d;color:#fff;border-radius:4rpx;font-size:20rpx"
+                    >
+                      已下架
+                    </text>
                   </view>
                   <text :class="'prod-info-text ' + (prod.skuName?'':'empty-n')">
                     {{ prod.skuName }}
@@ -179,7 +186,10 @@ const loadBasketData = () => {
     .then(({ data }) => {
       const records = data?.records || []
       if (records.length > 0) {
-        records.forEach(item => { item.checked = false; item.prodCount = item.count })
+        records.forEach(item => {
+          item.checked = false
+          item.prodCount = item.count
+        })
         shopCartItemDiscounts.value = [
           { chooseDiscountItemDto: null, shopCartItems: records }
         ]
@@ -199,9 +209,15 @@ const toFirmOrder = () => {
   const shopCartItemDiscountsParam = shopCartItemDiscounts.value
   const basketIds = []
   const orderItems = []
+  let hasUnavailable = false
   shopCartItemDiscountsParam.forEach(shopCartItemDiscount => {
     shopCartItemDiscount.shopCartItems.forEach(shopCartItem => {
       if (shopCartItem.checked) {
+        // 已下架商品不结算（后端 create_order 也会拒绝，但前端先挡住更友好）
+        if (shopCartItem.isAvailable === false) {
+          hasUnavailable = true
+          return
+        }
         basketIds.push(shopCartItem.basketId)
         orderItems.push({
           skuId: shopCartItem.skuId,
@@ -211,6 +227,9 @@ const toFirmOrder = () => {
     })
   })
 
+  if (hasUnavailable) {
+    uni.showToast({ title: '已下架商品不能结算，已自动跳过', icon: 'none' })
+  }
   if (!basketIds.length) {
     uni.showToast({
       title: '请选择商品',

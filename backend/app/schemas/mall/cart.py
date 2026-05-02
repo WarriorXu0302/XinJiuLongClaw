@@ -28,6 +28,8 @@ class MallCartItemVO(BaseModel):
     price: Optional[Decimal] = None
     quantity: int = Field(serialization_alias="count")
     selected: bool = True
+    # 商品可用性（sku 和 product 都 active/on_sale 才 true）
+    is_available: bool = Field(default=True, serialization_alias="isAvailable")
 
     @field_serializer("price", when_used="always")
     def _mask_price(self, v):

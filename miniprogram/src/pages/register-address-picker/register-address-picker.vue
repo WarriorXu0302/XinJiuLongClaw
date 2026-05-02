@@ -161,17 +161,12 @@ const onPickerChange = (e) => {
 const onConfirm = () => {
   if (!canConfirm.value) return
   const full = `${region.value.province}${region.value.city}${region.value.area} ${detail.value.trim()}`
-  const pages = getCurrentPages()
-  const prev = pages[pages.length - 2]
-  if (prev) {
-    // 回写到 register 页；register 页在 onShow 里读取并填表
-    prev.$vm = prev.$vm || {}
-    prev.$vm.pickedAddress = full
-    prev.$vm.pickedAddressParts = {
-      ...region.value,
-      detail: detail.value.trim()
-    }
-  }
+  // 用 storage 中转最稳妥 —— getCurrentPages()[x].$vm 在 h5/vue3 setup 下不稳
+  uni.setStorageSync('pickedAddress', full)
+  uni.setStorageSync('pickedAddressParts', JSON.stringify({
+    ...region.value,
+    detail: detail.value.trim()
+  }))
   uni.navigateBack()
 }
 

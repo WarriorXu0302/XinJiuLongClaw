@@ -217,14 +217,13 @@ const onInviteInput = (e) => {
   form.value.invite_code = v
 }
 
-// 从地址选择页回来 —— 复用 onShow 读 $vm.pickedAddress
+// 从地址选择页回来 —— 从 storage 取，取完立即删
 onShow(() => {
-  // 从地址 picker 回来会通过 getCurrentPages 在本页实例上塞 pickedAddress
-  const current = getCurrentPages()?.[getCurrentPages().length - 1]
-  const picked = current?.$vm?.pickedAddress
+  const picked = uni.getStorageSync('pickedAddress')
   if (picked) {
     form.value.delivery_address = picked
-    delete current.$vm.pickedAddress
+    uni.removeStorageSync('pickedAddress')
+    uni.removeStorageSync('pickedAddressParts')
   }
 })
 

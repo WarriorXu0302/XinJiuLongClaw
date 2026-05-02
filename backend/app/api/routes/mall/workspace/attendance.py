@@ -60,6 +60,11 @@ async def checkin(
     current: CurrentMallUser,
     db: AsyncSession = Depends(get_mall_db),
 ):
+    """业务员打卡。复用 ERP `_get_rule_for_employee` + `_haversine` 做地理围栏和迟到判定，
+    保证 mall/ERP 两端打卡规则完全一致（同一 employee 走哪端都同样判定）。
+    """
+    from app.api.routes.attendance import _get_rule_for_employee, _haversine
+
     user = await _require_linked_salesman(current, db)
     if body.checkin_type not in ("work_in", "work_out"):
         raise HTTPException(status_code=400, detail="checkin_type 非法")
@@ -75,15 +80,29 @@ async def checkin(
     if exists:
         raise HTTPException(status_code=409, detail="今日已打过卡")
 
+    rule = await _get_rule_for_employee(db, user.linked_employee_id)
+
+    # 地理围栏：若规则配置了办公点且打卡传了 GPS，强制校验
+    if rule.office_latitude and rule.office_longitude:
+        if body.latitude is None or body.longitude is None:
+            raise HTTPException(status_code=400, detail="请允许定位权限后再打卡")
+        dist = _haversine(body.latitude, body.longitude, rule.office_latitude, rule.office_longitude)
+        if dist > rule.office_radius_m:
+            raise HTTPException(
+                status_code=400,
+                detail=f"距离办公地点 {dist:.0f} 米，超出 {rule.office_radius_m} 米围栏",
+            )
+
     now = datetime.now(timezone.utc)
     status = "normal"
     late_minutes = 0
-    if body.checkin_type == "work_in":
-        bj = now.astimezone(ZoneInfo("Asia/Shanghai"))
-        threshold = bj.replace(hour=9, minute=10, second=0, microsecond=0)
-        if bj > threshold:
-            status = "late"
-            late_minutes = int((bj - threshold).total_seconds() / 60)
+    if body.checkin_type == "work_in" and rule.work_start_time:
+        work_start = datetime.combine(today, rule.work_start_time).replace(tzinfo=timezone.utc)
+        delta = (now - work_start).total_seconds() / 60
+        tolerance = rule.late_tolerance_minutes or 0
+        if delta > tolerance:
+            late_minutes = int(delta - tolerance)
+            status = "late_over30" if late_minutes > 30 else "late"
 
     record = CheckinRecord(
         id=str(uuid.uuid4()),
@@ -234,10 +253,10 @@ async def leave_visit(
     duration = int((now - visit.enter_time).total_seconds() / 60)
     visit.duration_minutes = duration
 
-    min_visit = 30
-    rule = (await db.execute(select(AttendanceRule).limit(1))).scalar_one_or_none()
-    if rule and getattr(rule, "min_visit_minutes", None):
-        min_visit = rule.min_visit_minutes
+    # 用 ERP 的规则查找逻辑：优先个人规则，否则全局；与 ERP 端拜访判定一致
+    from app.api.routes.attendance import _get_rule_for_employee
+    rule = await _get_rule_for_employee(db, user.linked_employee_id)
+    min_visit = rule.min_visit_minutes or 30
     visit.is_valid = duration >= min_visit
 
     await db.flush()

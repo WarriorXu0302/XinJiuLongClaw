@@ -43,6 +43,10 @@ async def change_cart_item(
     ).scalar_one_or_none()
     if sku is None or sku.status != "active":
         raise HTTPException(status_code=404, detail="SKU 不存在或已下架")
+    # 还需校验 product 上架状态：避免整品下架但 SKU 状态遗漏时漏网
+    prod = await db.get(MallProduct, sku.product_id)
+    if prod is None or prod.status != "on_sale":
+        raise HTTPException(status_code=404, detail="商品已下架或不存在")
 
     item = (
         await db.execute(

@@ -160,10 +160,14 @@ async def job_notify_archive_pre_notice() -> dict:
     """距归档 7 天给客户发预告通知。每天跑一次；避免重复推送。
 
     规则：距到期日在 [6.5, 7.5] 天窗口内发一次。
+    幂等：查过去 8 天内该用户是否已收到过 title="账号即将停用提醒" 的通知，有则跳过
+          （避免定时任务重试或手动触发时重复推送）
     """
     from app.services.notification_service import notify_mall_user
+    from app.models.notification_log import NotificationLog
 
     now = datetime.now(timezone.utc)
+    dedupe_cutoff = now - timedelta(days=8)
     notified = 0
     async with admin_session_factory() as s:
         candidates = (await s.execute(
@@ -179,19 +183,31 @@ async def job_notify_archive_pre_notice() -> dict:
             if reference is None:
                 continue
             archive_at = reference + timedelta(days=days_threshold)
-            # 发通知的 window：archive_at 在 6.5-7.5 天后
             hours_until = (archive_at - now).total_seconds() / 3600
-            if 6 * 24 + 12 <= hours_until <= 7 * 24 + 12:
-                await notify_mall_user(
-                    s, mall_user_id=user.id,
-                    title="账号即将停用提醒",
-                    content=(
-                        f"您的账号因长期未下单，将于 7 天后自动停用。"
-                        "期间下单即可保留账号；需恢复请联系业务员。"
-                    ),
-                    entity_type="MallUser",
-                )
-                notified += 1
+            if not (6 * 24 + 12 <= hours_until <= 7 * 24 + 12):
+                continue
+
+            # 幂等查重：8 天内已有同标题通知就跳过
+            existing = (await s.execute(
+                select(NotificationLog.id)
+                .where(NotificationLog.mall_user_id == user.id)
+                .where(NotificationLog.title == "账号即将停用提醒")
+                .where(NotificationLog.created_at >= dedupe_cutoff)
+                .limit(1)
+            )).first()
+            if existing:
+                continue
+
+            await notify_mall_user(
+                s, mall_user_id=user.id,
+                title="账号即将停用提醒",
+                content=(
+                    f"您的账号因长期未下单，将于 7 天后自动停用。"
+                    "期间下单即可保留账号；需恢复请联系业务员。"
+                ),
+                entity_type="MallUser",
+            )
+            notified += 1
         await s.commit()
     logger.info("[hk] pre-archive notified=%d", notified)
     return {"notified": notified}
@@ -230,7 +246,9 @@ async def job_detect_partial_close() -> dict:
             order.payment_status = (
                 "partially_paid" if (order.received_amount or 0) > 0 else "unpaid"
             )
-            order.completed_at = datetime.now(timezone.utc)
+            # 不写 order.completed_at —— partial_close 不是真正全款完成。
+            # 后续若 admin 补款全款恢复，manual_record 会把 completed_at 设为那时；
+            # 若永远没补齐，completed_at 保持 NULL 也符合业务语义（partial_closed_at 查 audit_logs）
             order.profit_ledger_posted = True  # 折损关单也入报表
             closed += 1
 
@@ -263,13 +281,33 @@ async def job_detect_partial_close() -> dict:
                 if prod is not None:
                     prod.total_sales = (prod.total_sales or 0) + qty
 
-            # 有已收才生成提成，且只生成一次
-            if (order.received_amount or 0) > 0 and not order.commission_posted:
+            # 有已收才生成提成；post_commission_for_order 自身按差额幂等，无需额外 guard
+            if (order.received_amount or 0) > 0:
                 from app.services.mall.commission_service import (
                     post_commission_for_order,
                 )
-                await post_commission_for_order(s, order)
-                with_commission += 1
+                rows = await post_commission_for_order(s, order)
+                if rows:
+                    with_commission += 1
+
+            # 推通知给 assigned + referrer（如果不重复）；坏账关单对业务员有经济影响
+            from app.services.notification_service import notify_mall_user
+            bad_debt = order.pay_amount - (order.received_amount or Decimal("0"))
+            notice_recipients = {x for x in (
+                order.assigned_salesman_id,
+                order.referrer_salesman_id,
+            ) if x}
+            for rid in notice_recipients:
+                await notify_mall_user(
+                    s, mall_user_id=rid,
+                    title="订单坏账关单",
+                    content=(
+                        f"订单 {order.order_no} 送达 {settings.MALL_PARTIAL_CLOSE_DAYS} 天"
+                        f"未全款，系统已关单折损，坏账 ¥{bad_debt}。"
+                        "如客户补款请联系管理员走补录。"
+                    ),
+                    entity_type="MallOrder", entity_id=order.id,
+                )
 
         await s.commit()
 

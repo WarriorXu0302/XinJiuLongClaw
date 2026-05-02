@@ -260,8 +260,8 @@ async def manual_record_payment(
         order.status = "completed"
         order.payment_status = "fully_paid"
         order.paid_at = now
-        if not order.completed_at:
-            order.completed_at = now
+        # 始终以全款到账时刻为 completed_at（不再用 "if not"，避免 partial_closed 老时间被保留）
+        order.completed_at = now
         await db.flush()
         await post_commission_for_order(db, order)
         # 通知 consumer + salesman（补录完成订单）

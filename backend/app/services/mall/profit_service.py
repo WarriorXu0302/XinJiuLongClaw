@@ -63,6 +63,11 @@ async def aggregate_mall_profit(
     ]
 
     # ── 取相关订单（含 received_amount + pay_amount + status）─────
+    # 时间窗口口径：
+    #   - completed 订单：按 completed_at（全款到账时刻）
+    #   - partial_closed 订单：completed_at 故意留空（见 housekeeping.job_detect_partial_close），
+    #     改按 delivered_at 落窗口 —— 实际交付时刻是最接近"该笔业务归属月份"的锚点
+    from sqlalchemy import and_, or_
     order_stmt = (
         select(
             MallOrder.id.label("oid"),
@@ -73,10 +78,16 @@ async def aggregate_mall_profit(
         )
         .where(MallOrder.status.in_(valid_statuses))
     )
-    if date_from:
-        order_stmt = order_stmt.where(MallOrder.completed_at >= date_from)
-    if date_to:
-        order_stmt = order_stmt.where(MallOrder.completed_at < date_to)
+    if date_from or date_to:
+        completed_conds = [MallOrder.status == MallOrderStatus.COMPLETED.value]
+        partial_conds = [MallOrder.status == MallOrderStatus.PARTIAL_CLOSED.value]
+        if date_from:
+            completed_conds.append(MallOrder.completed_at >= date_from)
+            partial_conds.append(MallOrder.delivered_at >= date_from)
+        if date_to:
+            completed_conds.append(MallOrder.completed_at < date_to)
+            partial_conds.append(MallOrder.delivered_at < date_to)
+        order_stmt = order_stmt.where(or_(and_(*completed_conds), and_(*partial_conds)))
     order_rows = (await db.execute(order_stmt)).all()
     if not order_rows:
         return {

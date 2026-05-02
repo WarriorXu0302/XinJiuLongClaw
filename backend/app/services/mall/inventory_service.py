@@ -301,7 +301,13 @@ async def adjust_barcode_damaged(
     barcode: str,
     reason: Optional[str] = None,
 ) -> MallInventoryBarcode:
-    """单瓶盘亏 / 损耗：条码 in_stock → damaged，库存 -1，不改 avg_cost。"""
+    """单瓶盘亏 / 损耗：条码 in_stock → damaged，库存 -1，不改 avg_cost。
+
+    双重校验：
+      (1) 条码必须 in_stock
+      (2) 对应 inventory 行必须存在且 quantity >= 1；任何 mismatch 都抛错不吞
+          （否则流水 inventory_id=NULL 会变成找不回的孤儿记录）
+    """
     b = (await db.execute(
         select(MallInventoryBarcode)
         .where(MallInventoryBarcode.barcode == barcode)
@@ -321,11 +327,21 @@ async def adjust_barcode_damaged(
         .where(MallInventory.sku_id == b.sku_id)
         .with_for_update()
     )).scalar_one_or_none()
-    if inv is not None:
-        inv.quantity = max(inv.quantity - 1, 0)
+    if inv is None:
+        # 条码 in_stock 但对应 inventory 行不存在 → 数据已经出问题，必须抛错
+        raise HTTPException(
+            status_code=500,
+            detail=f"数据异常：条码 {barcode} 在仓 {b.warehouse_id} 无 inventory 行",
+        )
+    if inv.quantity < 1:
+        raise HTTPException(
+            status_code=409,
+            detail=f"库存数 {inv.quantity} < 1，无法标记损耗（先盘点核对）",
+        )
+    inv.quantity -= 1
 
     flow = MallInventoryFlow(
-        inventory_id=inv.id if inv else None,
+        inventory_id=inv.id,
         flow_type=MallInventoryFlowType.LOSS.value,
         quantity=-1,
         cost_price=b.cost_price,

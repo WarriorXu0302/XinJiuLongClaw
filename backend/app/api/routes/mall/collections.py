@@ -44,6 +44,9 @@ async def add_collection(
     prod = await db.get(MallProduct, body.product_id)
     if prod is None:
         raise HTTPException(status_code=404, detail="商品不存在")
+    if prod.status != "on_sale":
+        # 草稿/下架商品不允许收藏（避免 C 端收藏列表充斥永远看不到的商品）
+        raise HTTPException(status_code=400, detail="该商品当前未上架")
 
     existing = (await db.execute(
         select(MallCollection)
@@ -57,15 +60,10 @@ async def add_collection(
     db.add(c)
     try:
         await db.flush()
-    except IntegrityError:
-        # 并发双写兜底
-        await db.rollback()
-        existing = (await db.execute(
-            select(MallCollection)
-            .where(MallCollection.user_id == user.id)
-            .where(MallCollection.product_id == body.product_id)
-        )).scalar_one_or_none()
-        return {"id": existing.id if existing else None, "collected": True}
+    except IntegrityError as e:
+        # 并发双写撞 UniqueConstraint(user_id, product_id)：对用户视角是"已收藏"，
+        # 抛 409 让客户端识别幂等语义（不手动 rollback，避免释放其他锁）
+        raise HTTPException(status_code=409, detail="商品已在您的收藏中") from e
     return {"id": c.id, "collected": True}
 
 

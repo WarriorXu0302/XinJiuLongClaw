@@ -172,7 +172,9 @@ async def register_mall_user(
     try:
         await db.flush()  # 拿 id；并发唯一撞库在这里抛
     except IntegrityError as e:
-        await db.rollback()
+        # 不手动 rollback —— get_mall_db 依赖在请求结束时会统一 rollback；
+        # 手动 rollback 会释放 consume_invite_code 的 FOR UPDATE 锁，
+        # 让并发注册拿到同一张邀请码
         msg = str(e.orig) if e.orig else str(e)
         if "uq_mall_users_username" in msg or "mall_users_username" in msg:
             raise HTTPException(status_code=409, detail="账号已存在") from e

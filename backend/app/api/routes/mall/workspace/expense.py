@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +28,17 @@ async def _require_linked(current, db):
         raise HTTPException(status_code=403, detail="仅业务员可访问")
     if not user.linked_employee_id:
         raise HTTPException(status_code=400, detail="业务员未绑定员工记录")
+    # 校验 employee 在职（避免离职员工提报销）
+    from app.models.user import Employee
+    emp = await db.get(Employee, user.linked_employee_id)
+    if emp is None:
+        raise HTTPException(status_code=400, detail="绑定的员工记录不存在")
+    emp_status = getattr(emp, "status", None)
+    if emp_status and emp_status != "active":
+        raise HTTPException(
+            status_code=403,
+            detail=f"员工状态 {emp_status}，无法提交报销",
+        )
     return user
 
 
@@ -79,11 +90,17 @@ class _CreateBody(BaseModel):
 async def create_claim(
     body: _CreateBody,
     current: CurrentMallUser,
+    request: Request,
     db: AsyncSession = Depends(get_mall_db),
 ):
     user = await _require_linked(current, db)
     if body.amount <= 0:
         raise HTTPException(status_code=400, detail="金额必须大于 0")
+    if body.claim_type not in ("daily", "f_class"):
+        raise HTTPException(status_code=400, detail="claim_type 必须是 daily 或 f_class")
+    # f_class 走政策兑付，必须选品牌；daily 可以不选
+    if body.claim_type == "f_class" and not body.brand_id:
+        raise HTTPException(status_code=400, detail="F 类报销必须选择对应品牌")
     rec = ExpenseClaim(
         id=str(uuid.uuid4()),
         claim_no=_gen_no(),
@@ -97,6 +114,23 @@ async def create_claim(
         applicant_id=user.linked_employee_id,
     )
     db.add(rec)
+
+    # 审计：钱的事，提交/审批/支付三个关键节点都要留痕
+    from app.services.audit_service import log_audit
+    await log_audit(
+        db, action="mall_expense_claim.submit",
+        entity_type="ExpenseClaim", entity_id=rec.id,
+        mall_user_id=user.id, actor_type="mall_user",
+        request=request,
+        changes={
+            "claim_no": rec.claim_no,
+            "claim_type": body.claim_type,
+            "brand_id": body.brand_id,
+            "amount": str(body.amount),
+            "title": body.title,
+        },
+    )
+
     await db.flush()
     return {
         "id": rec.id,

@@ -8,7 +8,7 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import desc, func as sa_func, select
+from sqlalchemy import and_, desc, func as sa_func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -178,11 +178,16 @@ async def dashboard_summary(
             sa_func.coalesce(sa_func.sum(MallOrder.received_amount), 0).label("gmv"),
         )
         .where(MallOrder.assigned_salesman_id.isnot(None))
-        .where(MallOrder.status.in_([
-            MallOrderStatus.COMPLETED.value,
-            MallOrderStatus.PARTIAL_CLOSED.value,
-        ]))
-        .where(MallOrder.completed_at >= month_start)
+        .where(or_(
+            and_(
+                MallOrder.status == MallOrderStatus.COMPLETED.value,
+                MallOrder.completed_at >= month_start,
+            ),
+            and_(
+                MallOrder.status == MallOrderStatus.PARTIAL_CLOSED.value,
+                MallOrder.delivered_at >= month_start,
+            ),
+        ))
         .group_by(MallOrder.assigned_salesman_id)
         .order_by(desc("gmv"))
         .limit(5)
@@ -212,11 +217,16 @@ async def dashboard_summary(
             sa_func.coalesce(sa_func.sum(MallOrderItem.subtotal), 0).label("amount"),
         )
         .join(MallOrder, MallOrderItem.order_id == MallOrder.id)
-        .where(MallOrder.status.in_([
-            MallOrderStatus.COMPLETED.value,
-            MallOrderStatus.PARTIAL_CLOSED.value,
-        ]))
-        .where(MallOrder.completed_at >= month_start)
+        .where(or_(
+            and_(
+                MallOrder.status == MallOrderStatus.COMPLETED.value,
+                MallOrder.completed_at >= month_start,
+            ),
+            and_(
+                MallOrder.status == MallOrderStatus.PARTIAL_CLOSED.value,
+                MallOrder.delivered_at >= month_start,
+            ),
+        ))
         .group_by(MallOrderItem.product_id)
         .order_by(desc("qty"))
         .limit(10)

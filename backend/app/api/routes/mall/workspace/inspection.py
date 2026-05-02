@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +28,13 @@ async def _require_linked(current, db):
         raise HTTPException(status_code=403, detail="仅业务员可访问")
     if not user.linked_employee_id:
         raise HTTPException(status_code=400, detail="业务员未绑定员工记录")
+    from app.models.user import Employee
+    emp = await db.get(Employee, user.linked_employee_id)
+    if emp is None:
+        raise HTTPException(status_code=400, detail="绑定的员工记录不存在")
+    emp_status = getattr(emp, "status", None)
+    if emp_status and emp_status != "active":
+        raise HTTPException(status_code=403, detail=f"员工状态 {emp_status}，无法提交稽查")
     return user
 
 
@@ -87,9 +94,15 @@ class _CreateBody(BaseModel):
 async def create_case(
     body: _CreateBody,
     current: CurrentMallUser,
+    request: Request,
     db: AsyncSession = Depends(get_mall_db),
 ):
     user = await _require_linked(current, db)
+    # 必须有 barcode 或 qrcode 其一，否则稽查缺凭据
+    if not body.barcode and not body.qrcode:
+        raise HTTPException(status_code=400, detail="请至少提供 barcode 或 qrcode 其一")
+    if body.quantity <= 0:
+        raise HTTPException(status_code=400, detail="数量必须大于 0")
     rec = InspectionCase(
         id=str(uuid.uuid4()),
         case_no=_gen_no(),
@@ -108,6 +121,26 @@ async def create_case(
         status="pending",
     )
     db.add(rec)
+
+    # 审计：稽查案件涉及扣款，mall 侧提交渠道必留痕（A1 亏损 = 回收价 - 到手价 × 瓶数）
+    from app.services.audit_service import log_audit
+    await log_audit(
+        db, action="mall_inspection_case.submit",
+        entity_type="InspectionCase", entity_id=rec.id,
+        mall_user_id=user.id, actor_type="mall_user",
+        request=request,
+        changes={
+            "case_no": rec.case_no,
+            "case_type": body.case_type,
+            "barcode": body.barcode,
+            "qrcode": body.qrcode,
+            "brand_id": body.brand_id,
+            "product_id": body.product_id,
+            "quantity": body.quantity,
+            "original_sale_price": str(body.original_sale_price) if body.original_sale_price else None,
+        },
+    )
+
     await db.flush()
     return {
         "id": rec.id,

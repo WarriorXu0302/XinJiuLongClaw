@@ -32,10 +32,13 @@ async def _calc_mall_actual(
     brand_id: Optional[str],
 ) -> tuple[Decimal, Decimal]:
     """按 mall_orders 聚合某业务员在指定年月 + 品牌的实际销售/回款。"""
-    # 基础条件
+    # 基础条件：排除 cancelled / refunded（二者都不代表有效销售）
     conds = [
         MallOrder.assigned_salesman_id == salesman_id,
-        MallOrder.status != MallOrderStatus.CANCELLED.value,
+        MallOrder.status.notin_([
+            MallOrderStatus.CANCELLED.value,
+            MallOrderStatus.REFUNDED.value,
+        ]),
         extract("year", MallOrder.created_at) == year,
     ]
     if month:

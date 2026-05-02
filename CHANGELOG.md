@@ -18,6 +18,32 @@
 ### Fixed
 
 - 业务员"我的订单"在途 Tab 现在同时显示 `assigned` + `shipped` 两个状态（原仅 assigned → 导致已出库未送达的单消失）。后端 `/api/mall/salesman/orders` 的 `status` 参数支持逗号分隔多值
+- `order_stats` 过滤 `consumer_deleted_at IS NULL`（软删订单不进角标计数）+ partial_closed 归入 payed 分组（原先在任何计数里都看不到）
+- `register_mall_user` 移除 IntegrityError 后的冗余 `db.rollback()` —— 原行为会提前释放 FOR UPDATE 锁，让并发注册抢同一张邀请码
+- `auth/register` + `auth/wechat_register` 补 `mall_user.register` 审计（含 IP、推荐人、注册方式）
+- `adjust_barcode_damaged` 严格校验 inventory 行存在且 quantity ≥ 1，原先 `max(qty-1, 0)` + `inv=None` 时流水 `inventory_id=NULL` 静默埋孤儿记录
+- 加购（cart）+ 下单（order_service.preview/create）三处都加 `MallProduct.status='on_sale'` 校验，避免整品下架但 SKU 未同步下架时漏网
+- workspace expense/leave/inspection 都补 `Employee.status='active'` 校验（离职业务员不能提报销/请假/稽查）
+- expense 加 `claim_type` 枚举校验 + `f_class` 必须带 brand_id + 提交审计
+- `job_detect_partial_close` 不再写 `order.completed_at`（原写法导致后续 manual_record 真正全款时间被 `if not` guard 保留成折损时刻）；`manual_record` 全款恢复时**始终**覆盖 `completed_at`
+- `job_detect_partial_close` 新增给 assigned + referrer 推"订单坏账关单"通知
+- `job_notify_archive_pre_notice` 加幂等去重（过去 8 天已发过同标题通知就跳过），防定时任务重跑/手动触发时重复推送
+- `create_order` 校验 `cost_price_snapshot` 非空，两头都没成本时抛 409 拒绝下单（避免利润台账按 0 成本算虚高）
+- `add_collection` 校验 `MallProduct.status='on_sale'`（草稿/下架商品不允许收藏）+ IntegrityError 不手动 rollback 改抛 409
+- `admin_cancel` 多处修复：(1) 退库存按原出库 flow 定位目标仓（原按默认仓错误）(2) `prev_status` 审计被覆盖后的值（bug，永远记 cancelled）(3) `restocked_quantity` 与 `barcodes_reverted` 拆开 (4) FOR UPDATE 锁订单防与业务员 ship/deliver 并发
+- miniprogram `login.js` refresh token 竞态：并发请求碰到正在刷新时直接 return 让后续用旧 token → 改用模块级 Promise 合并所有并发的 refresh，等同一个结果
+- `enable_salesman` 恢复 `is_accepting_orders=True`（原 disable 时关了但 enable 不开 → 启用后是僵尸账号）
+- `claim_order` 校验 `is_accepting_orders` + `linked_employee_id`：关了开关不能自抢；没绑员工不能抢（与 admin_reassign 一致）
+- `appeal_skip_alert` reason 限长 1-500 + `resolve_skip_alert` 通知业务员裁决结果（resolved / dismissed 都推）
+- kpi `_calc_mall_actual` 排除 `refunded`（原仅排 cancelled → 退款订单仍被算销售）
+- salesman `stats` + admin `dashboard` 业务员/商品排行：`partial_closed` 订单按 `delivered_at` 落窗口（原用 completed_at，但前轮修完后该字段对 partial_closed 留空 → 新数据从统计里消失）
+- `profit_service` 同上：利润台账时间窗口对 partial_closed 改走 `delivered_at`，避免老板看月度利润少一块坏账
+- `admin_reassign` 补通知消费者"配送员已变更"（之前只通知新旧业务员；消费者可能已加原业务员微信，突然换人不告知）
+- `resolve_skip_alert` 推送业务员裁决结果通知 + `appeal_skip_alert` reason 限长 1-500
+- `create_leave`（mall workspace）补提交审计 + leave_type 枚举校验
+- `create_case`（mall inspection）补提交审计 + barcode|qrcode 至少一项 + quantity > 0 校验
+- mall 打卡复用 ERP 的 `_get_rule_for_employee` + `_haversine`：统一**地理围栏 + 迟到判定规则**（原 mall 硬编码 9:10、无围栏，导致业务员走 mall 绕过工资制度）
+- mall 拜访离店判定统一用 `_get_rule_for_employee`（原 `select(AttendanceRule).limit(1)` 随便拿一条，个人规则失效）
 - `cancel_order` 退库存按原出库流水的 inventory 定位目标仓，不再依赖 `get_default_warehouse()`。**修复**：默认仓换过后，取消订单会把货退到错的仓
 - `release_order` 仅允许在 `assigned` 状态释放；`shipped` 后条码已 OUTBOUND 绑定原业务员，不再允许自行释放（出库后须走管理员改派）
 - `admin_reassign` 在 shipped/delivered/pending_payment_confirmation 状态改派时，同步把本订单的 OUTBOUND 条码 `outbound_by_user_id` 过户到新业务员，避免归属数据错乱

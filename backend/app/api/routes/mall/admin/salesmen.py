@@ -305,7 +305,11 @@ async def enable_salesman(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """启用被禁用的业务员。"""
+    """启用被禁用的业务员。
+
+    同时恢复 is_accepting_orders=True —— disable 时会关闭接单开关，如果 enable
+    不重新打开，业务员账号虽然 active 但抢单池/派单都跳过他，实际等同"僵尸账号"
+    """
     require_role(user, "admin", "boss", "hr")
     sm = await db.get(MallUser, salesman_id)
     if sm is None or sm.user_type != MallUserType.SALESMAN.value:
@@ -314,6 +318,7 @@ async def enable_salesman(
         return _salesman_dict(sm)
 
     sm.status = MallUserStatus.ACTIVE.value
+    sm.is_accepting_orders = True
 
     await log_audit(
         db, action="mall_salesman.enable", entity_type="MallUser",

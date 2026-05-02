@@ -58,20 +58,32 @@ async def stats(
     user = await auth_service.verify_token_and_load_user(db, current)
     start, end = _range_window(range)
 
-    # 已成交订单数 / GMV（按 completed_at 落 window）
+    # 已成交订单数 / GMV：
+    # - completed 订单按 completed_at 落窗口
+    # - partial_closed 订单 completed_at 故意留空（见 job_detect_partial_close 注释），
+    #   改用 delivered_at 落窗口（实际交付完成时刻最贴近"成交月份"）
+    # 两类合并统计，避免 partial_closed 在 stats 里消失
+    from sqlalchemy import or_
     done_stats = (await db.execute(
         select(
             func.count(MallOrder.id).label("cnt"),
             func.coalesce(func.sum(MallOrder.received_amount), 0).label("gmv"),
         )
         .where(MallOrder.assigned_salesman_id == user.id)
-        .where(MallOrder.status.in_([
-            MallOrderStatus.COMPLETED.value,
-            MallOrderStatus.PARTIAL_CLOSED.value,
-        ]))
-        .where(MallOrder.completed_at.is_not(None))
-        .where(MallOrder.completed_at >= start)
-        .where(MallOrder.completed_at <= end)
+        .where(or_(
+            and_(
+                MallOrder.status == MallOrderStatus.COMPLETED.value,
+                MallOrder.completed_at.is_not(None),
+                MallOrder.completed_at >= start,
+                MallOrder.completed_at <= end,
+            ),
+            and_(
+                MallOrder.status == MallOrderStatus.PARTIAL_CLOSED.value,
+                MallOrder.delivered_at.is_not(None),
+                MallOrder.delivered_at >= start,
+                MallOrder.delivered_at <= end,
+            ),
+        ))
     )).one()
 
     month_orders = int(done_stats.cnt or 0)

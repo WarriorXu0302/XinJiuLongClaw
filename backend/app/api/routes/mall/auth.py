@@ -98,6 +98,18 @@ async def register(
         phone=payload.phone,
         nickname=payload.nickname,
     )
+    # 注册审计：账户创建是敏感动作，出合规问题时要能追溯哪一条邀请码 / 哪个业务员 / 哪个 IP
+    await log_audit(
+        db, action="mall_user.register",
+        entity_type="MallUser", entity_id=user.id,
+        mall_user_id=user.id, actor_type="mall_user",
+        request=request,
+        changes={
+            "method": "password",
+            "username": payload.username,
+            "referrer_salesman_id": user.referrer_salesman_id,
+        },
+    )
     await auth_service.record_login_log(
         db,
         user=user,
@@ -162,6 +174,17 @@ async def wechat_register(
         unionid=session.get("unionid"),
         nickname=payload.nickname,
         avatar_url=payload.avatar_url,
+    )
+    await log_audit(
+        db, action="mall_user.register",
+        entity_type="MallUser", entity_id=user.id,
+        mall_user_id=user.id, actor_type="mall_user",
+        request=request,
+        changes={
+            "method": "wechat",
+            "openid_hash": openid[:8] + "***",  # 日志避免全量存 openid
+            "referrer_salesman_id": user.referrer_salesman_id,
+        },
     )
     await auth_service.record_login_log(
         db,

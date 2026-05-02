@@ -9,7 +9,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +28,13 @@ async def _require_linked_salesman(current, db):
         raise HTTPException(status_code=403, detail="仅业务员可访问")
     if not user.linked_employee_id:
         raise HTTPException(status_code=400, detail="业务员未绑定员工记录")
+    from app.models.user import Employee
+    emp = await db.get(Employee, user.linked_employee_id)
+    if emp is None:
+        raise HTTPException(status_code=400, detail="绑定的员工记录不存在")
+    emp_status = getattr(emp, "status", None)
+    if emp_status and emp_status != "active":
+        raise HTTPException(status_code=403, detail=f"员工状态 {emp_status}，无法提交请假")
     return user
 
 
@@ -89,11 +96,14 @@ class _CreateBody(BaseModel):
 async def create_leave(
     body: _CreateBody,
     current: CurrentMallUser,
+    request: Request,
     db: AsyncSession = Depends(get_mall_db),
 ):
     user = await _require_linked_salesman(current, db)
     if body.end_date < body.start_date:
         raise HTTPException(status_code=400, detail="结束日期不能早于开始日期")
+    if body.leave_type not in ("annual", "sick", "personal", "overtime_off"):
+        raise HTTPException(status_code=400, detail="leave_type 非法")
     total = _calc_days(body.start_date, body.end_date, body.half_day_start, body.half_day_end)
     rec = LeaveRequest(
         id=str(uuid.uuid4()),
@@ -109,6 +119,23 @@ async def create_leave(
         status="pending",
     )
     db.add(rec)
+
+    # 审计：考勤/请假是 HR 核查依据，业务员提交渠道（mall）要留痕区分
+    from app.services.audit_service import log_audit
+    await log_audit(
+        db, action="mall_leave_request.submit",
+        entity_type="LeaveRequest", entity_id=rec.id,
+        mall_user_id=user.id, actor_type="mall_user",
+        request=request,
+        changes={
+            "request_no": rec.request_no,
+            "leave_type": body.leave_type,
+            "start_date": str(body.start_date),
+            "end_date": str(body.end_date),
+            "total_days": float(total),
+        },
+    )
+
     await db.flush()
     return {
         "id": rec.id,

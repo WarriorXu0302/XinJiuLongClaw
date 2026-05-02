@@ -4,7 +4,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_mall_db
@@ -70,7 +70,8 @@ async def list_alerts(
 
 
 class _AppealBody(BaseModel):
-    reason: str
+    # 申诉文本限长 500：足够说明情况又防 DB 污染
+    reason: str = Field(min_length=1, max_length=500)
 
 
 @router.post("/{alert_id}/appeal")

@@ -94,6 +94,10 @@ async def preview_order(
         ).scalar_one_or_none()
         if prod is None:
             raise HTTPException(status_code=404, detail=f"商品 {sku.product_id} 不存在")
+        if prod.status != "on_sale":
+            raise HTTPException(
+                status_code=400, detail=f"商品「{prod.name}」已下架，请从购物车移除",
+            )
 
         subtotal = (sku.price * qty).quantize(Decimal("0.01"))
         total_amount += subtotal
@@ -231,6 +235,12 @@ async def create_order(
         prod = (
             await db.execute(select(MallProduct).where(MallProduct.id == sku.product_id))
         ).scalar_one_or_none()
+        if prod is None:
+            raise HTTPException(status_code=404, detail=f"商品 {sku.product_id} 不存在")
+        if prod.status != "on_sale":
+            raise HTTPException(
+                status_code=400, detail=f"商品「{prod.name}」已下架，请从购物车移除",
+            )
 
         # 扣库存（FOR UPDATE，带 CHECK 兜底）
         cost_snapshot = await deduct_for_order(
@@ -243,6 +253,18 @@ async def create_order(
 
         subtotal = (sku.price * qty).quantize(Decimal("0.01"))
         total_amount += subtotal
+
+        # 成本快照优先级：inventory.avg_cost_price > sku.cost_price
+        # 两者都 None → 拒绝下单（否则利润台账会按 0 成本算虚高利润）
+        snapshot_cost = cost_snapshot if cost_snapshot is not None else sku.cost_price
+        if snapshot_cost is None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"商品「{prod.name}」尚未配置成本价，请联系运营配置后再下单"
+                    f"（SKU {sku_id}）"
+                ),
+            )
 
         item = MallOrderItem(
             order_id=order.id,
@@ -259,9 +281,7 @@ async def create_order(
             price=sku.price,
             quantity=qty,
             subtotal=subtotal,
-            # 纯商城 SKU 可能 cost_price = None，用 inventory.avg 作为快照；
-            # avg 也 None 时（第一次入库前）保持 None，M4 确认收款前必须回填
-            cost_price_snapshot=cost_snapshot if cost_snapshot is not None else sku.cost_price,
+            cost_price_snapshot=snapshot_cost,
         )
         db.add(item)
         sku_ids_to_clear.append(sku_id)
@@ -553,9 +573,11 @@ async def order_stats(db: AsyncSession, user: MallUser) -> dict[str, int]:
 
     C 端视角（小程序第一版线下收款，付款发生在业务员送达时）：
       unPay       = 尚未送达收款的所有订单（下单/接单/出库/送达/财务确认中）
-      payed       = 已全款确认 → completed
+      payed       = 已全款确认 → completed；加上已关单的 partial_closed（对 C 端都是"订单已结束"）
       consignment = 配送中（已出库未送达）
-      unComment   = 已评价功能 M5 再做
+      unComment   = 已评价功能暂不做
+
+    过滤 consumer_deleted_at：C 端从列表删除的订单不在任何角标里显示。
     """
     from sqlalchemy import func
 
@@ -564,6 +586,7 @@ async def order_stats(db: AsyncSession, user: MallUser) -> dict[str, int]:
             await db.execute(
                 select(func.count(MallOrder.id))
                 .where(MallOrder.user_id == user.id)
+                .where(MallOrder.consumer_deleted_at.is_(None))
                 .where(MallOrder.status.in_(statuses))
             )
         ).scalar() or 0)
@@ -576,7 +599,10 @@ async def order_stats(db: AsyncSession, user: MallUser) -> dict[str, int]:
             MallOrderStatus.DELIVERED.value,
             MallOrderStatus.PENDING_PAYMENT_CONFIRMATION.value,
         ),
-        "payed": await _count(MallOrderStatus.COMPLETED.value),
+        "payed": await _count(
+            MallOrderStatus.COMPLETED.value,
+            MallOrderStatus.PARTIAL_CLOSED.value,
+        ),
         "consignment": await _count(MallOrderStatus.SHIPPED.value),
         "unComment": 0,
     }
@@ -749,6 +775,17 @@ async def claim_order(
     """业务员抢单。"""
     if salesman.user_type != MallUserType.SALESMAN.value:
         raise HTTPException(status_code=403, detail="仅业务员可抢单")
+    # 接单开关 = 业务员是否接受派单/抢单。关闭时不能抢（否则业务员可能抢了不履约）
+    if not salesman.is_accepting_orders:
+        raise HTTPException(
+            status_code=403,
+            detail="您的接单开关已关闭，请先在「我的」页打开接单",
+        )
+    # 绑 employee 才能入提成表（改派也有同样校验，这里保持一致）
+    if not salesman.linked_employee_id:
+        raise HTTPException(
+            status_code=400, detail="账号未绑定 ERP 员工，无法抢单",
+        )
 
     order = await _require_order_for_claim(db, order_id)
     if order.status != MallOrderStatus.PENDING_ASSIGNMENT.value:
@@ -949,7 +986,7 @@ async def admin_reassign(
         },
     )
 
-    # 通知新业务员接单 + 旧业务员订单被改派
+    # 通知新业务员接单 + 旧业务员订单被改派 + 消费者（已接单后 C 端能看到配送员换了）
     from app.services.notification_service import notify_mall_user
     await notify_mall_user(
         db, mall_user_id=target.id,
@@ -962,6 +999,15 @@ async def admin_reassign(
             db, mall_user_id=prev_salesman,
             title="订单已被改派",
             content=f"订单 {order.order_no} 已由管理员改派给其他业务员。",
+            entity_type="MallOrder", entity_id=order.id,
+        )
+    # 只有在曾经有过 assigned_salesman 的情况下（消费者已在订单里看到配送员信息），才通知消费者
+    if prev_salesman and prev_salesman != target.id:
+        target_nick = target.nickname or target.username or "新业务员"
+        await notify_mall_user(
+            db, mall_user_id=order.user_id,
+            title="配送员已变更",
+            content=f"您的订单 {order.order_no} 配送员已调整为 {target_nick}，请查看订单详情联系。",
             entity_type="MallOrder", entity_id=order.id,
         )
 
@@ -1179,6 +1225,26 @@ async def resolve_skip_alert(
             "resolution_note": note,
             "dismissed_skip_logs": dismissed_log_count,
         },
+    )
+
+    # 通知业务员裁决结果（业务员提了申诉/未申诉都该被告知）
+    from app.services.notification_service import notify_mall_user
+    if resolution_status == MallSkipAlertStatus.DISMISSED.value:
+        title = "跳单告警已驳回"
+        content = (
+            f"您的跳单告警（累计 {alert.skip_count} 次）经审核被驳回，"
+            "不计入后续阈值。"
+        ) + (f"\n运营说明：{note}" if note else "")
+    else:
+        title = "跳单告警已确认"
+        content = (
+            f"您的跳单告警（累计 {alert.skip_count} 次）经审核确认成立，"
+            "请调整接单节奏。"
+        ) + (f"\n运营说明：{note}" if note else "")
+    await notify_mall_user(
+        db, mall_user_id=alert.salesman_user_id,
+        title=title, content=content,
+        entity_type="MallSkipAlert", entity_id=alert.id,
     )
 
     await db.flush()

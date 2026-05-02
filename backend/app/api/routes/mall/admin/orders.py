@@ -320,9 +320,13 @@ async def admin_cancel(
     from app.models.mall.inventory import MallInventoryBarcode
 
     require_role(user, "admin", "boss")
-    order = await db.get(MallOrder, order_id)
+    # FOR UPDATE 锁订单，防与业务员并发 ship/deliver 相撞
+    order = (await db.execute(
+        select(MallOrder).where(MallOrder.id == order_id).with_for_update()
+    )).scalar_one_or_none()
     if order is None:
         raise HTTPException(status_code=404, detail="订单不存在")
+    prev_status = order.status  # 记真正的原状态，别被后面 L382 覆盖成 cancelled
     if order.status in (
         MallOrderStatus.COMPLETED.value,
         MallOrderStatus.CANCELLED.value,
@@ -334,7 +338,7 @@ async def admin_cancel(
             detail=f"订单状态 {order.status} 不可取消（已完成订单走退货/冲红）",
         )
 
-    # 退库存（只有真扣了的才退）
+    # 退库存（只有真扣了的才退）。按原出库 flow 的 inventory 定位目标仓，不靠当前默认仓
     already_deducted = order.status in (
         MallOrderStatus.PENDING_ASSIGNMENT.value,
         MallOrderStatus.ASSIGNED.value,
@@ -342,20 +346,35 @@ async def admin_cancel(
         MallOrderStatus.DELIVERED.value,
         MallOrderStatus.PENDING_PAYMENT_CONFIRMATION.value,
     )
+    restocked_count = 0
     if already_deducted:
+        from app.models.mall.base import MallInventoryFlowType
+        from app.models.mall.inventory import MallInventory, MallInventoryFlow
         items = await order_service.get_order_items(db, order.id)
-        warehouse = await inventory_service.get_default_warehouse(db)
-        if warehouse is None:
-            raise HTTPException(status_code=500, detail="未找到默认仓，无法退库存")
+        flows = (await db.execute(
+            select(MallInventoryFlow, MallInventory)
+            .join(MallInventory, MallInventoryFlow.inventory_id == MallInventory.id)
+            .where(MallInventoryFlow.ref_type == "order")
+            .where(MallInventoryFlow.ref_id == order.id)
+            .where(MallInventoryFlow.flow_type == MallInventoryFlowType.OUT.value)
+        )).all()
+        sku_to_warehouse = {inv.sku_id: inv.warehouse_id for _, inv in flows}
         for it in items:
+            src_wh = sku_to_warehouse.get(it.sku_id)
+            if src_wh is None:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"找不到 SKU {it.sku_id} 的原出库流水，无法退回",
+                )
             await inventory_service.restock_for_cancel(
                 db,
-                warehouse_id=warehouse.id,
+                warehouse_id=src_wh,
                 sku_id=it.sku_id,
                 quantity=it.quantity,
                 order_id=order.id,
                 cost_price=it.cost_price_snapshot,
             )
+            restocked_count += it.quantity
 
     # 已扫码出库的条码 → 回 in_stock（用 outbound_order_id 反查）
     bcs = (await db.execute(
@@ -388,9 +407,11 @@ async def admin_cancel(
         entity_id=order.id,
         changes={
             "order_no": order.order_no,
-            "prev_status": order.status,
+            "prev_status": prev_status,  # 原状态，非覆盖后的 cancelled
             "reason": body.reason,
-            "restock_items": len(bcs) if bcs else 0,
+            "restocked_quantity": restocked_count,
+            "barcodes_reverted": len(bcs),
+            "pending_payments_rejected": len(pending_payments),
         },
         user=user, request=request,
     )

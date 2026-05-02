@@ -130,8 +130,10 @@ const submitting = ref(false)
 
 onLoad((q) => {
   uni.setNavigationBarTitle({ title: '用户注册' })
-  if (q?.code) {
-    form.value.invite_code = String(q.code).toUpperCase()
+  // 兼容三种 query 命名：?code=（老链接）/ ?invite_code=（分享卡片）/ ?scene=（小程序码）
+  const raw = q?.code || q?.invite_code || q?.scene
+  if (raw) {
+    form.value.invite_code = String(raw).toUpperCase()
     inviteLocked.value = true
   }
 })

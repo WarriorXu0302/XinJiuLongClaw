@@ -163,46 +163,12 @@ const onWechatRegister = () => {
         })
       } catch (e) {
         loading.value = false
-        // 后端 409 "该微信已注册" → 跳登录
-        if (e?.status === 409 && /已注册/.test(e?.detail || '')) {
-          uni.showModal({
-            title: '账号已存在',
-            content: '该微信已注册过，为您跳转登录',
-            showCancel: false,
-            success: () => onWechatLogin(code)
-          })
-          return
-        }
         errorMsg.value = e?.detail || e?.msg || '注册失败，请重试'
       }
     },
     fail: () => {
       loading.value = false
       errorMsg.value = '微信授权失败，请重试'
-    }
-  })
-}
-
-// 409 已注册时的降级登录路径（复用同一个 wx_code 打不开新 session，需要重新 login）
-const onWechatLogin = () => {
-  uni.login({
-    provider: 'weixin',
-    success: async ({ code }) => {
-      try {
-        const res = await http.request({
-          url: '/api/mall/auth/wechat-login',
-          method: 'POST',
-          login: true,
-          hasCatch: true,
-          data: { code }
-        })
-        http.loginSuccess(res.data || res, () => {
-          uni.reLaunch({ url: '/pages/index/index' })
-        })
-      } catch (e) {
-        loading.value = false
-        errorMsg.value = e?.detail || '登录失败'
-      }
     }
   })
 }

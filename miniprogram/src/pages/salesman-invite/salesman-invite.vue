@@ -157,7 +157,7 @@
           </text>
         </view>
         <view class="history__time">
-          {{ h.used_at || h.expires_at }}
+          {{ formatTime(h.used_at || h.expires_at) }}
         </view>
       </view>
     </view>
@@ -178,6 +178,13 @@ const statusMap = {
   expired: '已过期',
   invalidated: '已作废',
   pending: '可使用'
+}
+
+const formatTime = (s) => {
+  if (!s) return ''
+  const str = String(s)
+  // 去掉毫秒 + 时区尾巴，简化展示（YYYY-MM-DD HH:mm）
+  return str.replace('T', ' ').slice(0, 16)
 }
 
 const loadHistory = async () => {

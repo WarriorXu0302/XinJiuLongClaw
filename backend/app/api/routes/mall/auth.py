@@ -162,10 +162,27 @@ async def wechat_register(
     request: Request,
     db: AsyncSession = Depends(get_mall_db),
 ):
+    """扫码/首次微信注册。
+
+    UX 优化：已存在的 openid 直接当登录处理，不消耗邀请码、不弹 409。
+    业务员扫同一码两次不会浪费额度；同一人误扫多张码也不会累加邀请记录。
+    """
     session = await auth_service.wechat_code2session(payload.code)
     openid = session.get("openid")
     if not openid:
         raise HTTPException(status_code=400, detail="微信登录失败：未获取 openid")
+
+    # 已注册用户 → 不消耗邀请码，直接登录（避免 code 二次 uni.login 绕路）
+    existing = await auth_service.get_mall_user_by_openid(db, openid)
+    if existing is not None:
+        from app.services.mall.validators import assert_mall_user_active
+        assert_mall_user_active(existing)
+        await auth_service.record_login_log(
+            db, user=existing, request=request,
+            login_method=MallLoginMethod.WECHAT.value,
+            device_info=payload.device_info,
+        )
+        return auth_service.issue_tokens(existing)
 
     user = await auth_service.register_mall_user(
         db,

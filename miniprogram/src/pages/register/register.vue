@@ -302,55 +302,69 @@ const validate = () => {
   return true
 }
 
+// dev H5 下：如果设置了 devMockOpenid 就直接用（注册/登录共用同一个 mock openid）
+const getDevMockCode = () => {
+  // #ifdef H5
+  if (import.meta.env.DEV) {
+    const saved = uni.getStorageSync('devMockOpenid')
+    if (saved) return `devmock:${saved}`
+  }
+  // #endif
+  return null
+}
+
 // 微信一键注册 + 提交资料
 const onWechatRegister = () => {
   if (!validate()) return
   submitting.value = true
-  uni.login({
+  const devCode = getDevMockCode()
+  // eslint-disable-next-line n/no-callback-literal
+  const wxLoginCall = devCode ? (cb) => cb({ code: devCode }) : (cb) => uni.login({
     provider: 'weixin',
-    success: ({ code }) => {
-      if (!code) {
-        submitting.value = false
-        uni.showToast({ title: '微信授权失败，请重试', icon: 'none' })
-        return
-      }
-      http.request({
-        url: '/api/mall/auth/wechat-register',
-        method: 'POST',
-        login: true,
-        hasCatch: true,
-        data: {
-          code,
-          invite_code: form.value.invite_code.trim().toUpperCase(),
-          real_name: form.value.real_name.trim(),
-          contact_phone: form.value.contact_phone.trim(),
-          delivery_address: form.value.delivery_address.trim(),
-          business_license_url: form.value.business_license_url
-        }
-      }).then(({ data }) => {
-        submitting.value = false
-        if (data?.token) {
-          http.loginSuccess(data, () => {
-            uni.showToast({ title: '欢迎回来', icon: 'success' })
-            setTimeout(() => salesman.dispatchAfterLogin(data.user_type || 'consumer'), 800)
-          })
-        } else if (data?.application_id) {
-          uni.showToast({ title: '申请已提交', icon: 'success', duration: 1200 })
-          setTimeout(() => {
-            uni.reLaunch({
-              url: `/pages/pending-approval/pending-approval?application_id=${data.application_id}`
-            })
-          }, 1000)
-        }
-      }).catch((e) => {
-        submitting.value = false
-        uni.showToast({ title: e?.detail || e?.msg || '注册失败', icon: 'none' })
-      })
-    },
+    success: cb,
     fail: () => {
       submitting.value = false
       uni.showToast({ title: '微信授权失败，请重试', icon: 'none' })
     }
+  })
+  wxLoginCall(({ code }) => {
+    if (!code) {
+      submitting.value = false
+      uni.showToast({ title: '微信授权失败，请重试', icon: 'none' })
+      return
+    }
+    http.request({
+      url: '/api/mall/auth/wechat-register',
+      method: 'POST',
+      login: true,
+      hasCatch: true,
+      data: {
+        code,
+        invite_code: form.value.invite_code.trim().toUpperCase(),
+        real_name: form.value.real_name.trim(),
+        contact_phone: form.value.contact_phone.trim(),
+        delivery_address: form.value.delivery_address.trim(),
+        business_license_url: form.value.business_license_url
+      }
+    }).then(({ data }) => {
+      submitting.value = false
+      if (data?.token) {
+        http.loginSuccess(data, () => {
+          uni.showToast({ title: '欢迎回来', icon: 'success' })
+          setTimeout(() => salesman.dispatchAfterLogin(data.user_type || 'consumer'), 800)
+        })
+      } else if (data?.application_id) {
+        uni.showToast({ title: '申请已提交', icon: 'success', duration: 1200 })
+        setTimeout(() => {
+          uni.reLaunch({
+            url: `/pages/pending-approval/pending-approval?application_id=${data.application_id}`
+          })
+        }, 1000)
+      }
+    }).catch((e) => {
+      submitting.value = false
+      uni.showToast({ title: e?.detail || e?.msg || '注册失败', icon: 'none' })
+    })
   })
 }
 </script>

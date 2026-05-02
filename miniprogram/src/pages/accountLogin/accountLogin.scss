@@ -241,3 +241,62 @@ button {
     opacity: 0.6;
   }
 }
+
+/* DEV 调试面板（仅 H5 dev 显示） */
+.dev-panel {
+  margin: 32rpx 60rpx 0;
+  padding: 24rpx;
+  background: rgba(255, 243, 205, 0.7);
+  border: 1rpx dashed #C9A961;
+  border-radius: 12rpx;
+  font-size: 22rpx;
+
+  &__title {
+    color: #8B6914;
+    margin-bottom: 16rpx;
+    font-weight: 600;
+  }
+
+  &__input {
+    height: 64rpx;
+    padding: 0 16rpx;
+    background: #fff;
+    border: 1rpx solid #ECE8E1;
+    border-radius: 8rpx;
+    font-size: 24rpx;
+    margin-bottom: 16rpx;
+  }
+
+  &__row {
+    display: flex;
+    gap: 12rpx;
+  }
+
+  &__btn {
+    flex: 1;
+    height: 64rpx;
+    line-height: 64rpx;
+    text-align: center;
+    background: #C9A961;
+    color: #fff;
+    border-radius: 8rpx;
+    font-size: 22rpx;
+
+    &::after {
+      border: 0;
+    }
+
+    &--ghost {
+      background: transparent;
+      color: #C9A961;
+      border: 1rpx solid #C9A961;
+    }
+  }
+
+  &__saved {
+    margin-top: 12rpx;
+    color: #52c41a;
+    font-size: 20rpx;
+    word-break: break-all;
+  }
+}

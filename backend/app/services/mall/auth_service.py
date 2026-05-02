@@ -90,10 +90,19 @@ async def authenticate_by_password(
 async def wechat_code2session(code: str) -> dict[str, Any]:
     """调 https://api.weixin.qq.com/sns/jscode2session。
 
-    开发环境下未配 MP_APPID/MP_SECRET 时返回 mock openid，方便本地测试。
+    开发环境下未配 MP_APPID/MP_SECRET 时返回 mock openid，方便本地测试：
+    - 如果 code 以 "devmock:" 开头，后面的字符串原样作为 openid（前端可固定传
+      同一个 openid 复用账号 —— 注册/登录/换设备调试）
+    - 否则用 code 前 12 位做 openid 前缀（每次 uni.login 返的 code 不同 → openid 不同，
+      适合 smoke test 走"新用户注册"路径，但无法复用账号登录，dev 时用 devmock: 前缀）
     """
     if not settings.MP_APPID or not settings.MP_SECRET:
-        # dev mock：用 code 前 8 位当 openid 前缀
+        if code.startswith("devmock:"):
+            return {
+                "openid": f"mock_openid_{code[len('devmock:'):]}",
+                "session_key": "mock_session_key",
+                "unionid": None,
+            }
         return {
             "openid": f"mock_openid_{code[:12]}",
             "session_key": "mock_session_key",

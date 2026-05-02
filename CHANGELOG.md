@@ -97,6 +97,8 @@
 - **C 端账号必绑微信**：register.vue 重构为仅微信注册（移除账密 tab，品牌卡片 UI + 邀请码锁定卡 + 必填资料表单 + 绿色微信 CTA）；配送地址拆到独立 `pages/register-address-picker`（3 列省市区 picker + 门牌号 textarea，`getCurrentPages` 回写主页）；后端对应删除 `/api/mall/auth/register`（账密注册端点）+ `MallRegisterRequest` schema。业务员账号由 ERP 后台 `/api/mall/admin/salesmen` 创建，不受影响
 - register.vue 邀请码支持手动输入：URL 带 `?code=/?invite_code=/?scene=` 时锁定显示；手动打开注册页时允许用户输入（统一转大写）。原先没入口导致直接打开页面没地方填邀请码
 - 新建 `scripts/seed_regions_henan.py`：导入河南省完整三级行政区划（1 省 + 18 地市 + 156 区县，共 175 条），原 `mall_regions` 只有 4 条北京 smoke test，picker 只能选北京
+- dev H5 下 `uni.login` 返的 code 每次随机 → mock openid 跟着变 → 注册后再登录永远 404。后端 `wechat_code2session` 支持 `devmock:<openid_suffix>` 前缀（未配 MP_APPID 时）固定返回同一 openid；前端 accountLogin 加 DEV 调试面板（仅 H5 dev 可见）设置/清除 `devMockOpenid`；register 页也读取同一值，注册/登录在开发环境复用同一个微信身份
+- accountLogin 的"微信一键登录"按钮去掉 `#ifdef MP-WEIXIN` 限制，H5 dev 也能看见（真机走 uni.login，dev H5 走 mock）
 - `cancel_order` 退库存按原出库流水的 inventory 定位目标仓，不再依赖 `get_default_warehouse()`。**修复**：默认仓换过后，取消订单会把货退到错的仓
 - `release_order` 仅允许在 `assigned` 状态释放；`shipped` 后条码已 OUTBOUND 绑定原业务员，不再允许自行释放（出库后须走管理员改派）
 - `admin_reassign` 在 shipped/delivered/pending_payment_confirmation 状态改派时，同步把本订单的 OUTBOUND 条码 `outbound_by_user_id` 过户到新业务员，避免归属数据错乱

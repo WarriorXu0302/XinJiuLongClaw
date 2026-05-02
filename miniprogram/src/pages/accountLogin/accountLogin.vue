@@ -1,9 +1,15 @@
 <template>
   <view class="con">
     <view class="brand">
-      <text class="brand__mark">鑫</text>
-      <text class="brand__name">鑫久隆</text>
-      <text class="brand__sub">XIN JIU LONG · 批发商城</text>
+      <text class="brand__mark">
+        鑫
+      </text>
+      <text class="brand__name">
+        鑫久隆
+      </text>
+      <text class="brand__sub">
+        XIN JIU LONG · 批发商城
+      </text>
     </view>
     <!-- 登录 -->
     <view class="login-form">
@@ -66,10 +72,11 @@
         登录
       </button>
 
-      <!-- #ifdef MP-WEIXIN -->
       <view class="divider">
         <text class="divider__line" />
-        <text class="divider__text">或</text>
+        <text class="divider__text">
+          或
+        </text>
         <text class="divider__line" />
       </view>
       <button
@@ -77,9 +84,46 @@
         :disabled="wxLoading"
         @tap="onWechatLogin"
       >
-        <text class="wechat-btn__icon">💬</text>
+        <text class="wechat-btn__icon">
+          💬
+        </text>
         <text>{{ wxLoading ? '登录中…' : '微信一键登录' }}</text>
       </button>
+      <!-- dev H5 调试：设置固定 mock openid 复用账号 -->
+      <!-- #ifdef H5 -->
+      <view
+        v-if="isDev"
+        class="dev-panel"
+      >
+        <view class="dev-panel__title">
+          [DEV] 开发模式 · 微信登录 mock
+        </view>
+        <input
+          v-model="devMockOpenid"
+          class="dev-panel__input"
+          placeholder="微信 openid 后缀（去掉 mock_openid_ 前缀）"
+        >
+        <view class="dev-panel__row">
+          <button
+            class="dev-panel__btn"
+            @tap="saveDevMock"
+          >
+            保存并用此 openid 登录
+          </button>
+          <button
+            class="dev-panel__btn dev-panel__btn--ghost"
+            @tap="clearDevMock"
+          >
+            清除
+          </button>
+        </view>
+        <view
+          v-if="savedDevMock"
+          class="dev-panel__saved"
+        >
+          当前已保存：mock_openid_{{ savedDevMock }}
+        </view>
+      </view>
       <!-- #endif -->
     </view>
   </view>
@@ -172,52 +216,96 @@ const toRegitser = () => {
  *   - 403 → 账号停用/归档，提示联系客服
  */
 const wxLoading = ref(false)
+
+// dev H5 下 uni.login 返的 code 每次随机，后端 mock openid 也跟着变 → 永远 404
+// 本地调试允许用 storage 里存一个 openid 固定复用账号
+const isDev = ref(false)
+const devMockOpenid = ref('')
+const savedDevMock = ref('')
+// #ifdef H5
+isDev.value = import.meta.env.DEV
+savedDevMock.value = uni.getStorageSync('devMockOpenid') || ''
+devMockOpenid.value = savedDevMock.value
+// #endif
+
+const saveDevMock = () => {
+  const v = devMockOpenid.value.trim()
+  if (!v) {
+    uni.showToast({ title: '请输入 openid', icon: 'none' })
+    return
+  }
+  uni.setStorageSync('devMockOpenid', v)
+  savedDevMock.value = v
+  uni.showToast({ title: '已保存，正在登录…', icon: 'success', duration: 800 })
+  setTimeout(() => onWechatLogin(), 800)
+}
+
+const clearDevMock = () => {
+  uni.removeStorageSync('devMockOpenid')
+  savedDevMock.value = ''
+  devMockOpenid.value = ''
+  uni.showToast({ title: '已清除', icon: 'none' })
+}
+
+const getDevMockCode = () => {
+  // #ifdef H5
+  if (import.meta.env.DEV) {
+    const saved = uni.getStorageSync('devMockOpenid')
+    if (saved) return `devmock:${saved}`
+  }
+  // #endif
+  return null
+}
+
 const onWechatLogin = () => {
   wxLoading.value = true
-  uni.login({
+  const devCode = getDevMockCode()
+  // eslint-disable-next-line n/no-callback-literal
+  const wxLoginCall = devCode ? (cb) => cb({ code: devCode }) : (cb) => uni.login({
     provider: 'weixin',
-    success: ({ code }) => {
-      if (!code) {
-        wxLoading.value = false
-        uni.showToast({ title: '微信授权失败，请重试', icon: 'none' })
-        return
-      }
-      http.request({
-        url: '/api/mall/auth/wechat-login',
-        method: 'POST',
-        login: true,
-        hasCatch: true,
-        data: { code }
-      }).then(({ data }) => {
-        http.loginSuccess(data, () => {
-          uni.showToast({ title: '登录成功', icon: 'none' })
-          setTimeout(() => {
-            salesman.dispatchAfterLogin(data.user_type || 'consumer')
-          }, 800)
-        })
-      }).catch((e) => {
-        wxLoading.value = false
-        // 未注册：后端返 404 "账号未注册，请输入邀请码完成注册"
-        if (e?.status === 404) {
-          uni.showModal({
-            title: '您还没有账号',
-            content: '请扫业务员分享的邀请码，或手动输入邀请码注册',
-            confirmText: '去注册',
-            success: (r) => {
-              if (r.confirm) {
-                uni.navigateTo({ url: '/pages/register/register' })
-              }
-            }
-          })
-          return
-        }
-        uni.showToast({ title: e?.detail || e?.msg || '登录失败', icon: 'none' })
-      })
-    },
+    success: cb,
     fail: () => {
       wxLoading.value = false
       uni.showToast({ title: '微信授权失败，请重试', icon: 'none' })
     }
+  })
+  wxLoginCall(({ code }) => {
+    if (!code) {
+      wxLoading.value = false
+      uni.showToast({ title: '微信授权失败，请重试', icon: 'none' })
+      return
+    }
+    http.request({
+      url: '/api/mall/auth/wechat-login',
+      method: 'POST',
+      login: true,
+      hasCatch: true,
+      data: { code }
+    }).then(({ data }) => {
+      http.loginSuccess(data, () => {
+        uni.showToast({ title: '登录成功', icon: 'none' })
+        setTimeout(() => {
+          salesman.dispatchAfterLogin(data.user_type || 'consumer')
+        }, 800)
+      })
+    }).catch((e) => {
+      wxLoading.value = false
+      // 未注册：后端返 404 "账号未注册，请输入邀请码完成注册"
+      if (e?.status === 404) {
+        uni.showModal({
+          title: '您还没有账号',
+          content: '请扫业务员分享的邀请码，或手动输入邀请码注册',
+          confirmText: '去注册',
+          success: (r) => {
+            if (r.confirm) {
+              uni.navigateTo({ url: '/pages/register/register' })
+            }
+          }
+        })
+        return
+      }
+      uni.showToast({ title: e?.detail || e?.msg || '登录失败', icon: 'none' })
+    })
   })
 }
 

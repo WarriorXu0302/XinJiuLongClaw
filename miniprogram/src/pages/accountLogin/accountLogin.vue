@@ -89,8 +89,7 @@
         </text>
         <text>{{ wxLoading ? '登录中…' : '微信一键登录' }}</text>
       </button>
-      <!-- dev H5 调试：设置固定 mock openid 复用账号（H5 build 才编译进来） -->
-      <!-- #ifdef H5 -->
+      <!-- DEV 调试：固定 mock openid 复用账号 -->
       <view class="dev-panel">
         <view class="dev-panel__title">
           🛠 DEV · 微信登录 mock openid
@@ -121,7 +120,6 @@
           已存：mock_openid_{{ savedDevMock }}
         </view>
       </view>
-      <!-- #endif -->
     </view>
   </view>
 </template>
@@ -214,14 +212,12 @@ const toRegitser = () => {
  */
 const wxLoading = ref(false)
 
-// H5 dev 调试：uni.login 每次返随机 code → 后端 mock openid 跟着变 → 永远 404
+// DEV 调试：uni.login 在 H5/mp 开发时 code 每次随机 → 后端 mock openid 跟着变 → 永远 404
 // 面板让用户存一个固定 openid，登录时后端 wechat_code2session 识别 'devmock:' 前缀返固定 openid
 const devMockOpenid = ref('')
 const savedDevMock = ref('')
-// #ifdef H5
 savedDevMock.value = uni.getStorageSync('devMockOpenid') || ''
 devMockOpenid.value = savedDevMock.value
-// #endif
 
 const saveAndLoginDevMock = () => {
   const v = devMockOpenid.value.trim()
@@ -243,10 +239,8 @@ const clearDevMock = () => {
 }
 
 const getDevMockCode = () => {
-  // #ifdef H5
   const saved = uni.getStorageSync('devMockOpenid')
   if (saved) return `devmock:${saved}`
-  // #endif
   return null
 }
 

@@ -302,12 +302,10 @@ const validate = () => {
   return true
 }
 
-// H5 下：如果登录页存过 devMockOpenid 就用它（注册/登录共用同一个 mock 微信身份）
+// 登录页存过 devMockOpenid 就用它（注册/登录共用同一个 mock 微信身份）
 const getDevMockCode = () => {
-  // #ifdef H5
   const saved = uni.getStorageSync('devMockOpenid')
   if (saved) return `devmock:${saved}`
-  // #endif
   return null
 }
 

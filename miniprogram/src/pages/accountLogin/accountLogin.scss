@@ -206,3 +206,38 @@ button {
     }
   }
 }
+
+.divider {
+  display: flex;
+  align-items: center;
+  margin: 40rpx 60rpx 20rpx;
+  &__line {
+    flex: 1;
+    height: 1rpx;
+    background: #ECE8E1;
+  }
+  &__text {
+    padding: 0 24rpx;
+    font-size: 22rpx;
+    color: #999;
+  }
+}
+
+.wechat-btn {
+  margin: 0 60rpx;
+  height: 88rpx;
+  line-height: 88rpx;
+  text-align: center;
+  background: #07C160;
+  color: #fff;
+  border-radius: 44rpx;
+  font-size: 28rpx;
+
+  &__icon {
+    margin-right: 8rpx;
+  }
+
+  &[disabled] {
+    opacity: 0.6;
+  }
+}

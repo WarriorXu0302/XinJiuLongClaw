@@ -83,6 +83,7 @@
 - `wechat_register` 对已注册 openid 不再 409，直接当登录处理（不消耗邀请码）。前端 register-by-scan 移除 409 降级二次 uni.login 路径，新老用户走同一个按钮体验一致
 - `register.vue` 兼容三种邀请码 query 参数：`?code=`（老链接）/ `?invite_code=`（分享卡片）/ `?scene=`（小程序码），分享/扫码/历史链接共用同一注册页
 - `salesman-invite.vue` 历史记录时间格式化为 `YYYY-MM-DD HH:mm`（原直接渲染 ISO 字符串）
+- **accountLogin.vue 加微信一键登录按钮**（mp-weixin 专用）：`uni.login` → `/wechat-login`；已注册→直接登录并按 user_type 分流到 consumer/salesman 首页；404 未注册→引导"扫业务员邀请码注册"
 - `cancel_order` 退库存按原出库流水的 inventory 定位目标仓，不再依赖 `get_default_warehouse()`。**修复**：默认仓换过后，取消订单会把货退到错的仓
 - `release_order` 仅允许在 `assigned` 状态释放；`shipped` 后条码已 OUTBOUND 绑定原业务员，不再允许自行释放（出库后须走管理员改派）
 - `admin_reassign` 在 shipped/delivered/pending_payment_confirmation 状态改派时，同步把本订单的 OUTBOUND 条码 `outbound_by_user_id` 过户到新业务员，避免归属数据错乱

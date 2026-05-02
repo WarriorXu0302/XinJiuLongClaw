@@ -65,6 +65,22 @@
       >
         登录
       </button>
+
+      <!-- #ifdef MP-WEIXIN -->
+      <view class="divider">
+        <text class="divider__line" />
+        <text class="divider__text">或</text>
+        <text class="divider__line" />
+      </view>
+      <button
+        class="wechat-btn"
+        :disabled="wxLoading"
+        @tap="onWechatLogin"
+      >
+        <text class="wechat-btn__icon">💬</text>
+        <text>{{ wxLoading ? '登录中…' : '微信一键登录' }}</text>
+      </button>
+      <!-- #endif -->
     </view>
   </view>
 </template>
@@ -143,6 +159,65 @@ const login = () => {
 const toRegitser = () => {
   uni.navigateTo({
     url: '/pages/register/register'
+  })
+}
+
+/**
+ * 微信一键登录（mp-weixin 专用）
+ *
+ * 流程：
+ *   uni.login 拿 code → /api/mall/auth/wechat-login
+ *   - 200 → loginSuccess + dispatchAfterLogin 分流到 consumer/salesman 首页
+ *   - 404  → openid 未注册，引导去扫业务员邀请码或手动输邀请码注册
+ *   - 403 → 账号停用/归档，提示联系客服
+ */
+const wxLoading = ref(false)
+const onWechatLogin = () => {
+  wxLoading.value = true
+  uni.login({
+    provider: 'weixin',
+    success: ({ code }) => {
+      if (!code) {
+        wxLoading.value = false
+        uni.showToast({ title: '微信授权失败，请重试', icon: 'none' })
+        return
+      }
+      http.request({
+        url: '/api/mall/auth/wechat-login',
+        method: 'POST',
+        login: true,
+        hasCatch: true,
+        data: { code }
+      }).then(({ data }) => {
+        http.loginSuccess(data, () => {
+          uni.showToast({ title: '登录成功', icon: 'none' })
+          setTimeout(() => {
+            salesman.dispatchAfterLogin(data.user_type || 'consumer')
+          }, 800)
+        })
+      }).catch((e) => {
+        wxLoading.value = false
+        // 未注册：后端返 404 "账号未注册，请输入邀请码完成注册"
+        if (e?.status === 404) {
+          uni.showModal({
+            title: '您还没有账号',
+            content: '请扫业务员分享的邀请码，或手动输入邀请码注册',
+            confirmText: '去注册',
+            success: (r) => {
+              if (r.confirm) {
+                uni.navigateTo({ url: '/pages/register/register' })
+              }
+            }
+          })
+          return
+        }
+        uni.showToast({ title: e?.detail || e?.msg || '登录失败', icon: 'none' })
+      })
+    },
+    fail: () => {
+      wxLoading.value = false
+      uni.showToast({ title: '微信授权失败，请重试', icon: 'none' })
+    }
   })
 }
 

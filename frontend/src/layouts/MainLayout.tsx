@@ -114,6 +114,7 @@ const menuItems: MenuItem[] = [
       { key: '/mall/orders', icon: <ShoppingCartOutlined />, label: '商城订单', roles: ['admin', 'boss', 'finance'] },
       { key: '/mall/products', icon: <AppstoreOutlined />, label: '商品', roles: ['admin', 'boss', 'purchase'] },
       { key: '/mall/categories', icon: <TagsOutlined />, label: '分类与标签', roles: ['admin', 'boss'] },
+      { key: '/mall/user-applications', icon: <SolutionOutlined />, label: '注册审批', roles: ['admin', 'boss', 'hr'] },
       { key: '/mall/consumers', icon: <UserOutlined />, label: 'C 端用户', roles: ['admin', 'boss', 'finance'] },
       { key: '/mall/salesmen', icon: <TeamOutlined />, label: '业务员', roles: ['admin', 'boss', 'hr'] },
       { key: '/mall/skip-alerts', icon: <WarningOutlined />, label: '跳单告警', roles: ['admin', 'boss'] },

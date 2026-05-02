@@ -67,7 +67,7 @@
       open-type="getUserInfo"
       @getuserinfo="onWechatRegister"
     >
-      微信一键注册
+      填写资料注册
     </button>
     <!-- #endif -->
     <!-- #ifndef MP-WEIXIN -->
@@ -76,7 +76,7 @@
       class="cta"
       @tap="onWechatRegister"
     >
-      微信一键注册
+      填写资料注册
     </button>
     <!-- #endif -->
 
@@ -133,43 +133,10 @@ const onWechatRegister = () => {
     errorMsg.value = '邀请码缺失，无法注册'
     return
   }
-  errorMsg.value = ''
-  loading.value = true
-  // 1. uni.login 拿 code（openid 换取依据）
-  uni.login({
-    provider: 'weixin',
-    success: async ({ code }) => {
-      if (!code) {
-        loading.value = false
-        errorMsg.value = '微信授权失败，请重试'
-        return
-      }
-      try {
-        const res = await http.request({
-          url: '/api/mall/auth/wechat-register',
-          method: 'POST',
-          login: true,
-          hasCatch: true,
-          data: {
-            code,
-            invite_code: inviteCode.value
-          }
-        })
-        http.loginSuccess(res.data || res, () => {
-          uni.showToast({ title: '注册成功', icon: 'success' })
-          setTimeout(() => {
-            uni.reLaunch({ url: '/pages/index/index' })
-          }, 600)
-        })
-      } catch (e) {
-        loading.value = false
-        errorMsg.value = e?.detail || e?.msg || '注册失败，请重试'
-      }
-    },
-    fail: () => {
-      loading.value = false
-      errorMsg.value = '微信授权失败，请重试'
-    }
+  // 审批流：扫码后跳 register 页填真实姓名/电话/配送地址/营业执照，
+  // 不直接调 /wechat-register（避免少传资料后端 422）
+  uni.navigateTo({
+    url: `/pages/register/register?invite_code=${encodeURIComponent(inviteCode.value)}`
   })
 }
 

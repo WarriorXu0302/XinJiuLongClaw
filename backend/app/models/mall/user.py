@@ -127,6 +127,24 @@ class MallUser(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # ─── 注册审批（决策：消费者必填上传营业执照 + 真实姓名等 → ADMIN/BOSS 审批） ───
+    # 业务员由 ERP 管理员手动建，跳过审批，application_status 直接 APPROVED
+    application_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="approved", index=True,
+    )
+    real_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    contact_phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    delivery_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    business_license_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # 审批人 = ERP 员工 id（approve_by_user_id 对 mall_users 无意义）
+    approved_by_employee_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("employees.id", ondelete="SET NULL"), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         onupdate=func.now(), nullable=True

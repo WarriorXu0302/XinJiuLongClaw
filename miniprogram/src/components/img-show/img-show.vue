@@ -1,6 +1,7 @@
 <template>
   <image
     v-if="!isError && imgPath"
+    class="img-show__el"
     :src="imgPath"
     :style="imgStyle"
     :class="classList"
@@ -11,6 +12,7 @@
   />
   <image
     v-else
+    class="img-show__el"
     :src="defaultImgPath"
     :style="imgStyle"
     :class="classList"
@@ -72,7 +74,7 @@ const handleTap = () => {
 </script>
 
 <style scoped>
-image {
+.img-show__el {
   width: 100%;
   height: 100%;
 }

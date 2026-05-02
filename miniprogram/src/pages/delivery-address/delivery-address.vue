@@ -5,8 +5,8 @@
         v-if="addressList.length===0"
         class="empty"
       >
-        <view class="img">
-          <image src="http://jiales.gz-yami.com/addr.png" />
+        <view class="empty__icon">
+          📭
         </view>
         <view class="txt">
           您还没有收货地址

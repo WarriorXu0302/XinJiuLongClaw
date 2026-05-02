@@ -8,7 +8,11 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.mall.base import MallUserStatus, MallUserType
+from app.models.mall.base import (
+    MallUserApplicationStatus,
+    MallUserStatus,
+    MallUserType,
+)
 from app.models.mall.user import MallUser
 
 
@@ -37,6 +41,26 @@ def assert_mall_user_active(user: MallUser) -> None:
     if user.status != MallUserStatus.ACTIVE.value:
         raise HTTPException(
             status_code=403, detail="账号已停用，请联系管理员"
+        )
+
+
+def assert_mall_user_approved(user: MallUser) -> None:
+    """登录前检查 application_status='approved'。
+
+    业务员跳过审批（user_type='salesman'）；消费者若 pending/rejected 都拒绝登录，
+    错误 body 里返 application_id 让前端跳"审批中"页。
+    """
+    if user.user_type == MallUserType.SALESMAN.value:
+        return
+    if user.application_status != MallUserApplicationStatus.APPROVED.value:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "reason": "application_not_approved",
+                "application_id": user.id,
+                "application_status": user.application_status,
+                "rejection_reason": user.rejection_reason,
+            },
         )
 
 

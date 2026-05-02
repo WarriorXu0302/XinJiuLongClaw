@@ -21,6 +21,18 @@ class MallUserStatus(str, enum.Enum):
     INACTIVE_ARCHIVED = "inactive_archived"
 
 
+class MallUserApplicationStatus(str, enum.Enum):
+    """Mall 消费者注册审批状态。
+
+    业务员（user_type=salesman）由 ERP 管理员手动建，跳过审批，视为 APPROVED。
+    消费者注册必须填姓名/电话/配送地址/营业执照，走 ADMIN/BOSS 审批流程。
+    PENDING → APPROVED / REJECTED；REJECTED 时邀请码会被自动作废。
+    """
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
 class MallProductStatus(str, enum.Enum):
     """商城商品上架状态。"""
     DRAFT = "draft"

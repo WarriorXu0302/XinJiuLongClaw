@@ -112,6 +112,70 @@
           </view>
         </view>
 
+        <!-- ─── 审批资料（必填） ─── -->
+        <view :class="['item', errorTips === 'real_name' && 'error']">
+          <view class="account">
+            <input
+              v-model="form.real_name"
+              type="text"
+              maxlength="50"
+              placeholder-class="inp-palcehoder"
+              placeholder="真实姓名（与营业执照一致）"
+            >
+          </view>
+        </view>
+        <view :class="['item', errorTips === 'contact_phone' && 'error']">
+          <view class="account">
+            <input
+              v-model="form.contact_phone"
+              type="number"
+              maxlength="11"
+              placeholder-class="inp-palcehoder"
+              placeholder="联系电话（11 位手机号）"
+            >
+          </view>
+        </view>
+        <view :class="['item', errorTips === 'delivery_address' && 'error']">
+          <view class="account">
+            <textarea
+              v-model="form.delivery_address"
+              maxlength="500"
+              auto-height
+              placeholder-class="inp-palcehoder"
+              placeholder="配送地址（详细到门牌号）"
+            />
+          </view>
+        </view>
+        <view :class="['item item--upload', errorTips === 'business_license_url' && 'error']">
+          <view class="upload-label">
+            营业执照（必传）
+          </view>
+          <view
+            class="upload-area"
+            @tap="onChooseLicense"
+          >
+            <image
+              v-if="form.business_license_url"
+              class="upload-preview"
+              :src="form.business_license_url"
+              mode="aspectFit"
+            />
+            <view
+              v-else
+              class="upload-placeholder"
+            >
+              <text class="upload-plus">+</text>
+              <text class="upload-hint">点击上传</text>
+            </view>
+            <view
+              v-if="licenseUploading"
+              class="upload-mask"
+            >
+              上传中…
+            </view>
+          </view>
+        </view>
+
         <view class="operate">
           <view
             class="to-register"
@@ -160,11 +224,78 @@
 const form = ref({
   username: '',
   password: '',
-  invite_code: ''
+  invite_code: '',
+  // 审批资料（消费者必填）
+  real_name: '',
+  contact_phone: '',
+  delivery_address: '',
+  business_license_url: ''
 })
 const inviteLocked = ref(false)
 const errorTips = ref('')
 const submitting = ref(false)
+const licenseUploading = ref(false)
+
+// 上传营业执照（匿名端点）
+const onChooseLicense = () => {
+  if (licenseUploading.value) return
+  uni.chooseImage({
+    count: 1,
+    sizeType: ['compressed'],
+    sourceType: ['camera', 'album'],
+    success: (r) => {
+      if (!r.tempFilePaths?.length) return
+      licenseUploading.value = true
+      uni.uploadFile({
+        url: (import.meta.env.VITE_APP_BASE_API || '') + '/api/mall/public-uploads/upload',
+        filePath: r.tempFilePaths[0],
+        name: 'file',
+        formData: { kind: 'business_license' },
+        success: (res) => {
+          try {
+            const body = typeof res.data === 'string' ? JSON.parse(res.data) : res.data
+            if (res.statusCode >= 200 && res.statusCode < 300 && body.url) {
+              form.value.business_license_url = body.url
+              errorTips.value = ''
+              uni.showToast({ title: '上传成功', icon: 'success' })
+            } else {
+              uni.showToast({ title: body?.detail || '上传失败', icon: 'none' })
+            }
+          } catch (e) {
+            uni.showToast({ title: '上传失败', icon: 'none' })
+          }
+        },
+        fail: () => uni.showToast({ title: '上传失败', icon: 'none' }),
+        complete: () => { licenseUploading.value = false }
+      })
+    }
+  })
+}
+
+// 校验所有审批字段都填了
+const validateApproval = () => {
+  if (!form.value.real_name.trim()) {
+    errorTips.value = 'real_name'
+    uni.showToast({ title: '请填写真实姓名', icon: 'none' })
+    return false
+  }
+  if (!/^1[3-9]\d{9}$/.test(form.value.contact_phone.trim())) {
+    errorTips.value = 'contact_phone'
+    uni.showToast({ title: '请填写正确的手机号', icon: 'none' })
+    return false
+  }
+  if (form.value.delivery_address.trim().length < 5) {
+    errorTips.value = 'delivery_address'
+    uni.showToast({ title: '请填写配送地址', icon: 'none' })
+    return false
+  }
+  if (!form.value.business_license_url) {
+    errorTips.value = 'business_license_url'
+    uni.showToast({ title: '请上传营业执照', icon: 'none' })
+    return false
+  }
+  return true
+}
 
 // mp-weixin 默认微信注册，其他平台默认账密
 // 用运行时 process.env 判断而非条件编译，避免 ESLint 同标识符重复声明
@@ -198,8 +329,24 @@ const validateInvite = () => {
  * 后端：code2session 拿 openid → 若已注册直接登录（不消耗邀请码）
  *      否则消费邀请码 + 创建账号 + 签 token
  */
+const approvalPayload = () => ({
+  invite_code: form.value.invite_code.trim().toUpperCase(),
+  real_name: form.value.real_name.trim(),
+  contact_phone: form.value.contact_phone.trim(),
+  delivery_address: form.value.delivery_address.trim(),
+  business_license_url: form.value.business_license_url
+})
+
+// 审批流注册：不签 token，跳 pending-approval 页
+const goPendingApproval = (applicationId) => {
+  uni.reLaunch({
+    url: `/pages/pending-approval/pending-approval?application_id=${applicationId}`
+  })
+}
+
 const onWechatRegister = () => {
   if (!validateInvite()) return
+  if (!validateApproval()) return
   errorTips.value = ''
   submitting.value = true
   uni.login({
@@ -217,16 +364,20 @@ const onWechatRegister = () => {
         hasCatch: true,
         data: {
           code,
-          invite_code: form.value.invite_code.trim().toUpperCase()
+          ...approvalPayload()
         }
       }).then(({ data }) => {
         submitting.value = false
-        uni.showToast({ title: '注册成功', icon: 'success', duration: 1200 })
-        http.loginSuccess(data, () => {
-          setTimeout(() => {
-            salesman.dispatchAfterLogin(data.user_type || 'consumer')
-          }, 1000)
-        })
+        // 后端已注册 openid 会直接签 token；新账号会返 application_id
+        if (data?.token) {
+          http.loginSuccess(data, () => {
+            uni.showToast({ title: '欢迎回来', icon: 'success' })
+            setTimeout(() => salesman.dispatchAfterLogin(data.user_type || 'consumer'), 800)
+          })
+        } else if (data?.application_id) {
+          uni.showToast({ title: '申请已提交', icon: 'success', duration: 1200 })
+          setTimeout(() => goPendingApproval(data.application_id), 1000)
+        }
       }).catch((e) => {
         submitting.value = false
         uni.showToast({ title: e?.detail || e?.msg || '注册失败', icon: 'none' })
@@ -249,9 +400,10 @@ const onPasswordRegister = async () => {
     return
   }
   if (!validateInvite()) return
+  if (!validateApproval()) return
   errorTips.value = ''
   submitting.value = true
-  uni.showLoading({ title: '注册中…' })
+  uni.showLoading({ title: '提交中…' })
   try {
     const res = await http.request({
       url: '/api/mall/auth/register',
@@ -260,20 +412,14 @@ const onPasswordRegister = async () => {
       data: {
         username: form.value.username.trim(),
         password: form.value.password,
-        invite_code: form.value.invite_code.trim().toUpperCase()
+        ...approvalPayload()
       }
     })
     uni.hideLoading()
-    uni.showToast({ title: '注册成功', icon: 'success', duration: 1200 })
     const data = res.data || {}
-    if (data.token) {
-      http.loginSuccess(data, () => {
-        setTimeout(() => {
-          salesman.dispatchAfterLogin(data.user_type || 'consumer')
-        }, 1200)
-      })
-    } else {
-      setTimeout(() => uni.navigateTo({ url: '/pages/accountLogin/accountLogin' }), 1200)
+    if (data.application_id) {
+      uni.showToast({ title: '申请已提交', icon: 'success', duration: 1200 })
+      setTimeout(() => goPendingApproval(data.application_id), 1000)
     }
   } catch (e) {
     uni.hideLoading()
@@ -327,6 +473,54 @@ const toIndex = () => uni.switchTab({ url: '/pages/index/index' })
 
   .wechat__icon {
     margin-right: 8rpx;
+  }
+}
+
+.item--upload {
+  .upload-label {
+    font-size: 26rpx;
+    color: #666;
+    margin-bottom: 12rpx;
+  }
+  .upload-area {
+    width: 240rpx;
+    height: 240rpx;
+    background: #fafafa;
+    border: 2rpx dashed #d9d9d9;
+    border-radius: 12rpx;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .upload-preview {
+    width: 100%;
+    height: 100%;
+  }
+  .upload-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8rpx;
+    color: #999;
+  }
+  .upload-plus {
+    font-size: 48rpx;
+    color: #C9A961;
+  }
+  .upload-hint {
+    font-size: 22rpx;
+  }
+  .upload-mask {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24rpx;
   }
 }
 </style>

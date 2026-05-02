@@ -161,6 +161,14 @@ def create_app() -> FastAPI:
     app.include_router(mall_orders.router, prefix="/api/mall/orders", tags=["Mall-Orders"])
     app.include_router(mall_collections.router, prefix="/api/mall/collections", tags=["Mall-Collections"])
 
+    # 注册审批：匿名可访问的公共上传端点（营业执照等）
+    from app.api.routes.mall import public_uploads as mall_public_uploads
+    app.include_router(
+        mall_public_uploads.router,
+        prefix="/api/mall/public-uploads",
+        tags=["Mall-Public"],
+    )
+
     # M4a: 履约闭环（抢单/出库/送达/凭证/财务确认/跳单告警）
     from app.api.routes.mall import attachments as mall_attachments
     from app.api.routes.mall.salesman import (
@@ -243,6 +251,7 @@ def create_app() -> FastAPI:
         payments as ma_payments,
         products as ma_products,
         salesmen as ma_salesmen,
+        user_applications as ma_user_applications,
         users as ma_users,
         warehouses as ma_warehouses,
     )
@@ -253,6 +262,11 @@ def create_app() -> FastAPI:
         stats as ms_stats,
     )
     app.include_router(ma_users.router, prefix="/api/mall/admin/users", tags=["Mall-Admin"])
+    app.include_router(
+        ma_user_applications.router,
+        prefix="/api/mall/admin/user-applications",
+        tags=["Mall-Admin"],
+    )
     app.include_router(ma_payments.router, prefix="/api/mall/admin/payments", tags=["Mall-Admin"])
     app.include_router(ma_salesmen.router, prefix="/api/mall/admin/salesmen", tags=["Mall-Admin"])
     app.include_router(ma_warehouses.router, prefix="/api/mall/admin/warehouses", tags=["Mall-Admin"])

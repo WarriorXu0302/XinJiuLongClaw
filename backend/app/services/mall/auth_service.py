@@ -38,6 +38,7 @@ from app.services.mall.invite_service import (
 )
 from app.services.mall.validators import (
     assert_mall_user_active,
+    assert_mall_user_approved,
     assert_salesman_linked_to_employee,
 )
 
@@ -71,13 +72,14 @@ async def get_mall_user_by_openid(db: AsyncSession, openid: str) -> Optional[Mal
 async def authenticate_by_password(
     db: AsyncSession, username: str, password: str
 ) -> MallUser:
-    """账密登录。失败返回 401，账号停用 403。"""
+    """账密登录。失败 401，停用 403，未审批 403（带 application_id）。"""
     user = await get_mall_user_by_username(db, username)
     if user is None or not user.hashed_password:
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     if not verify_password(password, user.hashed_password):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     assert_mall_user_active(user)
+    assert_mall_user_approved(user)
     return user
 
 
@@ -124,6 +126,10 @@ async def register_mall_user(
     db: AsyncSession,
     *,
     invite_code: str,
+    real_name: str,
+    contact_phone: str,
+    delivery_address: str,
+    business_license_url: str,
     username: Optional[str] = None,
     password: Optional[str] = None,
     openid: Optional[str] = None,
@@ -132,16 +138,22 @@ async def register_mall_user(
     nickname: Optional[str] = None,
     avatar_url: Optional[str] = None,
 ) -> MallUser:
-    """事务内原子：消费邀请码 + 建 MallUser + 绑定 referrer_salesman_id。
+    """事务内原子：消费邀请码 + 建 MallUser（application_status=pending）+ 绑定推荐人。
 
+    新账号进入 pending_approval 状态，由 ERP 管理员审批后才能登录。
     username / openid 必须至少一个；有 username 时 password 必传。
+    审批资料（real_name / contact_phone / delivery_address / business_license_url）必填。
     """
+    from app.models.mall.base import MallUserApplicationStatus
+
     if not invite_code:
         raise HTTPException(status_code=400, detail="邀请码必填")
     if not (username or openid):
         raise HTTPException(status_code=400, detail="必须提供账号或微信 openid")
     if username and not password:
         raise HTTPException(status_code=400, detail="账密注册必须带密码")
+    if not (real_name and contact_phone and delivery_address and business_license_url):
+        raise HTTPException(status_code=400, detail="姓名/电话/配送地址/营业执照均必填")
 
     # 1. 前置软查（友好错误提示，不作为并发保护，并发保护靠 DB 唯一约束）
     if username and await get_mall_user_by_username(db, username):
@@ -152,21 +164,26 @@ async def register_mall_user(
     # 2. 锁定邀请码（FOR UPDATE），校验合法性
     invite = await consume_invite_code(db, invite_code)
 
-    # 3. 建用户。并发场景下两个请求用同一 username 同时通过软查 → 同时插入，
-    # 依赖 DB 唯一约束兜底：第二个 flush 会抛 IntegrityError → 转 409
+    # 3. 建用户。pending 审批中，token_version=0 表示无有效 token（不会被签发）
     user = MallUser(
         username=username,
         hashed_password=get_password_hash(password) if password else None,
         openid=openid,
         unionid=unionid,
         phone=phone,
-        nickname=nickname or username or "新用户",
+        nickname=nickname or username or real_name or "新用户",
         avatar_url=avatar_url,
         status=MallUserStatus.ACTIVE.value,
         user_type=MallUserType.CONSUMER.value,
         token_version=1,
         referrer_salesman_id=invite.issuer_salesman_id,
         referrer_bound_at=datetime.now(timezone.utc),
+        # ─── 审批相关字段 ───
+        application_status=MallUserApplicationStatus.PENDING.value,
+        real_name=real_name,
+        contact_phone=contact_phone,
+        delivery_address=delivery_address,
+        business_license_url=business_license_url,
     )
     db.add(user)
     try:

@@ -161,7 +161,7 @@ onLoad((options) => {
 
 const provArray = ref([])
 const valArr = ref([0, 0, 0])
-const initCityData = (provinceId, cityId, areaId) => {
+const initCityData = (pProvinceId, pCityId, pAreaId) => {
   uni.showLoading()
   http.request({
     url: '/api/mall/regions',
@@ -170,14 +170,14 @@ const initCityData = (provinceId, cityId, areaId) => {
   })
     .then(({ data }) => {
       provArray.value = data
-      if (provinceId) {
+      if (pProvinceId) {
         for (const index in data) {
-          if (data[index].areaId === provinceId) {
+          if (data[index].areaId === pProvinceId) {
             valArr.value = [parseInt(index), valArr.value[1], valArr.value[2]]
           }
         }
       }
-      getCityArray(provinceId || data[0].areaId, cityId, areaId)
+      getCityArray(pProvinceId || data[0].areaId, pCityId, pAreaId)
       uni.hideLoading()
     })
 }
@@ -262,43 +262,44 @@ const animationEvents = (moveY, showParam) => {
 /**
  * 根据省份ID获取 城市数据
  */
-const getCityArray = (provinceId, cityId, areaId) => {
+const getCityArray = (pProvinceId, pCityId, pAreaId) => {
   http.request({
     url: '/api/mall/regions',
     method: 'GET',
     data: {
-      parent_code: provinceId
+      parent_code: pProvinceId
     }
   })
     .then(({ data }) => {
       cityArray.value = data
-      if (cityId) {
+      if (pCityId) {
         for (const index in data) {
-          if (data[index].areaId == cityId) {
+          if (data[index].areaId == pCityId) {
             valArr.value = [valArr.value[0], parseInt(index), valArr.value[2]]
           }
         }
       }
-      getAreaArray(cityId || data[0].areaId, areaId)
+      getAreaArray(pCityId || data[0].areaId, pAreaId)
       uni.hideLoading()
     })
 }
 
 /**
  * 根据城市ID获取 区数据
+ * 注意参数名重命名避免遮蔽外层 ref（cityId/areaId 是页面级 ref，函数参数用 pCityId/pAreaId）
  */
-const getAreaArray = (cityId, areaId) => {
+const getAreaArray = (pCityId, pAreaId) => {
   http.request({
     url: '/api/mall/regions',
     method: 'GET',
     data: {
-      parent_code: cityId
+      parent_code: pCityId
     }
   }).then(({ data }) => {
     areaArray.value = data
-    if (areaId) {
+    if (pAreaId) {
       for (const _index in data) {
-        if (data[_index].areaId == areaId) {
+        if (data[_index].areaId == pAreaId) {
           valArr.value = [valArr.value[0], valArr.value[1], parseInt(_index)]
         }
       }

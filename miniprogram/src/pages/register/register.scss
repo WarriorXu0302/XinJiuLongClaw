@@ -189,7 +189,8 @@
   }
 }
 
-button {
+.authorized-btn,
+.to-idx-btn {
   &::after { border: 0 !important; }
 }
 

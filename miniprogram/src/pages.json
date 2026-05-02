@@ -20,6 +20,12 @@
       }
     },
     {
+      "path": "pages/pending-approval/pending-approval",
+      "style": {
+        "navigationBarTitleText": "审核进度"
+      }
+    },
+    {
       "path": "pages/user/user",
       "style": {
         "navigationBarTitleText": "个人中心"

@@ -148,8 +148,12 @@ async def wechat_login(
             status_code=404, detail="账号未注册，请输入邀请码完成注册"
         )
     assert_mall_user_active(user)
-    from app.services.mall.validators import assert_mall_user_approved
+    from app.services.mall.validators import (
+        assert_mall_user_approved,
+        assert_salesman_linked_employee_active,
+    )
     assert_mall_user_approved(user)
+    await assert_salesman_linked_employee_active(db, user)
 
     await auth_service.record_login_log(
         db,
@@ -185,7 +189,10 @@ async def wechat_register(
     # 已注册用户 → 直接登录（不消耗邀请码）
     existing = await auth_service.get_mall_user_by_openid(db, openid)
     if existing is not None:
-        from app.services.mall.validators import assert_mall_user_active
+        from app.services.mall.validators import (
+            assert_mall_user_active,
+            assert_salesman_linked_employee_active,
+        )
         assert_mall_user_active(existing)
         # 审批状态也要过：已注册但还 pending 的复扫，拒登录
         from app.models.mall.base import MallUserApplicationStatus
@@ -199,6 +206,7 @@ async def wechat_register(
                     "rejection_reason": existing.rejection_reason,
                 },
             )
+        await assert_salesman_linked_employee_active(db, existing)
         await auth_service.record_login_log(
             db, user=existing, request=request,
             login_method=MallLoginMethod.WECHAT.value,

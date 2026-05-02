@@ -39,6 +39,7 @@ from app.services.mall.invite_service import (
 from app.services.mall.validators import (
     assert_mall_user_active,
     assert_mall_user_approved,
+    assert_salesman_linked_employee_active,
     assert_salesman_linked_to_employee,
 )
 
@@ -72,7 +73,7 @@ async def get_mall_user_by_openid(db: AsyncSession, openid: str) -> Optional[Mal
 async def authenticate_by_password(
     db: AsyncSession, username: str, password: str
 ) -> MallUser:
-    """账密登录。失败 401，停用 403，未审批 403（带 application_id）。"""
+    """账密登录。失败 401，停用 403，未审批 403（带 application_id），linked employee 停用 403。"""
     user = await get_mall_user_by_username(db, username)
     if user is None or not user.hashed_password:
         raise HTTPException(status_code=401, detail="用户名或密码错误")
@@ -80,6 +81,7 @@ async def authenticate_by_password(
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     assert_mall_user_active(user)
     assert_mall_user_approved(user)
+    await assert_salesman_linked_employee_active(db, user)
     return user
 
 
@@ -276,8 +278,9 @@ async def refresh_tokens(db: AsyncSession, refresh_token: str) -> dict[str, Any]
     """用 refresh_token 换新一对 token。"""
     payload = decode_mall_token(refresh_token, expected_type="mall_refresh")
     user = await verify_token_and_load_user(db, payload)
-    # 业务员额外校验 linked_employee
+    # 业务员额外校验：绑定关系存在 + linked employee 仍是 active
     assert_salesman_linked_to_employee(user)
+    await assert_salesman_linked_employee_active(db, user)
     return issue_tokens(user)
 
 

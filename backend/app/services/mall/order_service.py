@@ -20,6 +20,7 @@ from app.models.mall.base import (
     MallOrderStatus,
     MallSkipAlertStatus,
     MallSkipType,
+    MallUserStatus,
     MallUserType,
 )
 from app.models.mall.inventory import MallInventory
@@ -180,6 +181,15 @@ async def create_order(
             status_code=403,
             detail="请先联系业务员获取邀请码绑定推荐人后再下单",
         )
+    # 推荐人被禁用时下单会进独占期但没人看到（开放期开始前订单悬空）→ 提前拒绝
+    # 让用户去联系业务员换绑；admin 也能从"换绑推荐人"端点介入
+    if user.user_type != "salesman" and user.referrer_salesman_id:
+        ref = await db.get(MallUser, user.referrer_salesman_id)
+        if ref is not None and ref.status != MallUserStatus.ACTIVE.value:
+            raise HTTPException(
+                status_code=403,
+                detail="您的推荐业务员已停用，请联系客服换绑新业务员",
+            )
     if not items:
         raise HTTPException(status_code=400, detail="购物清单为空")
 

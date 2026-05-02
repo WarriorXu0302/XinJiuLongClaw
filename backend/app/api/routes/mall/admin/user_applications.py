@@ -178,6 +178,14 @@ async def reject_application(
     # bump token_version 防并发已签过的 token（虽然 pending 阶段不签，保险）
     u.token_version = (u.token_version or 0) + 1
 
+    # 释放 openid / username 唯一键，否则用户无法用同一微信/账号重新申请注册
+    # 原值保留在 rejected_* 前缀字段（历史追溯）；查询用 original_openid 字段
+    ts = int(datetime.now(timezone.utc).timestamp())
+    if u.openid:
+        u.openid = f"rejected_{ts}_{u.openid}"
+    if u.username:
+        u.username = f"rejected_{ts}_{u.username}"
+
     # 邀请码已消费状态不变（plan：拒绝不退码，用户重申请需新码）
     # 但审计上标注该码关联的注册被驳回，便于业务员侧后续追查
     if u.referrer_salesman_id:

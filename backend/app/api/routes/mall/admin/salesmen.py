@@ -277,7 +277,18 @@ async def disable_salesman(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """禁用业务员。bump token_version 让所有在途 JWT 立即失效。"""
+    """禁用业务员。
+
+    级联处理：
+      - bump token_version 让所有在途 JWT 立即失效
+      - 关闭 is_accepting_orders 防抢单
+      - 已抢到但还没出库的订单（assigned）自动释放回独占期 / 开放池（assigned_salesman_id=null, status=pending_assignment）
+      - 已出库/送达/待确认的订单不动，用 in_progress_count 汇报给 admin，需手动改派
+      - 推荐关系不动（历史归属保留，新客户绑定前端会看到"该业务员已停用"）
+    """
+    from app.models.mall.base import MallOrderStatus
+    from app.models.mall.order import MallOrder, MallOrderClaimLog
+
     require_role(user, "admin", "boss", "hr")
     sm = await db.get(MallUser, salesman_id)
     if sm is None or sm.user_type != MallUserType.SALESMAN.value:
@@ -289,13 +300,52 @@ async def disable_salesman(
     sm.token_version = (sm.token_version or 0) + 1
     sm.is_accepting_orders = False
 
+    # 1. assigned 状态订单（刚抢未发货）→ 释放回池子，记 claim log
+    to_release = (await db.execute(
+        select(MallOrder)
+        .where(MallOrder.assigned_salesman_id == sm.id)
+        .where(MallOrder.status == MallOrderStatus.ASSIGNED.value)
+        .with_for_update()
+    )).scalars().all()
+    for o in to_release:
+        o.status = MallOrderStatus.PENDING_ASSIGNMENT.value
+        o.assigned_salesman_id = None
+        o.claimed_at = None
+        db.add(MallOrderClaimLog(
+            order_id=o.id,
+            action="release",
+            from_salesman_id=sm.id,
+            to_salesman_id=None,
+            operator_id=user["sub"],
+            reason=f"业务员被禁用自动释放：{body.reason or ''}",
+        ))
+
+    # 2. 已出库/送达/待确认的单子不动（会影响用户履约），只汇报数量提示 admin
+    in_progress = (await db.execute(
+        select(sa_func.count()).select_from(MallOrder)
+        .where(MallOrder.assigned_salesman_id == sm.id)
+        .where(MallOrder.status.in_([
+            MallOrderStatus.SHIPPED.value,
+            MallOrderStatus.DELIVERED.value,
+            MallOrderStatus.PENDING_PAYMENT_CONFIRMATION.value,
+        ]))
+    )).scalar() or 0
+
     await log_audit(
         db, action="mall_salesman.disable", entity_type="MallUser",
         entity_id=sm.id, user=user, request=request,
-        changes={"username": sm.username, "reason": body.reason},
+        changes={
+            "username": sm.username,
+            "reason": body.reason,
+            "released_assigned_orders": len(to_release),
+            "in_progress_orders_need_reassign": int(in_progress),
+        },
     )
     await db.flush()
-    return _salesman_dict(sm)
+    result = _salesman_dict(sm)
+    result["released_assigned_orders"] = len(to_release)
+    result["in_progress_orders_need_reassign"] = int(in_progress)
+    return result
 
 
 @router.post("/{salesman_id}/enable")

@@ -74,3 +74,27 @@ def assert_salesman_linked_to_employee(user: MallUser) -> None:
             status_code=400,
             detail="业务员账号必须绑定 ERP 员工（linked_employee_id）",
         )
+
+
+async def assert_salesman_linked_employee_active(db, user: MallUser) -> None:
+    """业务员登录时校验 linked employee 仍是 active 状态。
+
+    ERP 端可能把员工改成 inactive/resigned，mall 侧必须同步拒绝登录：
+    否则离职业务员还能通过 mall token 刷 ERP 的复用端点（打卡/报销/稽查）。
+    """
+    if user.user_type != MallUserType.SALESMAN.value:
+        return
+    if not user.linked_employee_id:
+        return
+    from app.models.user import Employee
+    emp = await db.get(Employee, user.linked_employee_id)
+    if emp is None:
+        raise HTTPException(
+            status_code=403,
+            detail="绑定的 ERP 员工不存在，请联系管理员",
+        )
+    if emp.status != "active":
+        raise HTTPException(
+            status_code=403,
+            detail=f"您绑定的 ERP 员工已停用（状态 {emp.status}），请联系 HR",
+        )

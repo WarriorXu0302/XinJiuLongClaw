@@ -22,9 +22,9 @@
       </view>
     </view>
 
-    <!-- 邀请码卡片（自动填入且锁定） -->
+    <!-- 邀请码：扫码进来锁定显示；否则让用户手动输入 -->
     <view
-      v-if="form.invite_code"
+      v-if="inviteLocked"
       class="invite-card"
     >
       <view class="invite-card__row">
@@ -35,6 +35,22 @@
           {{ form.invite_code }}
         </text>
       </view>
+    </view>
+    <view
+      v-else
+      class="invite-card invite-card--input"
+    >
+      <text class="invite-card__label">
+        推荐码
+      </text>
+      <input
+        v-model="form.invite_code"
+        class="invite-card__input"
+        maxlength="16"
+        placeholder="请输入业务员发的邀请码"
+        placeholder-class="invite-card__placeholder"
+        @input="onInviteInput"
+      >
     </view>
 
     <!-- 必填资料表单 -->
@@ -183,14 +199,23 @@ const form = ref({
 })
 const submitting = ref(false)
 const licenseUploading = ref(false)
+// URL 带来的邀请码锁定展示；手动进入则允许用户输入
+const inviteLocked = ref(false)
 
 onLoad((q) => {
   uni.setNavigationBarTitle({ title: '注册' })
   const raw = q?.code || q?.invite_code || q?.scene
   if (raw) {
     form.value.invite_code = String(raw).toUpperCase()
+    inviteLocked.value = true
   }
 })
+
+const onInviteInput = (e) => {
+  // 邀请码统一大写
+  const v = (e?.detail?.value || '').toUpperCase()
+  form.value.invite_code = v
+}
 
 // 从地址选择页回来 —— 复用 onShow 读 $vm.pickedAddress
 onShow(() => {
@@ -389,6 +414,32 @@ const onWechatRegister = () => {
     color: $color-gold;
     letter-spacing: 6rpx;
   }
+
+  &--input {
+    display: flex;
+    flex-direction: column;
+    gap: 12rpx;
+  }
+
+  &__input {
+    width: 100%;
+    font-size: 34rpx;
+    font-weight: 700;
+    color: $color-gold;
+    letter-spacing: 4rpx;
+    background: transparent;
+    padding: 4rpx 0;
+  }
+
+  // placeholder-class 样式脱离 scoped 作用域，用属性选择器替代
+}
+
+// eslint-disable-next-line vue-scoped-css/no-unused-selector
+.invite-card__placeholder {
+  font-size: 28rpx;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.3);
+  letter-spacing: 0;
 }
 
 .form {

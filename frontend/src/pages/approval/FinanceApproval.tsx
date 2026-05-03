@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button, Descriptions, Empty, Form, Image, Input, message, Modal, Select, Space, Tabs, Table, Tag, Typography, Upload } from 'antd';
 import { CheckCircleOutlined, CloseCircleOutlined, DollarOutlined, UploadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -14,6 +15,7 @@ interface Account { id: string; name: string; account_type: string; balance: num
 
 function FinanceApproval() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [payExpenseId, setPayExpenseId] = useState<string | null>(null);
   const [payForm] = Form.useForm();
   const [payPR, setPayPR] = useState<any | null>(null);  // 当前要兑付的 PaymentRequest
@@ -102,6 +104,38 @@ function FinanceApproval() {
     queryKey: ['pending-mall-payments'],
     queryFn: () => api.get('/mall/admin/payments/pending').then(r => extractItems(r.data)),
     refetchInterval: 5000,
+  });
+
+  // 商城退货：pending（待审）+ approved（已批准但还没退款）
+  const { data: pendingReturns = [] } = useQuery<any[]>({
+    queryKey: ['pending-mall-returns'],
+    queryFn: () => api.get('/mall/admin/returns', { params: { status: 'pending' } })
+      .then(r => r.data?.records || []),
+    refetchInterval: 5000,
+  });
+  const { data: approvedReturns = [] } = useQuery<any[]>({
+    queryKey: ['approved-mall-returns'],
+    queryFn: () => api.get('/mall/admin/returns', { params: { status: 'approved' } })
+      .then(r => r.data?.records || []),
+    refetchInterval: 5000,
+  });
+  const approveReturnMut = useMutation({
+    mutationFn: (id: string) => api.post(`/mall/admin/returns/${id}/approve`, {}),
+    onSuccess: () => {
+      message.success('已批准退货，库存已回退');
+      queryClient.invalidateQueries({ queryKey: ['pending-mall-returns'] });
+      queryClient.invalidateQueries({ queryKey: ['approved-mall-returns'] });
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail ?? '批准失败'),
+  });
+  const markRefundedMut = useMutation({
+    mutationFn: ({ id, refund_method }: { id: string; refund_method: string }) =>
+      api.post(`/mall/admin/returns/${id}/mark-refunded`, { refund_method }),
+    onSuccess: () => {
+      message.success('已标记退款完成');
+      queryClient.invalidateQueries({ queryKey: ['approved-mall-returns'] });
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail ?? '标记失败'),
   });
   const confirmMallPaymentMut = useMutation({
     mutationFn: (order_id: string) => api.post(`/mall/admin/orders/${order_id}/confirm-payment`),
@@ -626,6 +660,124 @@ function FinanceApproval() {
               ] as any}
               dataSource={pendingMallPayments} rowKey="id" size="middle" pagination={false} scroll={{ x: 1400 }}
             />,
+        },
+        {
+          key: 'mall-returns',
+          label: <span>商城退货待审 <Tag color="red">{pendingReturns.length + approvedReturns.length}</Tag></span>,
+          children: (
+            <>
+              {pendingReturns.length === 0 && approvedReturns.length === 0
+                ? <Empty description="暂无商城退货待处理" />
+                : null}
+
+              {pendingReturns.length > 0 && (
+                <div style={{ marginBottom: 24 }}>
+                  <Typography.Title level={5}>待审批</Typography.Title>
+                  <Table
+                    dataSource={pendingReturns}
+                    rowKey="id"
+                    size="middle"
+                    pagination={false}
+                    columns={[
+                      { title: '订单号', dataIndex: 'order_no', width: 180 },
+                      {
+                        title: '客户', key: 'cust', width: 180,
+                        render: (_: any, r: any) => r.customer
+                          ? `${r.customer.real_name || r.customer.nickname || '-'}${r.customer.phone ? ` · ${r.customer.phone}` : ''}`
+                          : '-',
+                      },
+                      { title: '退货原因', dataIndex: 'reason', ellipsis: true },
+                      {
+                        title: '订单金额', dataIndex: 'order_pay_amount', width: 110,
+                        render: (v?: string) => v ? `¥${v}` : '-',
+                      },
+                      {
+                        title: '已收', dataIndex: 'order_received_amount', width: 110,
+                        render: (v?: string) => v ? `¥${v}` : '-',
+                      },
+                      {
+                        title: '申请时间', dataIndex: 'created_at', width: 150,
+                        render: (v?: string) => v ? new Date(v).toLocaleString('zh-CN') : '-',
+                      },
+                      {
+                        title: '操作', key: 'act', width: 160,
+                        render: (_: any, r: any) => (
+                          <Space>
+                            <Button
+                              size="small"
+                              type="primary"
+                              onClick={() => Modal.confirm({
+                                title: `批准退货 - ${r.order_no}`,
+                                content: <p>批准后将回退库存、订单状态改为 refunded、pending commission 标 reversed。退款金额默认为订单已收 ¥{r.order_received_amount || 0}</p>,
+                                onOk: () => approveReturnMut.mutateAsync(r.id),
+                              })}
+                            >
+                              批准
+                            </Button>
+                            <Button
+                              size="small"
+                              onClick={() => navigate(`/mall/returns?status=pending`)}
+                            >
+                              详情/驳回
+                            </Button>
+                          </Space>
+                        ),
+                      },
+                    ]}
+                  />
+                </div>
+              )}
+
+              {approvedReturns.length > 0 && (
+                <div>
+                  <Typography.Title level={5}>已通过待退款（线下打款后标记）</Typography.Title>
+                  <Table
+                    dataSource={approvedReturns}
+                    rowKey="id"
+                    size="middle"
+                    pagination={false}
+                    columns={[
+                      { title: '订单号', dataIndex: 'order_no', width: 180 },
+                      {
+                        title: '客户', key: 'cust', width: 180,
+                        render: (_: any, r: any) => r.customer
+                          ? `${r.customer.real_name || r.customer.nickname || '-'}${r.customer.phone ? ` · ${r.customer.phone}` : ''}`
+                          : '-',
+                      },
+                      {
+                        title: '退款金额', dataIndex: 'refund_amount', width: 120,
+                        render: (v?: string) => v ? <strong style={{ color: '#cf1322' }}>¥{v}</strong> : '-',
+                      },
+                      {
+                        title: '批准时间', dataIndex: 'reviewed_at', width: 150,
+                        render: (v?: string) => v ? new Date(v).toLocaleString('zh-CN') : '-',
+                      },
+                      {
+                        title: '操作', key: 'act', width: 200,
+                        render: (_: any, r: any) => (
+                          <Space>
+                            {(['cash', 'bank', 'wechat', 'alipay'] as const).map(m => (
+                              <Button
+                                key={m}
+                                size="small"
+                                onClick={() => Modal.confirm({
+                                  title: `线下${m === 'cash' ? '现金' : m === 'bank' ? '转账' : m}退款完成？`,
+                                  content: <p>订单 {r.order_no} 已通过退货申请，退款金额 ¥{r.refund_amount}。确认后状态 → refunded。</p>,
+                                  onOk: () => markRefundedMut.mutateAsync({ id: r.id, refund_method: m }),
+                                })}
+                              >
+                                {m === 'cash' ? '现金' : m === 'bank' ? '转账' : m === 'wechat' ? '微信' : '支付宝'}已退
+                              </Button>
+                            ))}
+                          </Space>
+                        ),
+                      },
+                    ]}
+                  />
+                </div>
+              )}
+            </>
+          ),
         },
         {
           key: 'target',

@@ -25,6 +25,8 @@ from app.models.store_sale import (  # noqa: F401
     RetailCommissionRate,
     StoreSale,
     StoreSaleItem,
+    StoreSaleReturn,
+    StoreSaleReturnItem,
 )
 
 # Mall models（小程序）

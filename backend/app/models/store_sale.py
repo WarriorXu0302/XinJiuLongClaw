@@ -185,3 +185,128 @@ class RetailCommissionRate(Base):
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         onupdate=func.now(), nullable=True
     )
+
+
+# =============================================================================
+# 门店退货（StoreSaleReturn）
+# =============================================================================
+#
+# 客户拎着酒来店里退。状态机：
+#   pending ──approve──→ approved（库存回加 + 条码回 in_stock + commission reversed）
+#      │
+#      └──reject──→ rejected（终态，不动数据）
+#
+# approved 之后同时改 StoreSale.status=refunded，该销售单不再计入 profit 聚合。
+# 退款走线下结算，系统只记账。
+#
+# 权限：
+#   - 发起（apply_return）：店员（本店）
+#   - 批准 / 驳回（approve/reject）：admin / boss / finance
+#
+# 一张 StoreSale 只允许**一次**成功退货（approved/refunded 后不能再退）—— service 层校验。
+
+
+class StoreSaleReturn(Base):
+    """门店销售退货单（整单退）。"""
+
+    __tablename__ = "store_sale_returns"
+    __table_args__ = (
+        Index("ix_store_sale_returns_sale", "original_sale_id"),
+        Index("ix_store_sale_returns_store", "store_id"),
+        Index("ix_store_sale_returns_status", "status"),
+        Index("ix_store_sale_returns_created", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    return_no: Mapped[str] = mapped_column(
+        String(50), unique=True, index=True, nullable=False,
+        comment="SRR-YYYYMMDD-HHMMSS-xxxxxx",
+    )
+
+    # 关联原销售单
+    original_sale_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("store_sales.id"), nullable=False,
+    )
+    # 冗余快照：查询列表时避免 join store_sales
+    store_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("warehouses.id"), nullable=False,
+    )
+
+    # 发起店员（小程序端店员，提成归属要用）
+    initiator_employee_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("employees.id"), nullable=False,
+    )
+    # 客户（从原单复制）
+    customer_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("mall_users.id"), nullable=False,
+    )
+
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # 状态：pending / approved / rejected / refunded（refunded 等价于 approved，
+    # 但保留语义上的区分，方便将来拆"已批准但退款未结算"vs "已退款")
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending",
+    )
+
+    # 金额快照（从原单聚合）
+    refund_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False, default=Decimal("0"),
+        comment="应退金额 = 原单成交总金额（整单退）",
+    )
+    commission_reversal_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False, default=Decimal("0"),
+        comment="需冲销的店员提成（原单 commission）",
+    )
+    total_bottles: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # 审批
+    reviewer_employee_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("employees.id"), nullable=True,
+    )
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        onupdate=func.now(), nullable=True
+    )
+
+
+class StoreSaleReturnItem(Base):
+    """退货明细（每瓶一行，精确对应 StoreSaleItem）。
+
+    执行 approve 时逐瓶：条码 OUTBOUND → IN_STOCK，Inventory 回加。
+    """
+
+    __tablename__ = "store_sale_return_items"
+    __table_args__ = (
+        Index("ix_store_sale_return_items_return", "return_id"),
+        Index("ix_store_sale_return_items_barcode", "barcode"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    return_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("store_sale_returns.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # 对应 StoreSaleItem 的快照
+    original_item_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("store_sale_items.id"), nullable=False,
+    )
+    barcode: Mapped[str] = mapped_column(String(200), nullable=False)
+    product_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("products.id"), nullable=False,
+    )
+    batch_no_snapshot: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # 金额（从 StoreSaleItem 复制过来作退款凭证）
+    sale_price_snapshot: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    commission_reversal: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False, default=Decimal("0"),
+        comment="该瓶对应的提成冲销（= 原 StoreSaleItem.commission_amount）",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())

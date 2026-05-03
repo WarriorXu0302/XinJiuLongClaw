@@ -138,6 +138,32 @@ function FinanceApproval() {
     },
     onError: (e: any) => message.error(e?.response?.data?.detail ?? '驳回失败'),
   });
+
+  // 门店退货待审（桥 B12）
+  const { data: pendingStoreReturns = [] } = useQuery<any[]>({
+    queryKey: ['pending-store-returns'],
+    queryFn: () => api.get('/store-returns/pending-approval')
+      .then(r => r.data?.records || []),
+    refetchInterval: 5000,
+  });
+  const approveStoreReturnMut = useMutation({
+    mutationFn: (id: string) => api.post(`/store-returns/${id}/approve`, {}),
+    onSuccess: () => {
+      message.success('已批准，条码和库存已回退');
+      queryClient.invalidateQueries({ queryKey: ['pending-store-returns'] });
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail ?? '批准失败'),
+  });
+  const rejectStoreReturnMut = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      api.post(`/store-returns/${id}/reject`, { rejection_reason: reason }),
+    onSuccess: () => {
+      message.success('已驳回');
+      queryClient.invalidateQueries({ queryKey: ['pending-store-returns'] });
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail ?? '驳回失败'),
+  });
+
   const { data: approvedReturns = [] } = useQuery<any[]>({
     queryKey: ['approved-mall-returns'],
     queryFn: () => api.get('/mall/admin/returns', { params: { status: 'approved' } })
@@ -990,6 +1016,70 @@ function FinanceApproval() {
                             onOk: () => {
                               if (!reason.trim()) { message.warning('请填写驳回原因'); return Promise.reject(); }
                               return rejectWhTransferMut.mutateAsync({ id: r.id, reason });
+                            },
+                          });
+                        }}
+                      >驳回</Button>
+                    </Space>
+                  ),
+                },
+              ] as any}
+            />,
+        },
+        {
+          key: 'store-returns',
+          label: <span>门店退货待审 <Tag color="red">{pendingStoreReturns.length}</Tag></span>,
+          children: pendingStoreReturns.length === 0 ? <Empty description="暂无门店退货待审" /> :
+            <Table
+              dataSource={pendingStoreReturns}
+              rowKey="id"
+              size="middle"
+              pagination={false}
+              columns={[
+                { title: '退货单号', dataIndex: 'return_no', width: 210 },
+                { title: '原销售单', dataIndex: 'original_sale_no', width: 200 },
+                { title: '门店', dataIndex: 'store_name', width: 150 },
+                { title: '发起店员', dataIndex: 'initiator_name', width: 100 },
+                { title: '客户', dataIndex: 'customer_name', width: 120 },
+                { title: '瓶数', dataIndex: 'total_bottles', width: 70, align: 'right' as const },
+                {
+                  title: '应退金额', dataIndex: 'refund_amount', width: 110, align: 'right' as const,
+                  render: (v: string) => <span style={{ color: '#ff4d4f', fontWeight: 600 }}>¥{v}</span>,
+                },
+                {
+                  title: '提成冲销', dataIndex: 'commission_reversal_amount', width: 100, align: 'right' as const,
+                  render: (v: string) => `¥${v}`,
+                },
+                { title: '原因', dataIndex: 'reason', ellipsis: true },
+                {
+                  title: '申请时间', dataIndex: 'created_at', width: 150,
+                  render: (v: string) => new Date(v).toLocaleString('zh-CN'),
+                },
+                {
+                  title: '操作', key: 'act', width: 170,
+                  render: (_: any, r: any) => (
+                    <Space>
+                      <Button
+                        size="small" type="primary"
+                        onClick={() => Modal.confirm({
+                          title: `批准退货 ${r.return_no}？`,
+                          content: `${r.total_bottles} 瓶，应退 ¥${r.refund_amount}；条码回池、库存回加、提成冲销`,
+                          onOk: () => approveStoreReturnMut.mutateAsync(r.id),
+                        })}
+                      >通过</Button>
+                      <Button
+                        size="small" danger
+                        onClick={() => {
+                          let reason = '';
+                          Modal.confirm({
+                            title: `驳回退货 ${r.return_no}`,
+                            content: (
+                              <textarea rows={3} style={{ width: '100%', border: '1px solid #d9d9d9', borderRadius: 4, padding: 6 }}
+                                onChange={e => { reason = e.target.value; }} placeholder="驳回原因（必填）" />
+                            ),
+                            onOk: () => {
+                              if (!reason.trim()) { message.warning('请填写驳回原因'); return Promise.reject(); }
+                              return rejectStoreReturnMut.mutateAsync({ id: r.id, reason });
                             },
                           });
                         }}

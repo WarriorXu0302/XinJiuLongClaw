@@ -375,7 +375,7 @@ pending_scan ─submit→ pending_approval ─approve→ approved ─execute→ 
 关键断言：StoreSale 金额 + StoreSaleItem + Commission pending + Inventory 扣减 + 条码 outbound + StockFlow 六处一致
 
 ### 🔴 已知 gap
-- **退货**：当前无店面退货流程。客户来退货怎么办？是走 mall 的 MallReturnRequest 还是新建 StoreSaleReturn？需业务决策。P1
+- ~~**退货**：当前无店面退货流程~~ ✅ **已实现**：`StoreSaleReturn` + `StoreSaleReturnItem` 整单退，pending→approved/rejected→refunded 状态机，批准后 6 处一致性（原单 refunded / 条码 IN_STOCK / Inventory 回加 / StockFlow retail_return / Commission reversed / 退货单状态）。小程序店员从"我的业绩"发起，管理台审批中心新 tab"门店退货待审"审批。E2E `scripts/e2e_store_return.py` 覆盖 5 场景。
 - **客户首次到店**：如果没注册过 mall_user，店员能不能临时建个客户？目前必须客户自己注册完才能买。P1 业务决策
 - **条码来源 = 采购入仓或调拨入仓**：门店仓进货靠 B11 从品牌主仓调过来或 B6 采购直入。两条路径都支撑，但**店仓目前没进货接口前端**——桥 B6 的收货页已经能选 store 仓，但 B11 调拨的前端也行，所以不缺端点缺的是"从哪个品牌主仓货源搬来"的运营流程文档。P2
 

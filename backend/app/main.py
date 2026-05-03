@@ -100,6 +100,7 @@ def create_app() -> FastAPI:
         performance,
         transfers,
         store_sales,
+        store_returns,
     )
 
     app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
@@ -122,6 +123,7 @@ def create_app() -> FastAPI:
         prefix="/api/retail-commission-rates",
         tags=["StoreSales"],
     )
+    app.include_router(store_returns.router, prefix="/api/store-returns", tags=["StoreReturns"])
     app.include_router(suppliers.router, prefix="/api/suppliers", tags=["Suppliers"])
     app.include_router(hr.router, prefix="/api/hr", tags=["HR"])
     app.include_router(policy_templates.router, prefix="/api/policy-templates", tags=["PolicyTemplates"])
@@ -216,6 +218,7 @@ def create_app() -> FastAPI:
         leave as mw_leave,
         notifications as mw_notifications,
         store_sales as mw_store_sales,
+        store_returns as mw_store_returns,
     )
     app.include_router(
         mw_notifications.router,
@@ -255,6 +258,11 @@ def create_app() -> FastAPI:
     app.include_router(
         mw_store_sales.router,
         prefix="/api/mall/workspace/store-sales",
+        tags=["Mall-Workspace"],
+    )
+    app.include_router(
+        mw_store_returns.router,
+        prefix="/api/mall/workspace/store-returns",
         tags=["Mall-Workspace"],
     )
 

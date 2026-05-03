@@ -46,6 +46,7 @@
         <view class="row__right">
           <text class="row__amount">¥{{ r.total_sale_amount }}</text>
           <text class="row__commission">提成 ¥{{ r.total_commission }}</text>
+          <text class="row__return" @tap="applyReturn(r)">申请退货</text>
         </view>
       </view>
     </view>
@@ -87,6 +88,35 @@ const fmtTime = (t) => {
   return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+const applyReturn = (r) => {
+  let reason = ''
+  uni.showModal({
+    title: '申请整单退货',
+    content: `${r.sale_no}\n共 ${r.total_bottles} 瓶，应退 ¥${r.total_sale_amount}\n\n退货需管理员审批后生效（条码回池、库存回加、提成冲销）。确认发起？`,
+    editable: true,
+    placeholderText: '退货原因（可选）',
+    success: async (res) => {
+      if (!res.confirm) return
+      reason = res.content || ''
+      try {
+        const resp = await http.request({
+          url: '/api/mall/workspace/store-returns',
+          method: 'POST',
+          data: { original_sale_id: r.id, reason }
+        })
+        uni.showModal({
+          title: '已提交退货申请',
+          content: `退货单 ${resp.data.return_no}\n状态：待审批\n应退 ¥${resp.data.refund_amount}`,
+          showCancel: false,
+          success: () => loadAll()
+        })
+      } catch (e) {
+        uni.showToast({ title: e?.detail || '申请失败', icon: 'none' })
+      }
+    }
+  })
+}
+
 onLoad(() => { loadAll() })
 onShow(() => { loadAll() })
 </script>
@@ -122,4 +152,12 @@ onShow(() => { loadAll() })
 .row__time { font-size: 22rpx; color: #8c8c8c; margin-top: 4rpx; }
 .row__amount { font-size: 30rpx; font-weight: 600; color: #0e0e0e; }
 .row__commission { font-size: 22rpx; color: #c9a961; margin-top: 4rpx; }
+.row__return {
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  color: #ff4d4f;
+  padding: 4rpx 12rpx;
+  border: 1rpx solid #ff4d4f;
+  border-radius: 4rpx;
+}
 </style>

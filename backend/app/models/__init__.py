@@ -47,7 +47,13 @@ from app.models.notification_log import NotificationLog
 from app.models.financing import FinancingOrder, FinancingRepayment
 from app.models.expense_claim import ExpenseClaim
 from app.models.transfer import WarehouseTransfer, WarehouseTransferItem
-from app.models.store_sale import RetailCommissionRate, StoreSale, StoreSaleItem
+from app.models.store_sale import (
+    RetailCommissionRate,
+    StoreSale,
+    StoreSaleItem,
+    StoreSaleReturn,
+    StoreSaleReturnItem,
+)
 
 __all__ = [
     "Base",
@@ -113,4 +119,6 @@ __all__ = [
     "StoreSale",
     "StoreSaleItem",
     "RetailCommissionRate",
+    "StoreSaleReturn",
+    "StoreSaleReturnItem",
 ]

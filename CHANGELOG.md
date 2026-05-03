@@ -17,6 +17,19 @@
 
 ### Added
 
+- **门店退货（桥 B12 延伸）** — 客户来店退货的完整闭环
+  - 新表 `store_sale_returns` + `store_sale_return_items`（每瓶一行快照）
+  - 状态机：pending → approved/rejected → refunded（批准时一并执行）
+  - service `store_return_service`：apply / approve / reject 三个动作
+    * approve 时原子执行：条码 OUTBOUND → IN_STOCK + Inventory 回加 + StockFlow retail_return + Commission pending → reversed（已 settled 不追溯，只 notes 留痕）+ StoreSale.status = refunded（profit 自动排除）
+    * 一单只能活跃退一次（409 防重）
+    * 店员只能退本店单（403）
+  - 后端：`/api/store-returns`（admin 列表/详情/审批）+ `/api/store-returns/pending-approval`（审批中心聚合）+ `/api/mall/workspace/store-returns`（店员小程序发起 + 查自己流水）
+  - ERP 审批中心加 tab"门店退货待审"，一键通过/驳回
+  - 小程序"我的业绩"每行加"申请退货"按钮（支持填原因）
+  - E2E `scripts/e2e_store_return.py` 覆盖 5 场景：正常闭环 / 非本店店员拒 / 重复退货拒 / 批准后 6 处一致性（原单/条码/库存/流水/提成/退货单）
+  - migration m6b2
+
 - **门店零售收银系统（桥 B12）** — 4 家专卖店店员用小程序记账式收银
   - 新表 `store_sales` + `store_sale_items`（每瓶一行）+ `retail_commission_rates`（每员工×每商品一个利润提成率）
   - `products` 加 `min_sale_price/max_sale_price`（老板配售价区间）

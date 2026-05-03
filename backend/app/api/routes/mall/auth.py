@@ -144,16 +144,50 @@ async def wechat_login(
 
     user = await auth_service.get_mall_user_by_openid(db, openid)
     if user is None:
+        # 未注册用户也记一条审计（追溯"有人扫别人的小程序试登录"）
+        async with admin_session_factory() as audit_session:
+            await log_audit(
+                audit_session, action="mall_user.login_failed",
+                entity_type="MallUser", actor_type="anonymous",
+                request=request,
+                changes={
+                    "method": "wechat",
+                    "openid_hash": openid[:8] + "***",
+                    "reason": "openid 未注册",
+                    "status_code": 404,
+                },
+            )
+            await audit_session.commit()
         raise HTTPException(
             status_code=404, detail="账号未注册，请输入邀请码完成注册"
         )
-    assert_mall_user_active(user)
-    from app.services.mall.validators import (
-        assert_mall_user_approved,
-        assert_salesman_linked_employee_active,
-    )
-    assert_mall_user_approved(user)
-    await assert_salesman_linked_employee_active(db, user)
+    try:
+        assert_mall_user_active(user)
+        from app.services.mall.validators import (
+            assert_mall_user_approved,
+            assert_salesman_linked_employee_active,
+        )
+        assert_mall_user_approved(user)
+        await assert_salesman_linked_employee_active(db, user)
+    except HTTPException as exc:
+        # 已注册用户被拒（disabled / archived / pending / 驳回 / 员工离职）→ 审计
+        async with admin_session_factory() as audit_session:
+            await log_audit(
+                audit_session, action="mall_user.login_failed",
+                entity_type="MallUser", entity_id=user.id,
+                mall_user_id=user.id, actor_type="mall_user",
+                request=request,
+                changes={
+                    "method": "wechat",
+                    "status_code": exc.status_code,
+                    "reason": exc.detail if isinstance(exc.detail, str)
+                        else (exc.detail or {}).get("reason"),
+                    "user_status": user.status,
+                    "application_status": user.application_status,
+                },
+            )
+            await audit_session.commit()
+        raise
 
     await auth_service.record_login_log(
         db,

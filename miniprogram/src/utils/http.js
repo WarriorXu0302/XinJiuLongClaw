@@ -106,6 +106,34 @@ const http = {
 
           if (status >= 400 && status < 500) {
             const detail = body?.detail || body?.msg || '请求失败'
+            // 业务员 linked_employee 被 ERP 端停用：弹模态而不是 toast，并登出 mall session
+            // 后端 detail 固定前缀"您绑定的 ERP 员工已停用"（见 validators.assert_salesman_linked_employee_active）
+            if (status === 403 && typeof detail === 'string' && detail.startsWith('您绑定的 ERP 员工已停用')) {
+              uni.removeStorageSync('Token')
+              uni.removeStorageSync('RefreshToken')
+              uni.removeStorageSync('expiresTimeStamp')
+              uni.removeStorageSync('loginResult')
+              uni.removeStorageSync('userType')
+              uni.removeStorageSync('userId')
+              uni.removeStorageSync('hadLogin')
+              if (!params.dontTrunLogin) {
+                uni.showModal({
+                  title: '账号已停用',
+                  content: detail + '\n您的登录已失效，请联系 HR 处理后再登录。',
+                  showCancel: false,
+                  confirmText: '我知道了',
+                  success: () => {
+                    uni.reLaunch({ url: '/pages/accountLogin/accountLogin' })
+                  }
+                })
+              }
+              const eEmp = new Error(detail)
+              eEmp.status = status
+              eEmp.detail = detail
+              eEmp.data = body
+              eEmp.code = 'EMPLOYEE_INACTIVE'
+              return reject(eEmp)
+            }
             if (!params.hasCatch) {
               uni.showToast({ title: detail, icon: 'none' })
             }

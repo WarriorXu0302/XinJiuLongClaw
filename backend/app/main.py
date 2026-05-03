@@ -98,6 +98,7 @@ def create_app() -> FastAPI:
         sales_targets,
         attendance,
         performance,
+        transfers,
     )
 
     app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
@@ -113,6 +114,7 @@ def create_app() -> FastAPI:
     app.include_router(inspections.router, prefix="/api", tags=["Inspections"])
     app.include_router(tasting.router, prefix="/api", tags=["Tasting"])
     app.include_router(purchase.router, prefix="/api/purchase-orders", tags=["Purchase"])
+    app.include_router(transfers.router, prefix="/api/transfers", tags=["Transfers"])
     app.include_router(suppliers.router, prefix="/api/suppliers", tags=["Suppliers"])
     app.include_router(hr.router, prefix="/api/hr", tags=["HR"])
     app.include_router(policy_templates.router, prefix="/api/policy-templates", tags=["PolicyTemplates"])

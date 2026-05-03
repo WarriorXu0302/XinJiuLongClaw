@@ -15,9 +15,23 @@
 
 ## [Unreleased]
 
-### Fixed
+### Added
 
 - 业务员"我的订单"在途 Tab 现在同时显示 `assigned` + `shipped` 两个状态（原仅 assigned → 导致已出库未送达的单消失）。后端 `/api/mall/salesman/orders` 的 `status` 参数支持逗号分隔多值
+- 三份业务原子化文档 `skills/xinjiulong-erp/references/business-atoms-{mall,erp,bridges}.md`：按业务流切原子动作，标注 E2E 测试状态与全局 🔴 gap 汇总
+- `GET /api/products/{id}/mall-cascade-impact` + `PUT /products/{id}?cascade_mall=true` — ERP 下架商品时提示挂靠的 mall_products 数量，可选同步下架；前端 ProductList 增加"下架/启用"按钮，有影响时弹确认框
+- `GET /api/mall/salesman/orders/{id}/ship-mode` — 返回 `scan` / `bulk` 两种出库模式；mall 仓从采购入库无条码订单走 bulk 模式，小程序先查模式再决定扫码页还是按数量弹窗（桥 B6.2 P0 阻塞已解）
+- `ship_order` 探测订单 SKU 是否有 IN_STOCK 条码：有 → 必扫码；无 → 允许散装（`scanned_barcodes=None` 或 `[]` 都走 bulk 路径）
+- `PUT /api/mall/admin/salesmen/{id}/rebind-employee` — 管理员换绑业务员的 ERP 员工，校验 active + 未占用 + 无在途订单 + bump token_version；ERP 前端 SalesmanList 加"换绑员工"按钮
+- 热搜词 admin 管理：`mall_hot_search_keywords` 表 + `/api/mall/admin/search-keywords` CRUD + ERP 前端 `/mall/search-keywords` 页；`/api/mall/search/hot-keywords` 改读 DB（硬编码 5 个词降级为 fallback）
+- `backend/app/scripts/seed_regions_national.py` — 全国 34 省/自治区 + 全地级市/自治州 level 1+2 行政区划 seed（区县仍由 `seed_regions_henan.py` 分省补）
+- E2E 脚本三枚 · `scripts/e2e_mall_partial_close.py`（桥 B3.5 坏账路径）· `scripts/e2e_full_mall_flow.py`（注册→下单→ship→deliver→凭证→确认→退货 10 步贯通）· `scripts/e2e_skip_alert_threshold.py`（dismissed 排除阈值）· `scripts/e2e_reversed_commission_excluded.py`（工资单过滤回归）
+- `skills/xinjiulong-erp/references/business-decisions-pending.md` — 跨月退货/提成追溯的业务现实梳理，给 openclaw 飞书智能体回答老板问题用
+- 权限隔离索引补齐（migration m5b1）：`mall_users.linked_employee_id` UNIQUE partial(user_type=salesman) 保证"一 employee 一 salesman 账号"· `mall_inventory_barcodes(sku_id,status,warehouse_id)` 复合 · `commissions(employee_id,mall_order_id,status)` partial 覆盖工资单扫描
+
+### Fixed
+
+- mall http.js 识别后端"您绑定的 ERP 员工已停用"detail，改为弹模态 + 清 token + 跳登录页（之前靠通用 401 链路，体验差且没提示）
 - `order_stats` 过滤 `consumer_deleted_at IS NULL`（软删订单不进角标计数）+ partial_closed 归入 payed 分组（原先在任何计数里都看不到）
 - `register_mall_user` 移除 IntegrityError 后的冗余 `db.rollback()` —— 原行为会提前释放 FOR UPDATE 锁，让并发注册抢同一张邀请码
 - `auth/register` + `auth/wechat_register` 补 `mall_user.register` 审计（含 IP、推荐人、注册方式）

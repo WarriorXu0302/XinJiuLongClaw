@@ -218,3 +218,109 @@ Plan 拆得再细也不是偷懒的理由。拆开是为了有序推进，不是
 每合并一次改动（push 到 main 或合 PR 后），**立刻**在 `CHANGELOG.md` 的 `[Unreleased]` 节加一行。
 格式：`- [#PR号 或 commit 短 hash] 一句话描述（动词开头）` 放在对应分类下（Security / Added / Changed / Fixed / Deprecated / Removed）。
 不记 = 下次对话上下文清空就没人知道改了啥。CHANGELOG 是项目记忆，不是可选文档。
+
+---
+
+## 工作方法论：业务原子化 → 织网 → 找病灶
+
+每次做审计 / 排查 / 交付 / review 都按这个框架走，不要临时拍脑袋。
+
+### 第 1 层：原子化
+
+每个业务流切成"原子动作"：
+- 一个原子 = 一张表改动 + 副作用 + 通知 + 绑定的代码位置（file:line）
+- 状态标记：🟢 done + E2E · 🟡 coded 未 E2E · 🔴 gap · ⚪ n/a
+- 沉淀到 `skills/xinjiulong-erp/references/business-atoms-{mall,erp}.md`
+
+### 第 2 层：织网
+
+跨系统/跨域的连接点做成"桥"，每座桥三层看：
+1. **数据绑定**（FK / 冗余字段）
+2. **动作触发**（A 域动作 → B 域副作用）
+3. **状态同步**（A 字段改，B 要不要跟）
+
+沉淀到 `skills/xinjiulong-erp/references/business-atoms-bridges.md`，结尾加全局 🔴 gap 表，按 P0/P1/P2 排序 + 标注 file:line + 估工。
+
+### 第 3 层：找病灶
+
+网铺开后两类问题会显性化：
+- 原子 🟡 coded 但未 E2E → 写 `backend/scripts/e2e_*.py` 脚本，造数据 + 跑真实流 + 断言
+- 桥 🔴 断了 → 要么补代码（<30min 顺手修），要么转业务决策（记 `business-decisions-pending.md` 给老板/智能体参考）
+
+### 修 gap 的优先级
+
+- **P0 上线阻塞**：业务跑不通、数据不一致风险 → 立刻修
+- **P1 合规/数据质量**：跨月/跨域/定时任务场景下会翻车 → 上线后一周内
+- **P2 边角**：体验差但不阻塞 → 有空就修
+- **<30 min 的顺手修**：审计时就地改掉，别攒
+
+### 修完立刻三件事
+
+1. bridges.md / atoms.md 对应行把 🔴 改成 ✅，注明端点路径或 commit
+2. CHANGELOG.md 的 `[Unreleased]` 加一行
+3. 如果是代码改动，**跑一次 E2E 脚本**或者手 curl 验完再说"完成"
+
+---
+
+## Review 的两层（交付前必走）
+
+**技术 review 找 bug，业务 review 找 gap**。Bug 从代码里找，gap 从业务网上找。两个一起做，才敢说"这个功能做完了"。
+
+### 技术侧 review（6 个必查项）
+
+| 检查点 | 问自己 | 典型翻车 |
+|---|---|---|
+| 写入 → 读取闭环 | 改了写入，grep 所有读取方还能读对吗？ | confirm_payment 改了 completed_at，profit_service 按 completed_at 查 partial_closed 订单就查不到 |
+| 事务边界 | FOR UPDATE 锁够不够大？手动 rollback 会不会释放锁给并发抢？ | register 里 IntegrityError 后手动 rollback → 并发注册抢同一张邀请码 |
+| flush 时机 | INSERT/UPDATE 后同表聚合前有 flush 吗？ | Commission 还没落库就查 SUM，业务员工资虚低 |
+| 幂等性 | 重跑不会出问题吗？定时任务手动触发第二次呢？ | job_notify_archive_pre_notice 没去重 → 当天收两条"即将归档"通知 |
+| 索引 + 权限 | `WHERE actor_id=?` 查询的字段有索引吗？UNIQUE 约束是业务约束还是只是性能？ | linked_employee_id 没 UNIQUE → 一 employee 被两个 mall 账号绑，commission 归属混乱 |
+| 审计留痕 | 涉及金额/状态/权限变更的写操作，有 log_audit 吗？追责能反查吗？ | 管理员换绑推荐人没记 reason → 投诉时追不到根因 |
+
+### 业务侧 review（4 角色换位 + 3 边界场景）
+
+**4 个角色换位走真实流**：
+
+| 角色 | 要走的流 | 典型问题 |
+|---|---|---|
+| **消费者** | 注册 → 浏览 → 下单 → 收货 → 退货 | 注册后登录看不到已填地址；订单列表状态字符串 vs 数字比较全显"已取消" |
+| **业务员** | 抢单 → ship → deliver → 凭证 → 拿提成 → 查 KPI | mall 仓 ship 要求扫码但采购入库没生成条码流程卡死；在途 Tab 漏 shipped 状态 |
+| **财务/老板** | 审批凭证 → 看利润台账 → 跨月退货 → 发工资 | 上月发的工资下月客户退货了，那笔钱要不要吐？排行榜 GMV 会不会悄悄变？ |
+| **HR/管理员** | 建业务员 → 绑 employee → 换绑 → 停用 | 建错了只能禁用重建；停用后小程序没友好提示就被踢下线 |
+
+**3 个边界场景必问**：
+1. **跨域（ERP↔mall）**：A 域动作在 B 域是否自动生效？（employee 停用 → mall 登录拒绝 / 商品下架 → mall 商品是否级联）
+2. **跨时间（本月/下月）**：settled 后再发生的变更怎么处理？（退货追溯提成、跨月 KPI 快照、定时任务跑两次）
+3. **跨角色并发**：A 角色和 B 角色同时操作同一条数据会出什么？（admin 改派时业务员在 ship、业务员 ship 时管理员 cancel）
+
+### Review 的工具沉淀
+
+| 工具 | 用途 |
+|---|---|
+| `business-atoms-{mall,erp}.md` | 技术侧：每个端点状态机 + 副作用 + E2E 覆盖率 |
+| `business-atoms-bridges.md` | 两侧合一：跨域副作用完整性 + 全局 gap 表 |
+| `backend/scripts/e2e_*.py` | 业务侧：造数据跑真实链路每步断言 |
+| `business-decisions-pending.md` | 业务侧：边界场景讲清楚给业务方做决策，不是开发替老板拍板 |
+| `audit_logs` + `CHANGELOG.md` | 事后 review：出问题时反查"谁何时做了什么改动" |
+
+### 给智能体铺的文档层次
+
+```
+skills/xinjiulong-erp/references/
+├─ business-atoms-mall.md        ← mall 每个原子的状态
+├─ business-atoms-erp.md         ← ERP 每个原子的状态（生产稳定）
+├─ business-atoms-bridges.md     ← 桥 + 全局 gap 清单
+└─ business-decisions-pending.md ← 业务未决场景（openclaw 飞书智能体读）
+```
+
+前三份是"系统此刻的真相快照"，最后一份是"老板会追问但还没定的边界"。
+
+---
+
+## 做任何事之前先问自己
+
+1. 这个改动涉及哪些原子？在业务网上是哪座桥？
+2. 改完技术 review 6 项过得去吗？业务 review 4 角色走一遍有问题吗？
+3. 有没有 E2E 脚本覆盖？没有就补一个
+4. bridges.md / CHANGELOG / decisions 要不要更新？
+5. 这是开发能拍板的事，还是要业务方先决策？别替老板做决定

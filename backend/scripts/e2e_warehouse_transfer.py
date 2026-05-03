@@ -100,7 +100,6 @@ async def _fixture_seed_barcodes(
     cost = Decimal("50.00")
     # inventory
     inv = Inventory(
-        id=str(uuid.uuid4()),
         product_id=product.id,
         warehouse_id=warehouse.id,
         batch_no=batch_no,
@@ -186,16 +185,24 @@ async def main() -> None:
         s.add(mall_wh_2)
         await s.flush()
 
-        # mall 仓 1 塞 3 瓶条码
+        # mall 仓 1 塞 3 瓶条码；如果已存在同 (warehouse, sku) inventory 就 +qty 不新建
         mall_batch = f"E2E-MB-{uuid.uuid4().hex[:6]}"
-        m_inv = MallInventory(
-            id=str(uuid.uuid4()),
-            warehouse_id=mall_wh_1.id,
-            sku_id=mall_sku.id,
-            quantity=3,
-            avg_cost_price=Decimal("50.00"),
-        )
-        s.add(m_inv)
+        m_inv = (await s.execute(
+            select(MallInventory)
+            .where(MallInventory.warehouse_id == mall_wh_1.id)
+            .where(MallInventory.sku_id == mall_sku.id)
+        )).scalar_one_or_none()
+        if m_inv is None:
+            m_inv = MallInventory(
+                id=str(uuid.uuid4()),
+                warehouse_id=mall_wh_1.id,
+                sku_id=mall_sku.id,
+                quantity=3,
+                avg_cost_price=Decimal("50.00"),
+            )
+            s.add(m_inv)
+        else:
+            m_inv.quantity = (m_inv.quantity or 0) + 3
         mall_codes = []
         for i in range(3):
             code = f"E2E-MTR-{uuid.uuid4().hex[:10].upper()}"
@@ -213,8 +220,9 @@ async def main() -> None:
             mall_codes.append(code)
         await s.commit()
 
-        # 暂存 ID
+        # 暂存 ID + 跑前基线（mall 仓 1 当前 qty，后面断言用 qty_before + 2）
         wh_a_id, wh_b_id, wh_main_id = wh_a.id, wh_b.id, wh_main.id
+        mall_wh_1_qty_baseline = m_inv.quantity or 0
         mall_wh_1_id, mall_wh_2_id = mall_wh_1.id, mall_wh_2.id
         mall_sku_id = mall_sku.id
         emp_id = emp.id
@@ -322,7 +330,10 @@ async def main() -> None:
             .where(MallInventory.sku_id == mall_sku_id)
         )).scalar_one()
         print(f"   ✅ mall_inventory: quantity={m_inv_after.quantity}, avg_cost={m_inv_after.avg_cost_price}")
-        assert m_inv_after.quantity == 3 + 2, "mall 仓数量应 +2"
+        expected_qty = mall_wh_1_qty_baseline + 2
+        assert m_inv_after.quantity == expected_qty, (
+            f"mall 仓数量应 baseline + 2 = {expected_qty}, 实际 {m_inv_after.quantity}"
+        )
 
     # ── Step 3：mall→mall（需审批）──
     step(3, "mall→mall（预期：需审批）")
@@ -414,7 +425,21 @@ async def main() -> None:
         # 删 fixture inventory
         await s.execute(delete(Inventory).where(Inventory.batch_no.like("E2E-BATCH-%")))
         await s.execute(delete(Inventory).where(Inventory.batch_no.like("TRANSFER-%")))
+        # 先删 flows 再删 inventory（FK 顺序）
+        await s.execute(
+            delete(MallInventoryFlow).where(MallInventoryFlow.inventory_id.in_(
+                select(MallInventory.id).where(MallInventory.warehouse_id == mall_wh_2_id)
+            ))
+        )
         await s.execute(delete(MallInventory).where(MallInventory.warehouse_id.in_([mall_wh_2_id])))
+        # mall_wh_1 是真仓不能删；把 fixture 累加的库存复位到 baseline
+        inv_row = (await s.execute(
+            select(MallInventory)
+            .where(MallInventory.warehouse_id == mall_wh_1_id)
+            .where(MallInventory.sku_id == mall_sku_id)
+        )).scalar_one_or_none()
+        if inv_row is not None:
+            inv_row.quantity = mall_wh_1_qty_baseline
         # 删仓
         await s.execute(delete(Warehouse).where(Warehouse.id.in_([wh_a_id, wh_b_id, wh_main_id])))
         await s.execute(delete(MallWarehouse).where(MallWarehouse.id == mall_wh_2_id))

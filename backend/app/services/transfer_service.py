@@ -546,7 +546,6 @@ async def _execute_erp_to_erp(
         )).scalar_one_or_none()
         if dst_inv is None:
             dst_inv = Inventory(
-                id=str(uuid.uuid4()),
                 product_id=product_id,
                 warehouse_id=t.dest_warehouse_id,
                 batch_no=batch_no,
@@ -840,7 +839,6 @@ async def _execute_mall_to_erp(
 
         # ERP Inventory 加（虚拟 batch）
         dst_inv = Inventory(
-            id=str(uuid.uuid4()),
             product_id=erp_pid,
             warehouse_id=t.dest_warehouse_id,
             batch_no=virtual_batch,

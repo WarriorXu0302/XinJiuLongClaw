@@ -146,7 +146,9 @@ class Warehouse(Base):
         "Brand", foreign_keys=[brand_id], lazy="selectin"
     )
 
-    manager: Mapped[Optional["Employee"]] = relationship("Employee", lazy="selectin")
+    manager: Mapped[Optional["Employee"]] = relationship(
+        "Employee", foreign_keys=[manager_id], lazy="selectin"
+    )
 
 
 # =============================================================================

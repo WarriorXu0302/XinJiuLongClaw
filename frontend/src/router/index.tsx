@@ -63,6 +63,10 @@ import MallReturnList from '../pages/mall/orders/ReturnList';
 import MallSkipAlertList from '../pages/mall/operations/SkipAlertList';
 import MallDashboard from '../pages/mall/Dashboard';
 import MallInviteCodeList from '../pages/mall/operations/InviteCodeList';
+import MallHousekeepingLogs from '../pages/mall/operations/HousekeepingLogs';
+import MallWarehouseList from '../pages/mall/inventory/WarehouseList';
+import MallInventoryQuery from '../pages/mall/inventory/InventoryQuery';
+import MallNoticeList from '../pages/mall/operations/NoticeList';
 import MallAuditLogList from '../pages/mall/audit/AuditLogList';
 import MallLoginLogList from '../pages/mall/audit/LoginLogList';
 import MallLoginLogStats from '../pages/mall/audit/LoginLogStats';
@@ -164,6 +168,10 @@ const routes: RouteObject[] = [
       { path: 'mall/returns', element: <MallReturnList /> },
       { path: 'mall/skip-alerts', element: <MallSkipAlertList /> },
       { path: 'mall/invite-codes', element: <MallInviteCodeList /> },
+      { path: 'mall/housekeeping-logs', element: <AuthGuard requiredRoles={['admin', 'boss']}><MallHousekeepingLogs /></AuthGuard> },
+      { path: 'mall/warehouses', element: <MallWarehouseList /> },
+      { path: 'mall/inventory', element: <MallInventoryQuery /> },
+      { path: 'mall/notices', element: <MallNoticeList /> },
       { path: 'mall/audit/operations', element: <AuthGuard requiredRoles={['admin', 'boss']}><MallAuditLogList /></AuthGuard> },
       { path: 'mall/audit/login-logs', element: <AuthGuard requiredRoles={['admin', 'boss']}><MallLoginLogList /></AuthGuard> },
       { path: 'mall/audit/login-stats', element: <AuthGuard requiredRoles={['admin', 'boss']}><MallLoginLogStats /></AuthGuard> },

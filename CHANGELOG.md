@@ -114,6 +114,12 @@
 - admin `GET /mall/admin/salesmen/{id}` 返回 stats：completed_order_count / total_gmv / in_progress_order_count / referred_customer_count / open_skip_alerts。前端暂未接，后端 API 先就位
 - 地址删除时如果删的是默认地址，自动把最早的剩余地址提为新默认（原本是删掉就没默认了，下单时 preview 拿不到地址报错）
 - skip_log 处理自买单边缘：业务员自己给自己下单后被 release / admin_reassign / timeout，都不记 skip_log（原逻辑会污染自己的跳单告警统计）
+- ERP admin 前端补 4 个一直缺的管理页面：
+  - `/mall/housekeeping-logs` 定时任务（summary 卡片 + 执行历史，能看每个 job 最后执行的状态 / 耗时 / 结果，点"手动触发"可直接跑）
+  - `/mall/warehouses` 商城仓库（列表 + 新建 + 编辑 + 禁用启用，管理员下拉从业务员池选）
+  - `/mall/inventory` 商城库存（按仓库/SKU 查询，低库存标红，加权平均成本展示）
+  - `/mall/notices` 店铺公告（草稿/已发布 tab + CRUD + 发布/撤回）
+  以上端点后端一直都有但前端没 UI，admin 以前只能靠 curl 用这些功能
 - 前端采购单 UI 加目标仓库类型切换：Radio 切 ERP 仓 / 商城仓，切商城仓时下拉列出 mall_warehouses；createMutation 按 target_warehouse_type 互斥传 warehouse_id 或 mall_warehouse_id。`/api/mall/admin/warehouses` GET 角色放开 purchase（采购员录入 PO 时选商城仓用）
 - **C 端退货流程**（P0 完整落地）：新表 `mall_return_requests`（migration m5a8）+ `MallReturnStatus` 枚举（pending/approved/refunded/rejected）+ `return_service.py`（apply/approve/reject/mark_refunded）。后端接口：
   - C 端 `POST /api/mall/orders/{order_no}/return` 申请退货（completed / partial_closed 可申，同订单最多一条活跃申请）

@@ -89,6 +89,7 @@ const menuItems: MenuItem[] = [
     children: [
       { key: '/inventory/query', icon: <DatabaseOutlined />, label: '库存' },
       { key: '/inventory/stock-flow', icon: <SwapOutlined />, label: '出入库流水' },
+      { key: '/inventory/transfers', icon: <SwapOutlined />, label: '仓库调拨', roles: ['admin', 'boss', 'warehouse', 'purchase', 'finance'] },
       { key: '/inventory/low-stock', icon: <BellOutlined />, label: '低库存预警' },
       { key: '/purchase/orders', icon: <ShoppingCartOutlined />, label: '采购订单', roles: ['admin', 'boss', 'purchase', 'warehouse', 'finance'] },
       { key: '/purchase/receive', icon: <BarcodeOutlined />, label: '收货扫码', roles: ['admin', 'boss', 'purchase', 'warehouse'] },

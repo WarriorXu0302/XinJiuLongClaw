@@ -113,6 +113,31 @@ function FinanceApproval() {
       .then(r => r.data?.records || []),
     refetchInterval: 5000,
   });
+
+  // 仓库调拨待审
+  const { data: pendingWhTransfers = [] } = useQuery<any[]>({
+    queryKey: ['pending-wh-transfers'],
+    queryFn: () => api.get('/transfers/pending-approval')
+      .then(r => r.data?.records || []),
+    refetchInterval: 5000,
+  });
+  const approveWhTransferMut = useMutation({
+    mutationFn: (id: string) => api.post(`/transfers/${id}/approve`, {}),
+    onSuccess: () => {
+      message.success('已批准调拨，可由仓管执行');
+      queryClient.invalidateQueries({ queryKey: ['pending-wh-transfers'] });
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail ?? '批准失败'),
+  });
+  const rejectWhTransferMut = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      api.post(`/transfers/${id}/reject`, { reason }),
+    onSuccess: () => {
+      message.success('已驳回');
+      queryClient.invalidateQueries({ queryKey: ['pending-wh-transfers'] });
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail ?? '驳回失败'),
+  });
   const { data: approvedReturns = [] } = useQuery<any[]>({
     queryKey: ['approved-mall-returns'],
     queryFn: () => api.get('/mall/admin/returns', { params: { status: 'approved' } })
@@ -908,6 +933,71 @@ function FinanceApproval() {
                 )},
               ] as any}
               dataSource={pendingCases} rowKey="id" size="middle" pagination={false}
+            />,
+        },
+        {
+          key: 'warehouse-transfers',
+          label: <span>仓库调拨待审 <Tag color="red">{pendingWhTransfers.length}</Tag></span>,
+          children: pendingWhTransfers.length === 0 ? <Empty description="暂无仓库调拨待审" /> :
+            <Table
+              dataSource={pendingWhTransfers}
+              rowKey="id"
+              size="middle"
+              pagination={false}
+              columns={[
+                { title: '调拨单号', dataIndex: 'transfer_no', width: 200 },
+                {
+                  title: '源仓', key: 'src', width: 160,
+                  render: (_: any, r: any) => (
+                    <><Tag color={r.source_side === 'mall' ? 'gold' : 'blue'}>{r.source_side === 'mall' ? '商城' : 'ERP'}</Tag>{r.source_warehouse_name || r.source_warehouse_id.slice(0,8)}</>
+                  ),
+                },
+                {
+                  title: '目标仓', key: 'dst', width: 160,
+                  render: (_: any, r: any) => (
+                    <><Tag color={r.dest_side === 'mall' ? 'gold' : 'blue'}>{r.dest_side === 'mall' ? '商城' : 'ERP'}</Tag>{r.dest_warehouse_name || r.dest_warehouse_id.slice(0,8)}</>
+                  ),
+                },
+                { title: '瓶数', dataIndex: 'total_bottles', width: 80, align: 'right' as const },
+                { title: '成本合计', dataIndex: 'total_cost', width: 110, align: 'right' as const, render: (v?: string) => v ? `¥${v}` : '-' },
+                { title: '原因', dataIndex: 'reason', ellipsis: true },
+                {
+                  title: '提交时间', dataIndex: 'submitted_at', width: 150,
+                  render: (v?: string) => v ? new Date(v).toLocaleString('zh-CN') : '-',
+                },
+                {
+                  title: '操作', key: 'act', width: 160,
+                  render: (_: any, r: any) => (
+                    <Space>
+                      <Button
+                        size="small" type="primary"
+                        onClick={() => Modal.confirm({
+                          title: `批准调拨 ${r.transfer_no}？`,
+                          content: `${r.total_bottles} 瓶，合计 ¥${r.total_cost || 0}`,
+                          onOk: () => approveWhTransferMut.mutateAsync(r.id),
+                        })}
+                      >通过</Button>
+                      <Button
+                        size="small" danger
+                        onClick={() => {
+                          let reason = '';
+                          Modal.confirm({
+                            title: `驳回调拨 ${r.transfer_no}`,
+                            content: (
+                              <textarea rows={3} style={{ width: '100%', border: '1px solid #d9d9d9', borderRadius: 4, padding: 6 }}
+                                onChange={e => { reason = e.target.value; }} placeholder="驳回原因（必填）" />
+                            ),
+                            onOk: () => {
+                              if (!reason.trim()) { message.warning('请填写驳回原因'); return Promise.reject(); }
+                              return rejectWhTransferMut.mutateAsync({ id: r.id, reason });
+                            },
+                          });
+                        }}
+                      >驳回</Button>
+                    </Space>
+                  ),
+                },
+              ] as any}
             />,
         },
       ]} />

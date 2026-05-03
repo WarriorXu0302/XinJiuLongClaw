@@ -315,6 +315,128 @@ async def update_salesman(
 
 
 # =============================================================================
+# 换绑 ERP employee
+# =============================================================================
+
+class _RebindEmployeeBody(BaseModel):
+    new_employee_id: str = Field(min_length=36, max_length=36)
+    reason: str = Field(min_length=1, max_length=500, description="换绑原因（审计）")
+
+
+@router.put("/{salesman_id}/rebind-employee")
+async def rebind_employee(
+    salesman_id: str,
+    body: _RebindEmployeeBody,
+    user: CurrentUser,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """业务员账号换绑到新的 ERP employee。
+
+    场景：创建业务员时绑错了 employee，或业务员调岗换了 ERP 员工档案。
+    严格校验，避免在途数据对不上：
+      1. 新 employee 存在 + active
+      2. 新 employee 未被其他 salesman 账号占用（unique 约束）
+      3. 当前 salesman 没有在途订单（assigned/shipped/delivered/pending_payment_confirmation）
+         —— 否则已有 commission/考勤/报销会绑在老 employee_id 上，换绑后历史错乱
+      4. token_version +1 → 强制重新登录（新 employee 的 brand/position 可能不同）
+      5. 记审计 + 通知业务员
+    """
+    from app.models.mall.base import MallOrderStatus
+    from app.models.mall.order import MallOrder
+
+    require_role(user, "admin", "boss", "hr")
+    sm = await db.get(MallUser, salesman_id)
+    if sm is None or sm.user_type != MallUserType.SALESMAN.value:
+        raise HTTPException(status_code=404, detail="业务员不存在")
+
+    old_employee_id = sm.linked_employee_id
+    if old_employee_id == body.new_employee_id:
+        raise HTTPException(status_code=400, detail="新 employee 与当前 employee 相同")
+
+    new_emp = await db.get(Employee, body.new_employee_id)
+    if new_emp is None:
+        raise HTTPException(status_code=400, detail="新 employee 不存在")
+    if new_emp.status != "active":
+        raise HTTPException(
+            status_code=400,
+            detail=f"新 employee 状态 {new_emp.status}，无法绑定",
+        )
+
+    # 2. 新 employee 被其他 salesman 占用
+    dup = (await db.execute(
+        select(MallUser)
+        .where(MallUser.linked_employee_id == body.new_employee_id)
+        .where(MallUser.user_type == MallUserType.SALESMAN.value)
+        .where(MallUser.id != salesman_id)
+    )).scalar_one_or_none()
+    if dup:
+        raise HTTPException(
+            status_code=409,
+            detail=f"employee 已被业务员 {dup.username} 绑定",
+        )
+
+    # 3. 在途订单阻塞
+    in_progress = int((await db.execute(
+        select(sa_func.count(MallOrder.id))
+        .where(MallOrder.assigned_salesman_id == salesman_id)
+        .where(MallOrder.status.in_([
+            MallOrderStatus.ASSIGNED.value,
+            MallOrderStatus.SHIPPED.value,
+            MallOrderStatus.DELIVERED.value,
+            MallOrderStatus.PENDING_PAYMENT_CONFIRMATION.value,
+        ]))
+    )).scalar() or 0)
+    if in_progress > 0:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"该业务员有 {in_progress} 个在途订单，请先完成或改派后再换绑"
+                "（换绑会让新 employee 承接老订单的考勤/报销关联，容易错乱）"
+            ),
+        )
+
+    old_emp = await db.get(Employee, old_employee_id) if old_employee_id else None
+    sm.linked_employee_id = body.new_employee_id
+    sm.token_version = (sm.token_version or 0) + 1
+    sm.updated_at = datetime.now(timezone.utc)
+
+    await log_audit(
+        db, action="mall_salesman.rebind_employee",
+        entity_type="MallUser", entity_id=sm.id,
+        user=user, request=request,
+        changes={
+            "username": sm.username,
+            "old_employee_id": old_employee_id,
+            "old_employee_name": old_emp.name if old_emp else None,
+            "new_employee_id": body.new_employee_id,
+            "new_employee_name": new_emp.name,
+            "reason": body.reason,
+        },
+    )
+
+    # 通知业务员
+    from app.services.notification_service import notify_mall_user
+    await notify_mall_user(
+        db, mall_user_id=sm.id,
+        title="ERP 员工已换绑",
+        content=(
+            f"管理员将您的账号重新绑定到 ERP 员工 {new_emp.name}。"
+            "请重新登录以加载最新的考勤/报销/KPI 数据。"
+        ),
+        entity_type="MallUser", entity_id=sm.id,
+    )
+
+    await db.flush()
+    return {
+        "success": True,
+        "old_employee_id": old_employee_id,
+        "new_employee_id": body.new_employee_id,
+        "must_relogin": True,
+    }
+
+
+# =============================================================================
 # 禁用 / 启用
 # =============================================================================
 

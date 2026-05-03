@@ -7,7 +7,7 @@ import { useState } from 'react';
 import {
   Button, Form, Input, message, Modal, Select, Space, Switch, Table, Tabs, Tag, Tooltip, Typography,
 } from 'antd';
-import { PlusOutlined, KeyOutlined, EditOutlined, StopOutlined, UnlockOutlined } from '@ant-design/icons';
+import { PlusOutlined, KeyOutlined, EditOutlined, StopOutlined, UnlockOutlined, SwapOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
@@ -46,11 +46,13 @@ export default function SalesmanList() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Salesman | null>(null);
   const [resetTarget, setResetTarget] = useState<Salesman | null>(null);
+  const [rebindTarget, setRebindTarget] = useState<Salesman | null>(null);
   const [createdInfo, setCreatedInfo] = useState<{ username: string; password: string } | null>(null);
 
   const [createForm] = Form.useForm();
   const [editForm] = Form.useForm();
   const [resetForm] = Form.useForm();
+  const [rebindForm] = Form.useForm();
 
   const { data, isLoading } = useQuery({
     queryKey: ['mall-admin-salesmen', statusTab, keyword, page, pageSize],
@@ -69,7 +71,7 @@ export default function SalesmanList() {
   const { data: employeeData } = useQuery({
     queryKey: ['mall-admin-bindable-employees'],
     queryFn: () => api.get('/mall/admin/salesmen/_helpers/employees').then(r => r.data),
-    enabled: createOpen,
+    enabled: createOpen || !!rebindTarget,
   });
   const { data: brandData } = useQuery({
     queryKey: ['mall-admin-brands'],
@@ -138,6 +140,19 @@ export default function SalesmanList() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['mall-admin-salesmen'] });
     },
+  });
+
+  const rebindMut = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: any }) =>
+      api.put(`/mall/admin/salesmen/${id}/rebind-employee`, body).then(r => r.data),
+    onSuccess: () => {
+      message.success('换绑成功，该业务员 token 已失效需重新登录');
+      setRebindTarget(null);
+      rebindForm.resetFields();
+      queryClient.invalidateQueries({ queryKey: ['mall-admin-salesmen'] });
+      queryClient.invalidateQueries({ queryKey: ['mall-admin-bindable-employees'] });
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail ?? '换绑失败'),
   });
 
   const columns: ColumnsType<Salesman> = [
@@ -222,6 +237,11 @@ export default function SalesmanList() {
           <Tooltip title="重置密码">
             <Button size="small" icon={<KeyOutlined />}
               onClick={() => { setResetTarget(r); resetForm.resetFields(); }}
+            />
+          </Tooltip>
+          <Tooltip title="换绑 ERP 员工">
+            <Button size="small" icon={<SwapOutlined />}
+              onClick={() => { setRebindTarget(r); rebindForm.resetFields(); }}
             />
           </Tooltip>
           {r.status === 'active' ? (
@@ -403,6 +423,56 @@ export default function SalesmanList() {
                 value: b.id, label: b.name,
               }))}
             />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 换绑 ERP 员工 */}
+      <Modal
+        title={`换绑 ERP 员工 - ${rebindTarget?.nickname || rebindTarget?.username || ''}`}
+        open={!!rebindTarget}
+        onCancel={() => setRebindTarget(null)}
+        onOk={() => {
+          if (!rebindTarget) return;
+          rebindForm.validateFields().then((v: any) => {
+            rebindMut.mutate({ id: rebindTarget.id, body: v });
+          });
+        }}
+        confirmLoading={rebindMut.isPending}
+        width={560}
+      >
+        <div style={{ background: '#fffbe6', padding: 12, borderRadius: 4, marginBottom: 16, fontSize: 13 }}>
+          <div><strong>当前绑定：</strong>{rebindTarget?.employee?.name ?? '未绑定'}</div>
+          <div style={{ marginTop: 4, color: '#8c8c8c' }}>
+            换绑条件：该业务员无在途订单（后端会校验）；换绑后其 token 立即失效，必须重新登录。
+          </div>
+        </div>
+        <Form form={rebindForm} layout="vertical" preserve={false}>
+          <Form.Item
+            name="new_employee_id"
+            label="新 ERP 员工（必填）"
+            rules={[{ required: true, message: '请选择员工' }]}
+          >
+            <Select
+              showSearch
+              placeholder="搜索员工姓名"
+              options={(employeeData?.records || [])
+                .filter((e: any) => e.id !== rebindTarget?.linked_employee_id)
+                .map((e: any) => ({
+                  value: e.id,
+                  label: `${e.name}${e.phone ? ` · ${e.phone}` : ''}`,
+                }))}
+              filterOption={(input, option) =>
+                (option?.label as string).toLowerCase().includes(input.toLowerCase())
+              }
+            />
+          </Form.Item>
+          <Form.Item
+            name="reason"
+            label="换绑原因（必填，记入审计）"
+            rules={[{ required: true, min: 1, max: 500 }]}
+          >
+            <Input.TextArea rows={3} placeholder="如：建号时选错员工、业务员调岗合并档案等" />
           </Form.Item>
         </Form>
       </Modal>

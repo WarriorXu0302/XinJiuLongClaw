@@ -95,6 +95,77 @@ function ProductList() {
     form.setFieldsValue({ code: record.code, name: record.name, category: record.category, unit: record.unit, bottles_per_case: record.bottles_per_case, spec: record.spec ?? '', purchase_price: record.purchase_price, sale_price: record.sale_price });
   };
 
+  // 下架/启用切换：下架前查 mall 侧挂靠商品数，有则弹确认框问"是否同步下架商城商品"
+  const handleToggleStatus = async (record: ProductItem) => {
+    if (record.status !== 'active') {
+      try {
+        await api.put(`/products/${record.id}`, { status: 'active' });
+        message.success('已启用');
+        queryClient.invalidateQueries({ queryKey: ['products'] });
+      } catch (err: any) {
+        message.error(err?.response?.data?.detail ?? '操作失败');
+      }
+      return;
+    }
+    // active → inactive：查 mall 影响
+    try {
+      const { data: impact } = await api.get(`/products/${record.id}/mall-cascade-impact`);
+      const onSaleCount = impact?.mall_on_sale ?? 0;
+      if (onSaleCount === 0) {
+        Modal.confirm({
+          title: '确认下架该商品？',
+          content: '商城未挂靠在售商品。',
+          okText: '下架',
+          cancelText: '取消',
+          onOk: async () => {
+            try {
+              await api.put(`/products/${record.id}`, { status: 'inactive' });
+              message.success('已下架');
+              queryClient.invalidateQueries({ queryKey: ['products'] });
+            } catch (err: any) {
+              message.error(err?.response?.data?.detail ?? '操作失败');
+            }
+          },
+        });
+        return;
+      }
+      const names = (impact.mall_on_sale_items ?? []).map((m: any) => m.name).slice(0, 5).join('、');
+      Modal.confirm({
+        title: '商城侧有挂靠商品仍在售',
+        width: 560,
+        content: (
+          <div>
+            <p>本商品被 <b>{onSaleCount}</b> 个在售商城商品引用（source_product_id）。</p>
+            <p style={{ color: '#8c8c8c' }}>{names}{onSaleCount > 5 ? ` 等 ${onSaleCount} 个` : ''}</p>
+            <p>如果仅下架 ERP 端，C 端下单时可能仍能买到此商品。建议一并下架商城商品。</p>
+          </div>
+        ),
+        okText: '同步下架商城',
+        cancelText: '仅下架 ERP',
+        onOk: async () => {
+          try {
+            await api.put(`/products/${record.id}?cascade_mall=true`, { status: 'inactive' });
+            message.success(`已下架 ERP 与 ${onSaleCount} 个商城商品`);
+            queryClient.invalidateQueries({ queryKey: ['products'] });
+          } catch (err: any) {
+            message.error(err?.response?.data?.detail ?? '操作失败');
+          }
+        },
+        onCancel: async () => {
+          try {
+            await api.put(`/products/${record.id}`, { status: 'inactive' });
+            message.success('已下架 ERP；商城侧仍在售，请手动处理');
+            queryClient.invalidateQueries({ queryKey: ['products'] });
+          } catch (err: any) {
+            message.error(err?.response?.data?.detail ?? '操作失败');
+          }
+        },
+      });
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail ?? '查询商城影响失败');
+    }
+  };
+
   const columns: ColumnsType<ProductItem> = [
     { title: '商品编号', dataIndex: 'code', width: 110 },
     { title: '种类', dataIndex: 'category', width: 70, render: (v: string) => <Tag color={CATEGORY_COLOR[v] ?? 'default'}>{CATEGORY_LABEL[v] ?? v}</Tag> },
@@ -104,7 +175,18 @@ function ProductList() {
     { title: '进货价', dataIndex: 'purchase_price', width: 80, align: 'right', render: (v: number) => v ? `¥${Number(v).toFixed(0)}` : '-' },
     { title: '售价', dataIndex: 'sale_price', width: 80, align: 'right', render: (v: number) => v ? `¥${Number(v).toFixed(0)}` : '-' },
     { title: '状态', dataIndex: 'status', width: 60, render: (v: string) => <Tag color={v === 'active' ? 'green' : 'default'}>{v === 'active' ? '启用' : '停用'}</Tag> },
-    { title: '操作', key: 'action', width: 60, render: (_, record) => <a onClick={() => handleEdit(record)}>编辑</a> },
+    {
+      title: '操作',
+      key: 'action',
+      width: 140,
+      render: (_, record) => (
+        <>
+          <a onClick={() => handleEdit(record)}>编辑</a>
+          <span style={{ margin: '0 8px', color: '#d9d9d9' }}>|</span>
+          <a onClick={() => handleToggleStatus(record)}>{record.status === 'active' ? '下架' : '启用'}</a>
+        </>
+      ),
+    },
   ];
 
   return (

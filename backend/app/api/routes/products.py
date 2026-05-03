@@ -134,18 +134,59 @@ async def get_product(product_id: str, db: AsyncSession = Depends(get_db)):
     return obj
 
 
+@router.get("/{product_id}/mall-cascade-impact")
+async def get_mall_cascade_impact(
+    product_id: str, user: CurrentUser, db: AsyncSession = Depends(get_db)
+):
+    """下架 ERP 商品前预览 mall 侧挂靠商品数，让前端弹确认框。"""
+    from app.models.mall.product import MallProduct
+    obj = await db.get(Product, product_id)
+    if obj is None:
+        raise HTTPException(404, "Product not found")
+    rows = (await db.execute(
+        select(MallProduct)
+        .where(MallProduct.source_product_id == product_id)
+    )).scalars().all()
+    on_sale = [m for m in rows if m.status == "on_sale"]
+    return {
+        "product_id": product_id,
+        "mall_total": len(rows),
+        "mall_on_sale": len(on_sale),
+        "mall_on_sale_items": [
+            {"id": m.id, "name": m.name} for m in on_sale
+        ],
+    }
+
+
 @router.put("/{product_id}", response_model=ProductResponse)
 async def update_product(
-    product_id: str, body: ProductUpdate, user: CurrentUser, db: AsyncSession = Depends(get_db)
+    product_id: str,
+    body: ProductUpdate,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+    cascade_mall: bool = Query(False, description="下架时是否同步把 mall_products 也置为 off_sale"),
 ):
     from app.core.permissions import require_role
     require_role(user, "boss", "warehouse")
     obj = await db.get(Product, product_id)
     if obj is None:
         raise HTTPException(404, "Product not found")
+    prev_status = obj.status
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(obj, k, v)
     await db.flush()
+
+    # ERP active → inactive 时，如果 cascade_mall=True 把挂靠的 MallProduct 一起下架
+    if cascade_mall and prev_status == "active" and obj.status != "active":
+        from app.models.mall.product import MallProduct
+        affected = (await db.execute(
+            select(MallProduct)
+            .where(MallProduct.source_product_id == product_id)
+            .where(MallProduct.status == "on_sale")
+        )).scalars().all()
+        for m in affected:
+            m.status = "off_sale"
+        await db.flush()
     return obj
 
 

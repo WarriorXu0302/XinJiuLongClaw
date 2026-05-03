@@ -151,6 +151,8 @@ class MallInventoryBarcode(Base):
         Index("ix_mall_barcodes_status", "status"),
         Index("ix_mall_barcodes_batch", "batch_no"),
         Index("ix_mall_barcodes_parent", "parent_barcode"),
+        # ship_order / ship_mode 探测仓内是否有 IN_STOCK 条码用
+        Index("ix_mall_barcodes_sku_status_wh", "sku_id", "status", "warehouse_id"),
     )
 
     id: Mapped[str] = mapped_column(

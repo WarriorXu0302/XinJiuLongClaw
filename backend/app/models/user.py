@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Optional
 
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, ForeignKey, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, ForeignKey, Index, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import (
@@ -209,6 +209,14 @@ class Commission(Base):
     """
 
     __tablename__ = "commissions"
+    __table_args__ = (
+        # 月结工资单扫员工的 pending mall commission 专用
+        Index(
+            "ix_commissions_emp_mall_status",
+            "employee_id", "mall_order_id", "status",
+            postgresql_where="mall_order_id IS NOT NULL",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())

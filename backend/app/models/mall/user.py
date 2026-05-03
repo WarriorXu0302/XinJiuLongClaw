@@ -64,6 +64,13 @@ class MallUser(Base):
         Index("ix_mall_users_referrer", "referrer_salesman_id"),
         Index("ix_mall_users_last_order_at", "last_order_at"),
         Index("ix_mall_users_status", "status"),
+        # 权限完整性：ERP employee 最多绑一个 mall salesman，防 commission 归属混乱
+        Index(
+            "ix_mall_users_linked_employee_unique",
+            "linked_employee_id",
+            unique=True,
+            postgresql_where="linked_employee_id IS NOT NULL AND user_type = 'salesman'",
+        ),
     )
 
     id: Mapped[str] = mapped_column(

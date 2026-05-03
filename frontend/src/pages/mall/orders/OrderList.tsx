@@ -230,6 +230,8 @@ export default function MallOrderList() {
     { key: 'delivered', label: '待收款' },
     { key: 'pending_payment_confirmation', label: '待财务确认' },
     { key: 'completed', label: '已完成' },
+    { key: 'partial_closed', label: '已折损' },
+    { key: 'refunded', label: '已退货' },
     { key: 'cancelled', label: '已取消' },
   ];
 

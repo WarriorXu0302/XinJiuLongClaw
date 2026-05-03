@@ -92,6 +92,7 @@ async def stats(
     # 提成（绑定的 employee_id）
     pending_sum = Decimal("0")
     settled_sum = Decimal("0")
+    reversed_sum = Decimal("0")
     if user.linked_employee_id:
         com_rows = (await db.execute(
             select(Commission.status, func.coalesce(func.sum(Commission.commission_amount), 0))
@@ -102,10 +103,14 @@ async def stats(
             .group_by(Commission.status)
         )).all()
         for st, amount in com_rows:
+            amt = Decimal(str(amount or 0))
             if st == "settled":
-                settled_sum = Decimal(str(amount or 0))
-            else:
-                pending_sum = Decimal(str(amount or 0))
+                settled_sum = amt
+            elif st == "pending":
+                pending_sum = amt
+            elif st == "reversed":
+                # 退货冲销：不算 pending 也不算 settled，单独汇报让业务员知道被退了多少
+                reversed_sum = amt
 
     return {
         "range": range,
@@ -113,6 +118,7 @@ async def stats(
         "month_gmv": str(month_gmv),
         "month_commission_pending": str(pending_sum),
         "month_commission_settled": str(settled_sum),
+        "month_commission_reversed": str(reversed_sum),
     }
 
 

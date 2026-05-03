@@ -9,7 +9,16 @@ import { useBrandFilter } from '../../stores/useBrandFilter';
 
 const { Title, Text } = Typography;
 
-interface PO { id: string; po_no: string; brand_id?: string; brand_name?: string; supplier_id: string; supplier_name?: string; total_amount: number; cash_amount: number; f_class_amount: number; financing_amount: number; status: string; voucher_url?: string; created_at: string; items: { id: string; product_id: string; product_name?: string; quantity: number; unit_price: number }[]; }
+interface PO {
+  id: string; po_no: string; brand_id?: string; brand_name?: string;
+  supplier_id: string; supplier_name?: string;
+  warehouse_id?: string; warehouse?: { name: string; warehouse_type?: string };
+  target_warehouse_type?: 'erp_warehouse' | 'mall_warehouse';
+  mall_warehouse_id?: string;
+  total_amount: number; cash_amount: number; f_class_amount: number; financing_amount: number;
+  status: string; voucher_url?: string; created_at: string;
+  items: { id: string; product_id: string; product_name?: string; quantity: number; unit_price: number }[];
+}
 
 const STATUS_COLOR: Record<string, string> = { pending: 'orange', paid: 'blue', shipped: 'cyan', received: 'green', completed: 'green', cancelled: 'red' };
 const STATUS_LABEL: Record<string, string> = { pending: '待审批', paid: '已付款', shipped: '已发货', received: '已收货', completed: '已完成', cancelled: '已取消' };
@@ -127,10 +136,24 @@ function PurchaseOrderList() {
   const cashMax = Math.min(itemTotal, Number(cashBalance));
   const fClassMax = Math.min(itemTotal, Number(fClassBalance));
 
+  // mall_warehouse_id → name 的反查表
+  const mallWhMap: Record<string, string> = {};
+  mallWarehouses.forEach((w: any) => { mallWhMap[w.id] = `${w.code ? w.code + ' · ' : ''}${w.name}`; });
+
   const columns: ColumnsType<PO> = [
     { title: '采购单号', dataIndex: 'po_no', width: 160 },
     { title: '品牌', dataIndex: 'brand_name', width: 100, render: (v: string) => v || '-' },
     { title: '供货方', dataIndex: 'supplier_name', width: 120, render: (v: string) => v || '-' },
+    {
+      title: '入库仓', key: 'target_wh', width: 150,
+      render: (_, r) => {
+        if (r.target_warehouse_type === 'mall_warehouse') {
+          const label = r.mall_warehouse_id ? (mallWhMap[r.mall_warehouse_id] || r.mall_warehouse_id.slice(0, 8) + '...') : '-';
+          return <><Tag color="gold">商城</Tag>{label}</>;
+        }
+        return <><Tag>ERP</Tag>{r.warehouse?.name || '-'}</>;
+      },
+    },
     { title: '商品', key: 'items', width: 200, ellipsis: true, render: (_, r) => r.items?.map((it: any) => `${it.product_name ?? ''} ×${it.quantity}${it.quantity_unit || '箱'}`).join(', ') || '-' },
     { title: '总额', dataIndex: 'total_amount', width: 100, align: 'right', render: (v: number) => `¥${Number(v).toLocaleString()}` },
     { title: '现金', dataIndex: 'cash_amount', width: 90, align: 'right', render: (v: number) => Number(v) > 0 ? `¥${Number(v).toLocaleString()}` : '-' },

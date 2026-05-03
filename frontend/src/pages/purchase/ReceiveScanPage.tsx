@@ -15,6 +15,8 @@ interface PurchaseOrder {
   supplier?: { name: string };
   warehouse_id?: string;
   warehouse?: { name: string };
+  target_warehouse_type?: 'erp_warehouse' | 'mall_warehouse';
+  mall_warehouse_id?: string;
   total_amount: string;
   status: string;
   items: { product_id: string; product?: { name: string; bottles_per_case?: number }; quantity: number; quantity_unit?: string; unit_price: string }[];
@@ -114,7 +116,11 @@ function ReceiveScanPage() {
       }
     },
     onSuccess: () => {
-      message.success(`采购单 ${selectedPO!.po_no} 收货完成，${scannedCodes.length} 个条码已绑定`);
+      const isMall = selectedPO!.target_warehouse_type === 'mall_warehouse';
+      message.success(isMall
+        ? `采购单 ${selectedPO!.po_no} 已入商城仓（按 SKU 总量 + 加权平均成本记录）`
+        : `采购单 ${selectedPO!.po_no} 收货完成，${scannedCodes.length} 个条码已绑定`
+      );
       setScannedCodes([]);
       setSelectedPO(null);
       setBatchNo('');
@@ -156,7 +162,7 @@ function ReceiveScanPage() {
             optionFilterProp="label"
             options={receivablePOs.map(po => ({
               value: po.id,
-              label: `${po.po_no} | ${po.supplier?.name ?? ''} | ¥${Number(po.total_amount).toFixed(0)}`,
+              label: `${po.target_warehouse_type === 'mall_warehouse' ? '[商城] ' : ''}${po.po_no} | ${po.supplier?.name ?? ''} | ¥${Number(po.total_amount).toFixed(0)}`,
             }))}
             style={{ width: 420 }}
             onChange={(id) => setSelectedPO(poList.find(p => p.id === id) ?? null)}
@@ -176,10 +182,24 @@ function ReceiveScanPage() {
       {/* 采购单信息 */}
       {selectedPO && (
         <Card size="small" style={{ marginBottom: 16 }}>
+          {selectedPO.target_warehouse_type === 'mall_warehouse' && (
+            <Alert
+              type="warning"
+              showIcon
+              message="本采购单目标仓是商城仓"
+              description="商城仓按 SKU 总量入库（加权平均成本 + mall_inventory_flows 流水），不走瓶级条码扫描。点下方"直接入库"即完成，无需扫码。"
+              style={{ marginBottom: 12 }}
+            />
+          )}
           <Descriptions column={3} size="small">
             <Descriptions.Item label="采购单号">{selectedPO.po_no}</Descriptions.Item>
             <Descriptions.Item label="供应商">{selectedPO.supplier?.name ?? '-'}</Descriptions.Item>
-            <Descriptions.Item label="目标仓库">{selectedPO.warehouse?.name ?? selectedPO.warehouse_id ?? '-'}</Descriptions.Item>
+            <Descriptions.Item label="目标仓库">
+              {selectedPO.target_warehouse_type === 'mall_warehouse'
+                ? <><Tag color="gold">商城仓</Tag>{selectedPO.mall_warehouse_id?.slice(0, 8)}...</>
+                : <><Tag>ERP</Tag>{selectedPO.warehouse?.name ?? selectedPO.warehouse_id ?? '-'}</>
+              }
+            </Descriptions.Item>
             <Descriptions.Item label="总金额">¥{Number(selectedPO.total_amount).toFixed(2)}</Descriptions.Item>
             <Descriptions.Item label="状态"><Tag color="blue">{selectedPO.status}</Tag></Descriptions.Item>
             <Descriptions.Item label="商品明细">
@@ -193,34 +213,49 @@ function ReceiveScanPage() {
 
       {/* 扫码区域 */}
       <Card size="small" style={{ marginBottom: 16 }}>
-        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-          <Space>
-            <Input
-              ref={inputRef}
-              placeholder="扫码枪扫描 / 手动输入后回车"
-              style={{ width: 350 }}
-              onPressEnter={(e) => { handleScan((e.target as HTMLInputElement).value); (e.target as HTMLInputElement).value = ''; }}
-              autoFocus
-              prefix={<BarcodeOutlined />}
-              disabled={!selectedPO}
-            />
-            <Upload beforeUpload={handleExcelImport} accept=".xlsx,.xls,.csv" showUploadList={false} disabled={!selectedPO}>
-              <Button icon={<UploadOutlined />} disabled={!selectedPO}>Excel 导入</Button>
-            </Upload>
-          </Space>
-          <Space>
-            <Text>已扫 <strong>{scannedCodes.length}</strong> 个（去重 {uniqueCount}）</Text>
-            <Button onClick={() => setScannedCodes([])} disabled={scannedCodes.length === 0}>清空</Button>
+        {selectedPO?.target_warehouse_type === 'mall_warehouse' ? (
+          /* 商城仓：不扫码，直接 SKU 总量入库 */
+          <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+            <Text type="secondary">商城仓按 SKU 总量入库，填好批次号后点右侧"直接入库"即可</Text>
             <Button
               type="primary"
               disabled={!selectedPO || !batchNo.trim()}
               loading={receiveMutation.isPending}
               onClick={() => receiveMutation.mutate()}
             >
-              确认收货入库
+              直接入库（商城仓）
             </Button>
           </Space>
-        </Space>
+        ) : (
+          <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+            <Space>
+              <Input
+                ref={inputRef}
+                placeholder="扫码枪扫描 / 手动输入后回车"
+                style={{ width: 350 }}
+                onPressEnter={(e) => { handleScan((e.target as HTMLInputElement).value); (e.target as HTMLInputElement).value = ''; }}
+                autoFocus
+                prefix={<BarcodeOutlined />}
+                disabled={!selectedPO}
+              />
+              <Upload beforeUpload={handleExcelImport} accept=".xlsx,.xls,.csv" showUploadList={false} disabled={!selectedPO}>
+                <Button icon={<UploadOutlined />} disabled={!selectedPO}>Excel 导入</Button>
+              </Upload>
+            </Space>
+            <Space>
+              <Text>已扫 <strong>{scannedCodes.length}</strong> 个（去重 {uniqueCount}）</Text>
+              <Button onClick={() => setScannedCodes([])} disabled={scannedCodes.length === 0}>清空</Button>
+              <Button
+                type="primary"
+                disabled={!selectedPO || !batchNo.trim()}
+                loading={receiveMutation.isPending}
+                onClick={() => receiveMutation.mutate()}
+              >
+                确认收货入库
+              </Button>
+            </Space>
+          </Space>
+        )}
       </Card>
 
       {!selectedPO && (

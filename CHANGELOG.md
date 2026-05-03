@@ -120,6 +120,13 @@
   - `/mall/inventory` 商城库存（按仓库/SKU 查询，低库存标红，加权平均成本展示）
   - `/mall/notices` 店铺公告（草稿/已发布 tab + CRUD + 发布/撤回）
   以上端点后端一直都有但前端没 UI，admin 以前只能靠 curl 用这些功能
+- PurchaseOrderList 列表加"入库仓"列：ERP/商城 两类仓 tag 化展示 + 商城仓名字从 mallWarehouses 反查
+- ReceiveScanPage 区分 mall 仓 PO：
+  - 选 mall PO 时显示黄色 Alert "商城仓按 SKU 总量入库，无需扫码"
+  - 扫码区替换成"直接入库"按钮
+  - success 消息按仓类型分别展示
+- 商城订单列表（admin）加"已折损"和"已退货" tab（原先这两种状态找不到）
+- salesman `stats` 端点修复：Commission `status=reversed`（退货冲销）原被错误算进 `pending`，现在独立返 `month_commission_reversed` 字段；小程序业务员 profile 加"退货冲销"红底卡片展示
 - 前端采购单 UI 加目标仓库类型切换：Radio 切 ERP 仓 / 商城仓，切商城仓时下拉列出 mall_warehouses；createMutation 按 target_warehouse_type 互斥传 warehouse_id 或 mall_warehouse_id。`/api/mall/admin/warehouses` GET 角色放开 purchase（采购员录入 PO 时选商城仓用）
 - **C 端退货流程**（P0 完整落地）：新表 `mall_return_requests`（migration m5a8）+ `MallReturnStatus` 枚举（pending/approved/refunded/rejected）+ `return_service.py`（apply/approve/reject/mark_refunded）。后端接口：
   - C 端 `POST /api/mall/orders/{order_no}/return` 申请退货（completed / partial_closed 可申，同订单最多一条活跃申请）

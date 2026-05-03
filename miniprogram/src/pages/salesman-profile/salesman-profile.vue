@@ -74,6 +74,17 @@
             已入账提成
           </text>
         </view>
+        <view
+          v-if="Number(stats.month_commission_reversed || 0) > 0"
+          class="stats__cell stats__cell--warn"
+        >
+          <text class="stats__num">
+            -{{ fmtMoney(stats.month_commission_reversed) }}
+          </text>
+          <text class="stats__label">
+            退货冲销
+          </text>
+        </view>
       </view>
     </view>
 
@@ -194,7 +205,8 @@ const stats = ref({
   month_orders: 0,
   month_gmv: 0,
   month_commission_pending: 0,
-  month_commission_settled: 0
+  month_commission_settled: 0,
+  month_commission_reversed: 0
 })
 const inviteRemain = ref(20)
 const alertOpenCount = ref(0)
@@ -442,6 +454,14 @@ onShow(() => {
     background: $color-cream;
     border-radius: 12rpx;
     text-align: center;
+
+    &--warn {
+      background: rgba(255, 77, 79, 0.08);
+
+      .stats__num {
+        color: $color-err;
+      }
+    }
   }
   &__num {
     display: block;

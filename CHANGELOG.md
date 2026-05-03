@@ -17,6 +17,17 @@
 
 ### Added
 
+- **仓库调拨（桥 B11）** — 跨 ERP + mall 的条码过户
+  - 新表 `warehouse_transfers` + `warehouse_transfer_items`（每瓶一行），migration m6a1
+  - 业务规则：品牌主仓（`warehouse_type=main AND brand_id NOT NULL`）**出入都禁**；只能通过采购单入 + 销售订单出。其他仓（ERP 非主 + 所有 mall）互相可调拨
+  - 审批策略：ERP↔ERP 同品牌内免审直接 executed；跨品牌 / 涉 mall / 跨端必审（boss/finance）
+  - 扫码粒度：每瓶必扫厂家防伪码，条码软锁（活跃 transfer 查询实现，不改 barcode.status）
+  - 执行四种路径：ERP→ERP（条码改 warehouse_id）/ ERP→mall（条码 DELETE + mall 端 INSERT）/ mall→ERP（反向，ERP 用虚拟 batch 接盘）/ mall→mall
+  - 端点：`POST /api/transfers` + `/submit` `/approve` `/reject` `/execute` `/cancel` + `GET /` `GET /pending-approval` `GET /{id}`
+  - ERP 前端：`/inventory/transfers` 列表 + `/inventory/transfers/new` 扫码新建 + 审批中心新 tab "仓库调拨待审"
+  - E2E `scripts/e2e_warehouse_transfer.py` 覆盖 4 种路径 + 品牌主仓拦截
+  - 权限索引：所有 `source_side/dest_side` + `status` 有索引，活跃 transfer 软锁查询不扫表
+
 - 业务员"我的订单"在途 Tab 现在同时显示 `assigned` + `shipped` 两个状态（原仅 assigned → 导致已出库未送达的单消失）。后端 `/api/mall/salesman/orders` 的 `status` 参数支持逗号分隔多值
 - 三份业务原子化文档 `skills/xinjiulong-erp/references/business-atoms-{mall,erp,bridges}.md`：按业务流切原子动作，标注 E2E 测试状态与全局 🔴 gap 汇总
 - `GET /api/products/{id}/mall-cascade-impact` + `PUT /products/{id}?cascade_mall=true` — ERP 下架商品时提示挂靠的 mall_products 数量，可选同步下架；前端 ProductList 增加"下架/启用"按钮，有影响时弹确认框

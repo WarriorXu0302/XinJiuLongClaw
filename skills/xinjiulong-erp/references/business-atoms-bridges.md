@@ -89,7 +89,7 @@
 
 ---
 
-## 桥 4：库存 — ERP Inventory ↔ mall_inventory（独立两套）
+## 桥 4：库存 — ERP Inventory ↔ mall_inventory（支持跨端调拨）
 
 ### 绑定
 - **完全独立**，不做跨库存调拨（plan 决策，mall 仓独立运营）
@@ -103,7 +103,7 @@
 | B4.2 | Mall 订单下单扣 mall_inventory | mall | `create_order` | mall_inventory -qty + MallInventoryFlow(OUT) | 🟢 |
 | B4.3 | Mall 订单 cancel 退 mall_inventory | mall | `cancel_order / admin_cancel` | +qty + IN flow | 🟢 |
 | B4.4 | Mall 退货 approve 退 mall_inventory + 条码 | mall | `approve_return` | +qty + IN flow + barcode OUTBOUND→in_stock | 🟡（条码回退刚加） |
-| B4.5 | ERP 调拨到 mall 仓 | — | — | **不做** | ⚪ |
+| B4.5 | ~~ERP 调拨到 mall 仓不做~~ ✅ **已实现**：仓间调拨单（桥 11）覆盖 ERP↔ERP / ERP↔mall / mall↔mall 四种路径 | — | `WarehouseTransfer` | 🟢 |
 
 ### E2E 测试状态
 - ❌ **B4.4 刚修的条码回退未验证**（outbound_order_id 的数据是否都有值？）
@@ -238,6 +238,81 @@ ERP 既有 APScheduler 调度器被 mall 复用（plan 决策 #20）。job 在 m
 | `job_purge_old_login_logs` | mall_login_logs | 删除 >90 天 | 🟢 |
 
 所有 job 被 `_with_job_log` 装饰，历史查 `/api/mall/admin/housekeeping/logs`。
+
+---
+
+## 桥 11：仓库调拨（跨 ERP + mall 的条码过户）
+
+### 业务规则铁律
+
+1. **品牌主仓**（`warehouse_type='main' AND brand_id IS NOT NULL`）**不参与调拨**——出入都禁。品牌主仓只能通过：
+   - 采购订单（入库）
+   - 销售订单 + 政策审批（出库）
+2. 其他所有仓（ERP 非主仓 / backup / tasting / 所有 mall 仓）可以互相调拨
+3. 每瓶必须扫厂家防伪码（条码过户，不允许按数量散装）
+4. 所有商品**第一次入仓**都走采购订单；调拨是已入仓之后的仓间流转
+
+### 数据模型
+
+- `warehouse_transfers` 主单：`source_side/dest_side` ∈ {erp, mall} + 对应 warehouse_id（不建 FK，应用层+service 层校验）
+- `warehouse_transfer_items`：每瓶一行（barcode + product_ref + cost_price_snapshot + batch_no_snapshot）
+- 注意：**跨 side 时 warehouse_id 指向不同表**，所以主单不能对 warehouse_id 加 FK
+
+### 状态机
+
+```
+pending_scan ─submit→ pending_approval ─approve→ approved ─execute→ executed
+     │                       │
+     │                       └─reject→ rejected（终态）
+     └─execute（免审时直接）→ executed
+     └─cancel→ cancelled（源端条码"软锁"自动释放）
+```
+
+### 审批策略
+
+| 场景 | 是否审批 |
+|---|---|
+| ERP↔ERP 同品牌内（src.brand_id == dst.brand_id 且都非 None）| **免审**，直接 executed |
+| 跨品牌 ERP↔ERP | **必审**（boss/finance）|
+| ERP↔mall 跨端（双向） | **必审** |
+| mall↔mall | **必审** |
+
+### 执行粒度（四种路径）
+
+| 源 → 目标 | 条码处理 | 库存处理 |
+|---|---|---|
+| ERP → ERP | `InventoryBarcode.warehouse_id` 改 | `Inventory` 源减目加 + `StockFlow` 双向 |
+| ERP → mall | 源端 `InventoryBarcode` **DELETE** + 目标端 `MallInventoryBarcode` **INSERT**（同 barcode 字符串）| `Inventory` 源减 + `mall_inventory` 目加（加权平均） |
+| mall → ERP | 反向；ERP 侧用虚拟 batch `TRANSFER-{transfer_no}`（因为 ERP 是按 batch 追溯，要给它造一个接盘 batch） | `mall_inventory` 源减 + 新建 `Inventory` 行（batch=虚拟） |
+| mall → mall | `MallInventoryBarcode.warehouse_id` 改 | `MallInventory` 源减目加 + 加权平均 |
+
+### 动作表
+
+| # | 动作 | 角色 | 端点 | 副作用 | 状态 |
+|---|---|---|---|---|---|
+| B11.1 | 创建调拨单（扫码） | warehouse/boss/purchase | `POST /api/transfers` | 主单 + items；条码**不动状态**（靠"活跃 transfer 查重"软锁）| 🟢 |
+| B11.2 | 提交审批 | initiator | `POST /api/transfers/{id}/submit` | status → pending_approval | 🟢 |
+| B11.3 | 审批通过 | boss/finance | `POST /api/transfers/{id}/approve` | status → approved | 🟢 |
+| B11.4 | 驳回 | boss/finance | `POST /api/transfers/{id}/reject` | status → rejected（终态） | 🟢 |
+| B11.5 | 执行（真正过户）| warehouse/boss | `POST /api/transfers/{id}/execute` | 按四种路径分支；status → executed | 🟢 |
+| B11.6 | 取消 | initiator | `POST /api/transfers/{id}/cancel` | status → cancelled | 🟢 |
+| B11.7 | 品牌主仓拦截 | — | create 内校验 | `_is_brand_main_warehouse` → 400 | 🟢 |
+| B11.8 | 审批中心 tab | finance/boss | 审批中心"仓库调拨待审" | 聚合 status=pending_approval | 🟢 |
+
+### 软锁机制（避免跨事务锁）
+
+同一条码不能出现在多个活跃 transfer 中（pending_scan/pending_approval/approved）。
+通过 `_assert_barcode_not_in_active_transfer` 在 create 时查询拦截，cancel/reject/execute 后自然释放。
+**不改 barcode.status**（避免污染 ERP 原有 LOCKED 语义），纯靠"transfer items + status 查询"的软锁。
+
+### E2E 测试状态
+
+🟢 `scripts/e2e_warehouse_transfer.py` 覆盖 4 种路径 + 品牌主仓拦截（源 + 目标）
+
+### 🔴 剩余 gap
+
+- **mall→ERP 方向要求 MallProduct.source_product_id 非空**：纯商城 SKU 没挂靠 ERP 产品时不能反向调拨。service 层已抛 400 指引，但业务上是否合理？P2
+- **条码软锁 vs LOCKED 状态**：当前用活跃 transfer 查询实现软锁，没改 barcode.status。如果以后业务要做"调拨中库存冻结"报表，得另外 JOIN transfers。P2
 
 ---
 

@@ -130,10 +130,63 @@ async def get_salesman(
 
     emp = await db.get(Employee, sm.linked_employee_id) if sm.linked_employee_id else None
     brand = await db.get(Brand, sm.assigned_brand_id) if sm.assigned_brand_id else None
+
+    # 销售统计：completed / partial_closed 订单数 + GMV
+    from app.models.mall.base import MallOrderStatus
+    from app.models.mall.order import MallOrder, MallSkipAlert
+    from sqlalchemy import func as sa_f
+    stats = (await db.execute(
+        select(
+            sa_f.count(MallOrder.id),
+            sa_f.coalesce(sa_f.sum(MallOrder.received_amount), 0),
+        )
+        .where(MallOrder.assigned_salesman_id == salesman_id)
+        .where(MallOrder.status.in_([
+            MallOrderStatus.COMPLETED.value,
+            MallOrderStatus.PARTIAL_CLOSED.value,
+        ]))
+    )).one()
+    completed_count = int(stats[0] or 0)
+    total_gmv = str(stats[1] or 0)
+
+    # 在途订单数（assigned / shipped / delivered / pending_payment_confirmation）
+    in_progress_count = int((await db.execute(
+        select(sa_f.count(MallOrder.id))
+        .where(MallOrder.assigned_salesman_id == salesman_id)
+        .where(MallOrder.status.in_([
+            MallOrderStatus.ASSIGNED.value,
+            MallOrderStatus.SHIPPED.value,
+            MallOrderStatus.DELIVERED.value,
+            MallOrderStatus.PENDING_PAYMENT_CONFIRMATION.value,
+        ]))
+    )).scalar() or 0)
+
+    # 推荐客户数
+    referred_count = int((await db.execute(
+        select(sa_f.count(MallUser.id))
+        .where(MallUser.referrer_salesman_id == salesman_id)
+    )).scalar() or 0)
+
+    # 未解决告警数
+    open_alerts = int((await db.execute(
+        select(sa_f.count(MallSkipAlert.id))
+        .where(MallSkipAlert.salesman_user_id == salesman_id)
+        .where(MallSkipAlert.status == "open")
+    )).scalar() or 0)
+
     return {
         **_salesman_dict(sm),
-        "employee": ({"id": emp.id, "name": emp.name, "status": emp.status} if emp else None),
+        "employee": ({
+            "id": emp.id, "name": emp.name, "status": emp.status,
+        } if emp else None),
         "brand": ({"id": brand.id, "name": brand.name} if brand else None),
+        "stats": {
+            "completed_order_count": completed_count,
+            "total_gmv": total_gmv,
+            "in_progress_order_count": in_progress_count,
+            "referred_customer_count": referred_count,
+            "open_skip_alerts": open_alerts,
+        },
     }
 
 

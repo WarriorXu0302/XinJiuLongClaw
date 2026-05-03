@@ -890,8 +890,10 @@ async def release_order(
     ))
 
     # 如果释放人是推荐人，对该客户记一条 skip_log
+    # 边缘场景：业务员给自己下单（释放 == 自释自订），不记 skip（同 admin_reassign 的理由）
     is_referrer = order.referrer_salesman_id == prev_salesman
-    if is_referrer:
+    is_self_order = order.user_id == prev_salesman
+    if is_referrer and not is_self_order:
         await _record_skip_log(
             db, order, prev_salesman, MallSkipType.RELEASED.value
         )
@@ -991,7 +993,14 @@ async def admin_reassign(
     ))
 
     # 管理员改派 → 原业务员记 skip_log（如果是推荐人）
-    if prev_salesman and order.referrer_salesman_id == prev_salesman:
+    # 边缘场景：业务员给自己下单（user_id == referrer_salesman_id），改派不记 skip
+    #   原因：skip 的语义是"推荐人不服务自己推荐的客户"，但自买订单的"客户"就是自己，
+    #   被改派时不涉及"未服务推荐客户"的违约含义；记 skip 只会污染自己的告警统计
+    if (
+        prev_salesman
+        and order.referrer_salesman_id == prev_salesman
+        and order.user_id != prev_salesman
+    ):
         await _record_skip_log(
             db, order, prev_salesman, MallSkipType.ADMIN_REASSIGNED.value
         )
@@ -1136,6 +1145,9 @@ async def detect_unclaimed_timeout(db: AsyncSession) -> int:
 
     handled = 0
     for order in candidates:
+        # 自买单不记 skip（业务员自己下单又自己超时没抢 → 记 skip 毫无业务意义）
+        if order.user_id == order.referrer_salesman_id:
+            continue
         # 幂等：该订单对 referrer 已有任何类型 skip_log 就跳过，避免同一订单一边被
         # release 一边又被 timeout 算两次
         already = (await db.execute(

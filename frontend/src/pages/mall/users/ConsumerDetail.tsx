@@ -4,7 +4,7 @@
  * 展示：基础信息 / 订单统计 / 订单历史 / 登录日志 / 地址列表
  */
 import {
-  Descriptions, Divider, Drawer, Empty, Space, Spin, Statistic, Table, Tabs, Tag, Typography,
+  Descriptions, Divider, Drawer, Empty, Image, Space, Spin, Statistic, Table, Tabs, Tag, Typography,
 } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
@@ -27,6 +27,20 @@ const ORDER_STATUS: Record<string, string> = {
   completed: '已完成',
   cancelled: '已取消',
   partial_closed: '已折损',
+  refunded: '已退货',
+};
+
+const RETURN_STATUS: Record<string, { text: string; color: string }> = {
+  pending: { text: '待审批', color: 'orange' },
+  approved: { text: '已通过待退款', color: 'blue' },
+  refunded: { text: '已退款', color: 'green' },
+  rejected: { text: '已驳回', color: 'red' },
+};
+
+const APPLICATION_STATUS: Record<string, { text: string; color: string }> = {
+  pending: { text: '待审批', color: 'orange' },
+  approved: { text: '已通过', color: 'green' },
+  rejected: { text: '已驳回', color: 'red' },
 };
 
 const LOGIN_METHOD: Record<string, string> = {
@@ -235,6 +249,67 @@ export default function ConsumerDetail({ userId, open, onClose }: Props) {
                   </div>
                 ))}
               </div>
+            ),
+          },
+          {
+            key: 'application',
+            label: '审批资料',
+            children: (() => {
+              const app = data.application || {};
+              const st = APPLICATION_STATUS[app.status];
+              return (
+                <Descriptions bordered size="small" column={2} styles={{ label: { width: 120 } }}>
+                  <Descriptions.Item label="审批状态" span={2}>
+                    {st ? <Tag color={st.color}>{st.text}</Tag> : '-'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="真实姓名">{app.real_name || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="联系电话">{app.contact_phone || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="配送地址" span={2}>{app.delivery_address || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="营业执照" span={2}>
+                    {app.business_license_url
+                      ? <Image src={app.business_license_url} width={240} />
+                      : <span style={{ color: '#999' }}>未上传</span>}
+                  </Descriptions.Item>
+                  {app.approved_at && (
+                    <Descriptions.Item label="通过时间" span={2}>
+                      {dayjs(app.approved_at).format('YYYY-MM-DD HH:mm:ss')}
+                    </Descriptions.Item>
+                  )}
+                  {app.rejection_reason && (
+                    <Descriptions.Item label="驳回原因" span={2}>
+                      <span style={{ color: '#ff4d4f' }}>{app.rejection_reason}</span>
+                    </Descriptions.Item>
+                  )}
+                </Descriptions>
+              );
+            })(),
+          },
+          {
+            key: 'returns',
+            label: `退货记录 (${data.returns_count || 0})`,
+            children: (data.returns || []).length === 0 ? <Empty description="无退货记录" /> : (
+              <Table
+                dataSource={data.returns}
+                rowKey="id"
+                size="small"
+                pagination={false}
+                columns={[
+                  { title: '订单', dataIndex: 'order_id', width: 200,
+                    render: (v: string) => <code style={{ fontSize: 12 }}>{v?.slice(0, 8)}...</code> },
+                  { title: '状态', dataIndex: 'status', width: 120,
+                    render: (v: string) => {
+                      const s = RETURN_STATUS[v]; return s ? <Tag color={s.color}>{s.text}</Tag> : v;
+                    },
+                  },
+                  { title: '原因', dataIndex: 'reason', ellipsis: true },
+                  { title: '退款', dataIndex: 'refund_amount', width: 100,
+                    render: (v?: string) => v ? <span style={{ color: '#cf1322' }}>¥{v}</span> : '-',
+                  },
+                  { title: '时间', dataIndex: 'created_at', width: 140,
+                    render: (v: string) => dayjs(v).format('MM-DD HH:mm'),
+                  },
+                ]}
+              />
             ),
           },
         ]}

@@ -110,6 +110,10 @@
 - **采购跨仓**（P0）：`purchase_orders` 加 `target_warehouse_type`（'erp_warehouse'/'mall_warehouse'）+ `mall_warehouse_id`（migration m5a6）；`POST /api/purchase` 接受 `target_warehouse_type=mall_warehouse + mall_warehouse_id` 创建入商城仓的 PO；`receive_purchase_order` 按 target 分支到 `mall_inventory` + 加权平均成本 + MallInventoryFlow 流水。前提：ERP 商品必须有对应 `MallProduct`（source_product_id 映射），没有会拒绝并提示先建商城商品
 - **定时任务执行历史**：`MallJobLog` 表（migration m5a7）+ 装饰器 `_with_job_log` 包裹所有 `job_*`（unclaimed_timeout / archive_inactive / pre_notice / partial_close / purge_login_logs），每次执行落条记录（started/finished/duration/status/result/error）。admin 端新端点 `GET /api/mall/admin/housekeeping/logs` + `/logs/summary`（按 job_name 取最近一次），看 dashboard 能知道定时任务是否真的跑了
 - **C 端通知中心**（之前的 gap）：`notify_mall_user` 后端一直在发但 C 端用户没入口看。新建 `pages/notifications/notifications`（复用 `/api/mall/workspace/notifications` 通用端点），个人中心加"消息通知"菜单项 + 未读角标（红色数字 badge），点击通知按 entity_type 跳转（MallOrder/MallReturnRequest/MallPayment/MallUser）
+- admin ConsumerDetail 补 3 个 tab：审批资料（含营业执照大图 + 真实姓名电话配送地址审批状态）+ 退货记录（状态+原因+退款金额+时间）；后端 `GET /mall/admin/users/{id}` 返回 `application` + `returns` + `returns_count` 字段。原先 admin 想看 C 端真实姓名只能翻注册审批列表
+- admin `GET /mall/admin/salesmen/{id}` 返回 stats：completed_order_count / total_gmv / in_progress_order_count / referred_customer_count / open_skip_alerts。前端暂未接，后端 API 先就位
+- 地址删除时如果删的是默认地址，自动把最早的剩余地址提为新默认（原本是删掉就没默认了，下单时 preview 拿不到地址报错）
+- skip_log 处理自买单边缘：业务员自己给自己下单后被 release / admin_reassign / timeout，都不记 skip_log（原逻辑会污染自己的跳单告警统计）
 - 前端采购单 UI 加目标仓库类型切换：Radio 切 ERP 仓 / 商城仓，切商城仓时下拉列出 mall_warehouses；createMutation 按 target_warehouse_type 互斥传 warehouse_id 或 mall_warehouse_id。`/api/mall/admin/warehouses` GET 角色放开 purchase（采购员录入 PO 时选商城仓用）
 - **C 端退货流程**（P0 完整落地）：新表 `mall_return_requests`（migration m5a8）+ `MallReturnStatus` 枚举（pending/approved/refunded/rejected）+ `return_service.py`（apply/approve/reject/mark_refunded）。后端接口：
   - C 端 `POST /api/mall/orders/{order_no}/return` 申请退货（completed / partial_closed 可申，同订单最多一条活跃申请）

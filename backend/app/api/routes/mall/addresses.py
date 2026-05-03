@@ -2,7 +2,7 @@
 /api/mall/addresses/*
 """
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import delete, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_mall_db
@@ -125,14 +125,29 @@ async def delete_address(
     db: AsyncSession = Depends(get_mall_db),
 ):
     user = await auth_service.verify_token_and_load_user(db, current)
-    result = await db.execute(
-        delete(MallAddress)
-        .where(MallAddress.id == addr_id)
-        .where(MallAddress.user_id == user.id)
-    )
-    if result.rowcount == 0:
+    # 删掉 is_default 地址时，自动把最早剩余的地址提为新默认（保证永远有一条默认）
+    row = (
+        await db.execute(
+            select(MallAddress)
+            .where(MallAddress.id == addr_id)
+            .where(MallAddress.user_id == user.id)
+        )
+    ).scalar_one_or_none()
+    if row is None:
         raise HTTPException(status_code=404, detail="地址不存在")
+    was_default = row.is_default
+    await db.delete(row)
     await db.flush()
+    if was_default:
+        next_default = (await db.execute(
+            select(MallAddress)
+            .where(MallAddress.user_id == user.id)
+            .order_by(MallAddress.created_at)
+            .limit(1)
+        )).scalar_one_or_none()
+        if next_default:
+            next_default.is_default = True
+            await db.flush()
     return {"success": True}
 
 

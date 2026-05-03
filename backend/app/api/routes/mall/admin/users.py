@@ -139,8 +139,8 @@ async def get_user(
     user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
-    """详情 = 用户信息 + 订单历史（最多 20 条）+ 登录日志（最多 10 条）+ 地址"""
-    from app.models.mall.order import MallOrder
+    """详情 = 用户信息 + 订单历史（最多 20 条）+ 登录日志（最多 10 条）+ 地址 + 退货申请历史 + 审批资料"""
+    from app.models.mall.order import MallOrder, MallReturnRequest
     from app.models.mall.user import MallAddress, MallLoginLog
 
     require_role(user, "admin", "boss", "finance")
@@ -187,6 +187,14 @@ async def get_user(
     )).one()
     order_count, total_gmv = int(stats[0] or 0), str(stats[1] or 0)
 
+    # 退货申请历史（admin 想知道"这个客户退过多少次"判断是否异常）
+    returns = (await db.execute(
+        select(MallReturnRequest)
+        .where(MallReturnRequest.user_id == user_id)
+        .order_by(desc(MallReturnRequest.created_at))
+        .limit(20)
+    )).scalars().all()
+
     return {
         **_user_dict(u),
         "referrer": ({
@@ -194,6 +202,32 @@ async def get_user(
         } if ref else None),
         "order_count": order_count,
         "total_gmv": total_gmv,
+        # 审批资料（C 端注册时填的）—— admin 看详情时直接拿到，不用再去审批列表翻
+        "application": {
+            "status": u.application_status,
+            "real_name": u.real_name,
+            "contact_phone": u.contact_phone,
+            "delivery_address": u.delivery_address,
+            "business_license_url": u.business_license_url,
+            "rejection_reason": u.rejection_reason,
+            "approved_at": u.approved_at,
+            "approved_by_employee_id": u.approved_by_employee_id,
+        },
+        "returns": [
+            {
+                "id": r.id,
+                "order_id": r.order_id,
+                "status": r.status,
+                "reason": r.reason,
+                "review_note": r.review_note,
+                "refund_amount": str(r.refund_amount) if r.refund_amount else None,
+                "refunded_at": r.refunded_at,
+                "refund_method": r.refund_method,
+                "created_at": r.created_at,
+            }
+            for r in returns
+        ],
+        "returns_count": len(returns),
         "orders": [
             {
                 "id": o.id,

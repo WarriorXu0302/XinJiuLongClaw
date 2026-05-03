@@ -1,11 +1,14 @@
 <!--
-  业务员 - 通知中心（recipient_type='mall_user'）
+  C 端 - 消息通知
+
+  读 /api/mall/workspace/notifications（端点通用，按 mall_user_id 过滤）。
+  点通知后跳转：订单/退货相关 → 订单详情；注册审批 → 账号页；其他跳个人中心。
 -->
 <template>
   <view class="page">
     <view class="header">
       <view class="header__title">
-        通知中心
+        消息通知
       </view>
       <view
         v-if="hasUnread"
@@ -46,7 +49,7 @@
           </text>
         </view>
         <text class="card__time">
-          {{ relativeTime(n.created_at) }}
+          {{ formatTime(n.created_at) }}
         </text>
       </view>
       <view class="card__content">
@@ -66,18 +69,22 @@
 const notifications = ref([])
 const loading = ref(false)
 
-const relativeTime = salesman.relativeTime
-
 const entityTypeMap = {
-  SalesTarget: '销售目标',
   MallOrder: '商城订单',
-  ExpenseClaim: '报销',
-  MallSkipAlert: '跳单告警',
-  SalaryRecord: '工资',
-  LeaveRequest: '请假'
+  MallReturnRequest: '退货申请',
+  MallPayment: '收款凭证',
+  MallUser: '账号'
 }
 
 const hasUnread = computed(() => notifications.value.some(n => n.status === 'unread'))
+
+const formatTime = (iso) => {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return iso
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
 
 const load = async () => {
   loading.value = true
@@ -92,29 +99,29 @@ const load = async () => {
   }
 }
 
+// C 端跳转：订单/退货/凭证都能用 order_no 或 order_id；简化处理
 const jumpByEntity = (n) => {
   const type = n.related_entity_type
   const id = n.related_entity_id
   if (!type || !id) return
-  // 业务员侧通知实体：MallOrder / MallSkipAlert / MallPayment / MallReturnRequest
   if (type === 'MallOrder') {
-    uni.navigateTo({
-      url: `/pages/salesman-order-detail/salesman-order-detail?order_id=${id}`
+    // C 端订单详情用 orderNum（即 order_no），但通知里的 id 是 UUID；
+    // 先跳订单列表兜底，用户从列表进详情
+    uni.switchTab({
+      url: '/pages/user/user',
+      fail: () => uni.navigateTo({ url: '/pages/orderList/orderList' })
     })
-  } else if (type === 'MallSkipAlert') {
-    uni.navigateTo({ url: '/pages/salesman-alerts/salesman-alerts' })
-  } else if (type === 'MallPayment' || type === 'MallReturnRequest') {
-    // 凭证驳回 / 退货相关：id 不是订单 UUID，跳我的订单列表兜底
-    uni.switchTab
-      ? uni.switchTab({ url: '/pages/salesman-orders/salesman-orders' })
-      : uni.navigateTo({ url: '/pages/salesman-orders/salesman-orders' })
+    setTimeout(() => uni.navigateTo({ url: '/pages/orderList/orderList' }), 100)
+  } else if (type === 'MallReturnRequest' || type === 'MallPayment') {
+    uni.navigateTo({ url: '/pages/orderList/orderList' })
+  } else if (type === 'MallUser') {
+    uni.switchTab({ url: '/pages/user/user' })
   }
 }
 
 const onRead = async (n) => {
   const notifId = n.id
   if (n.status === 'unread') {
-    // 乐观更新：先改本地，后调接口；失败回滚
     n.status = 'read'
     try {
       await http.request({
@@ -131,19 +138,25 @@ const onRead = async (n) => {
 }
 
 const onMarkAllRead = async () => {
-  await http.request({
-    url: '/api/mall/workspace/notifications/mark-all-read',
-    method: 'POST',
-    data: {}
-  })
-  notifications.value.forEach(n => {
-    n.status = 'read'
-  })
-  uni.showToast({ title: '已全部标记为已读', icon: 'success' })
+  try {
+    await http.request({
+      url: '/api/mall/workspace/notifications/mark-all-read',
+      method: 'POST',
+      data: {}
+    })
+    notifications.value.forEach(n => {
+      n.status = 'read'
+    })
+    uni.showToast({ title: '已全部标记已读', icon: 'success' })
+  } catch (e) {
+    uni.showToast({ title: '操作失败', icon: 'none' })
+  }
 }
 
-onMounted(() => load())
-onShow(() => load())
+onShow(() => {
+  uni.setNavigationBarTitle({ title: '消息通知' })
+  load()
+})
 </script>
 
 <style lang="scss" scoped>
@@ -156,81 +169,90 @@ onShow(() => load())
 }
 
 .header {
-  padding: 40rpx 32rpx;
-  background: $color-ink;
-  color: #fff;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding: 32rpx;
+  background: $color-ink;
+  color: #fff;
 
   &__title {
-    font-size: 40rpx;
+    font-size: 36rpx;
     font-weight: 600;
     color: $color-gold;
   }
+
   &__action {
-    padding: 8rpx 20rpx;
-    border: 1rpx solid $color-gold;
+    font-size: 24rpx;
     color: $color-gold;
-    font-size: 22rpx;
-    border-radius: 20rpx;
   }
 }
 
 .state {
-  padding: 120rpx 0;
+  padding: 100rpx 0;
   text-align: center;
   color: $color-hint;
+  font-size: 26rpx;
 }
 
 .card {
-  margin: 24rpx 24rpx 0;
-  padding: 24rpx 32rpx;
-  background: $color-card;
+  margin: 24rpx;
+  padding: 24rpx;
+  background: #fff;
   border-radius: 16rpx;
-  border-left: 6rpx solid transparent;
 
-  &--unread { border-left-color: $color-gold; }
+  &--unread {
+    border-left: 8rpx solid $color-gold;
+  }
 
   &__top {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    margin-bottom: 12rpx;
   }
+
   &__title-row {
     display: flex;
     align-items: center;
-    gap: 8rpx;
+    gap: 10rpx;
+    flex: 1;
   }
+
   &__dot {
     width: 12rpx;
     height: 12rpx;
     border-radius: 50%;
     background: $color-err;
   }
+
   &__title {
-    font-size: 28rpx;
+    font-size: 30rpx;
     font-weight: 600;
     color: $color-ink-soft;
   }
+
   &__time {
     font-size: 22rpx;
     color: $color-hint;
   }
+
   &__content {
-    margin-top: 12rpx;
     font-size: 26rpx;
-    color: $color-muted;
-    line-height: 1.6;
+    color: #555;
+    line-height: 1.5;
+    margin-bottom: 8rpx;
+    word-break: break-all;
   }
+
   &__tag {
-    margin-top: 12rpx;
     display: inline-block;
-    padding: 4rpx 16rpx;
+    margin-top: 8rpx;
+    padding: 4rpx 14rpx;
     background: $color-cream;
-    border-radius: 12rpx;
-    font-size: 22rpx;
-    color: $color-gold-deep;
+    border-radius: 20rpx;
+    font-size: 20rpx;
+    color: $color-hint;
   }
 }
 </style>

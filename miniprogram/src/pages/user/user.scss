@@ -344,3 +344,18 @@ button.memu-btn.memu-item {
   background-color: #FFFFFF;
   &:after { border: 0; }
 }
+
+.notif-badge {
+  display: inline-block;
+  margin-left: 12rpx;
+  min-width: 32rpx;
+  height: 32rpx;
+  padding: 0 10rpx;
+  line-height: 32rpx;
+  text-align: center;
+  background: #ff4d4f;
+  color: #fff;
+  border-radius: 16rpx;
+  font-size: 20rpx;
+  vertical-align: middle;
+}

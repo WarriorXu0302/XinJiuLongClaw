@@ -38,6 +38,12 @@
       }
     },
     {
+      "path": "pages/notifications/notifications",
+      "style": {
+        "navigationBarTitleText": "消息通知"
+      }
+    },
+    {
       "path": "pages/basket/basket",
       "style": {
         "backgroundTextStyle": "light",

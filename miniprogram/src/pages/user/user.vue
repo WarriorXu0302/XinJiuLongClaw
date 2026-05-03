@@ -185,6 +185,22 @@
       <view class="my-menu">
         <view
           class="memu-item"
+          @tap="toNotifications"
+        >
+          <view class="i-name">
+            <image src="@/static/images/icon/myAddr.png" />
+            <text>消息通知</text>
+            <text
+              v-if="unreadCount > 0"
+              class="notif-badge"
+            >
+              {{ unreadCount > 99 ? '99+' : unreadCount }}
+            </text>
+          </view>
+          <view class="arrowhead" />
+        </view>
+        <view
+          class="memu-item"
           @tap="toAddressList"
         >
           <view class="i-name">
@@ -218,6 +234,20 @@ const orderAmount = ref('')
 /**
  * 生命周期函数--监听页面显示
  */
+const unreadCount = ref(0)
+
+const loadUnreadCount = () => {
+  http.request({
+    url: '/api/mall/workspace/notifications/unread-count',
+    method: 'GET',
+    hasCatch: true
+  })
+    .then(({ data }) => {
+      unreadCount.value = data?.count || 0
+    })
+    .catch(() => { unreadCount.value = 0 })
+}
+
 onShow(() => {
   if (uni.getStorageSync('userType') === 'salesman') {
     uni.reLaunch({ url: '/pages/salesman-profile/salesman-profile' })
@@ -238,6 +268,7 @@ onShow(() => {
         orderAmount.value = data
       })
     showCollectionCount()
+    loadUnreadCount()
   }
 })
 
@@ -251,6 +282,10 @@ const toAddressList = () => {
   uni.navigateTo({
     url: '/pages/delivery-address/delivery-address'
   })
+}
+
+const toNotifications = () => {
+  uni.navigateTo({ url: '/pages/notifications/notifications' })
 }
 
 const toOrderListPage = (e) => {

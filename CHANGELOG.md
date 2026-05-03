@@ -107,6 +107,7 @@
 - 业务员订单详情（salesman-order-detail）展示凭证列表 + 驳回原因 + 重传按钮文案切换：后端 `MallOrderDetailVO` 补 `payments` 字段；delivered 状态下有 rejected 凭证时按钮文案改成"重新上传收款凭证"。原先业务员不知道凭证被驳回为何/下一步做什么
 - `salesman-my-customers` 加一键拨号 + 导航按钮；后端返完整 `contact_phone`（注册留的电话，原只返脱敏）+ `default_address`（默认收货地址）。业务员跟客户对接/送货时不用手工输地址
 - admin `change_referrer`（换绑推荐人）补通知消费者本人："您的业务员已调整 XXX"。原先只通知了新老业务员，C 端用户完全不知道自己推荐人被换了
+- **采购跨仓**（P0）：`purchase_orders` 加 `target_warehouse_type`（'erp_warehouse'/'mall_warehouse'）+ `mall_warehouse_id`（migration m5a6）；`POST /api/purchase` 接受 `target_warehouse_type=mall_warehouse + mall_warehouse_id` 创建入商城仓的 PO；`receive_purchase_order` 按 target 分支到 `mall_inventory` + 加权平均成本 + MallInventoryFlow 流水。前提：ERP 商品必须有对应 `MallProduct`（source_product_id 映射），没有会拒绝并提示先建商城商品
 - `cancel_order` 退库存按原出库流水的 inventory 定位目标仓，不再依赖 `get_default_warehouse()`。**修复**：默认仓换过后，取消订单会把货退到错的仓
 - `release_order` 仅允许在 `assigned` 状态释放；`shipped` 后条码已 OUTBOUND 绑定原业务员，不再允许自行释放（出库后须走管理员改派）
 - `admin_reassign` 在 shipped/delivered/pending_payment_confirmation 状态改派时，同步把本订单的 OUTBOUND 条码 `outbound_by_user_id` 过户到新业务员，避免归属数据错乱

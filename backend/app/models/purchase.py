@@ -35,6 +35,16 @@ class PurchaseOrder(Base):
     warehouse_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("warehouses.id"), nullable=True
     )
+    # 跨仓采购：目标仓是 ERP 仓还是 mall 仓
+    #   target_warehouse_type='erp_warehouse' → warehouse_id 指向 warehouses 表（老行为）
+    #   target_warehouse_type='mall_warehouse' → mall_warehouse_id 指向 mall_warehouses 表
+    # receive_purchase_order 根据此字段分支到 inventory / mall_inventory
+    target_warehouse_type: Mapped[str] = mapped_column(
+        String(20), default="erp_warehouse", nullable=False
+    )
+    mall_warehouse_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("mall_warehouses.id"), nullable=True
+    )
     total_amount: Mapped[Decimal] = mapped_column(
         Numeric(15, 2), default=Decimal("0.00")
     )

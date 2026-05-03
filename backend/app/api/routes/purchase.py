@@ -46,7 +46,13 @@ from datetime import date as date_type
 class POCreate(BaseModel):
     brand_id: str
     supplier_id: str
-    warehouse_id: str
+    # 跨仓采购：
+    #   target_warehouse_type='erp_warehouse' → 传 warehouse_id（指向 warehouses 表）
+    #   target_warehouse_type='mall_warehouse' → 传 mall_warehouse_id（指向 mall_warehouses 表）
+    # 老接口不传 target_warehouse_type 时默认 erp_warehouse，warehouse_id 必填
+    target_warehouse_type: str = "erp_warehouse"  # 'erp_warehouse' | 'mall_warehouse'
+    warehouse_id: Optional[str] = None
+    mall_warehouse_id: Optional[str] = None
     cash_amount: float = 0
     f_class_amount: float = 0
     financing_amount: float = 0
@@ -81,6 +87,9 @@ class POResponse(BaseModel):
     supplier: Optional[Any] = None
     warehouse_id: Optional[str] = None
     warehouse: Optional[Any] = None
+    target_warehouse_type: str = "erp_warehouse"
+    mall_warehouse_id: Optional[str] = None
+    mall_warehouse: Optional[Any] = None  # {id, name}
     total_amount: float
     cash_amount: float
     f_class_amount: float
@@ -100,8 +109,25 @@ class POResponse(BaseModel):
 
 @router.post("", response_model=POResponse, status_code=201)
 async def create_purchase_order(body: POCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
-    """Create PO (status=pending). Does NOT deduct money yet."""
+    """Create PO (status=pending). Does NOT deduct money yet。
+
+    跨仓：target_warehouse_type='mall_warehouse' 时要求传 mall_warehouse_id；
+    'erp_warehouse' 或不传时要求 warehouse_id（向后兼容）。
+    """
     require_role(user, "boss", "purchase", "warehouse")
+
+    # 目标仓校验
+    if body.target_warehouse_type == "mall_warehouse":
+        if not body.mall_warehouse_id:
+            raise HTTPException(400, "入 mall 仓必须指定 mall_warehouse_id")
+        from app.models.mall.inventory import MallWarehouse
+        mall_wh = await db.get(MallWarehouse, body.mall_warehouse_id)
+        if mall_wh is None or not mall_wh.is_active:
+            raise HTTPException(400, "mall 仓不存在或已停用")
+    else:
+        if not body.warehouse_id:
+            raise HTTPException(400, "入 ERP 仓必须指定 warehouse_id")
+
     total = Decimal("0")
     po = PurchaseOrder(
         id=str(uuid.uuid4()),
@@ -109,6 +135,8 @@ async def create_purchase_order(body: POCreate, user: CurrentUser, db: AsyncSess
         brand_id=body.brand_id,
         supplier_id=body.supplier_id,
         warehouse_id=body.warehouse_id,
+        target_warehouse_type=body.target_warehouse_type,
+        mall_warehouse_id=body.mall_warehouse_id,
         cash_amount=Decimal(str(body.cash_amount)),
         f_class_amount=Decimal(str(body.f_class_amount)),
         financing_amount=Decimal(str(body.financing_amount)),
@@ -132,7 +160,10 @@ async def create_purchase_order(body: POCreate, user: CurrentUser, db: AsyncSess
     po.total_amount = total
 
     # Validate payment equals total exactly (skip for tasting warehouse — no payment needed)
-    wh = await db.get(Warehouse, body.warehouse_id) if body.warehouse_id else None
+    # mall 仓场景不走品鉴豁免（品鉴仓是 ERP 侧语义），必须付款校验
+    wh = await db.get(Warehouse, body.warehouse_id) if (
+        body.target_warehouse_type == "erp_warehouse" and body.warehouse_id
+    ) else None
     is_tasting = wh and wh.warehouse_type == 'tasting'
     if not is_tasting:
         pay_sum = po.cash_amount + po.f_class_amount + po.financing_amount
@@ -152,12 +183,17 @@ async def create_purchase_order(body: POCreate, user: CurrentUser, db: AsyncSess
 
 
 def _po_to_response(po: PurchaseOrder) -> dict:
-    """Convert PurchaseOrder ORM to response dict with nested names."""
+    """Convert PurchaseOrder ORM to response dict with nested names。"""
     d = POResponse.model_validate(po).model_dump()
     d["supplier_name"] = po.supplier.name if po.supplier else None
     d["supplier"] = {"name": po.supplier.name} if po.supplier else None
     d["brand_name"] = po.brand.name if po.brand else None
-    d["warehouse"] = {"name": po.warehouse.name, "warehouse_type": po.warehouse.warehouse_type} if po.warehouse else None
+    d["warehouse"] = (
+        {"name": po.warehouse.name, "warehouse_type": po.warehouse.warehouse_type}
+        if po.warehouse else None
+    )
+    # mall 仓信息（跨仓采购时让前端能展示仓名）
+    # 不在这里同步查询 MallWarehouse（要 await），前端用 mall_warehouse_id + 列表缓存拼名字，或走详情端点扩展
     d["items"] = []
     for item in po.items:
         item_d = POItemResponse.model_validate(item).model_dump()
@@ -380,17 +416,110 @@ async def receive_purchase_order(
     if po.status in (PurchaseStatus.RECEIVED, PurchaseStatus.COMPLETED):
         raise HTTPException(400, f"采购单已收货，状态: {po.status}")
 
+    is_mall = po.target_warehouse_type == "mall_warehouse"
+
     # Normal PO must be paid first; tasting warehouse auto-approved so always ok
     wh = await db.get(Warehouse, po.warehouse_id) if po.warehouse_id else None
-    is_tasting = wh and wh.warehouse_type == 'tasting'
+    is_tasting = (not is_mall) and wh and wh.warehouse_type == 'tasting'
     if not is_tasting and po.status not in (PurchaseStatus.PAID, PurchaseStatus.SHIPPED):
         raise HTTPException(400, f"采购单状态为 '{po.status}'，需要先审批付款才能收货")
 
+    from app.models.product import Product
+
+    if is_mall:
+        # mall 仓入库：需要 mall_product + mall_sku 映射才能写 mall_inventory
+        # 查 mall_products 表里 source_product_id == ERP product.id 的映射
+        from app.models.mall.inventory import MallInventory, MallInventoryFlow
+        from app.models.mall.product import MallProduct, MallProductSku
+        from app.models.mall.base import MallInventoryFlowType
+        if not po.mall_warehouse_id:
+            raise HTTPException(400, "PO 标记为 mall 仓但未指定 mall_warehouse_id")
+
+        now = datetime.now(timezone.utc)
+        for item in po.items:
+            # 找 mall_product（source_product_id = ERP product.id）
+            mall_prod = (await db.execute(
+                select(MallProduct).where(MallProduct.source_product_id == item.product_id)
+            )).scalar_one_or_none()
+            if mall_prod is None:
+                raise HTTPException(
+                    400,
+                    f"ERP 商品 {item.product_id} 还没映射到 mall_products（没有对应的商城商品），"
+                    f"无法入 mall 仓。请先在商城商品管理创建对应商品。",
+                )
+            # mall_sku：默认拿第一个 on_sale 的（单 SKU 场景）；多 SKU 需要界面指定
+            sku = (await db.execute(
+                select(MallProductSku).where(MallProductSku.product_id == mall_prod.id)
+                .order_by(MallProductSku.id)
+            )).scalar_one_or_none()
+            if sku is None:
+                raise HTTPException(
+                    400,
+                    f"商城商品 {mall_prod.name} 没有 SKU，无法入库",
+                )
+
+            bpc = 1
+            if item.quantity_unit == '箱':
+                prod = await db.get(Product, item.product_id)
+                bpc = prod.bottles_per_case if prod and prod.bottles_per_case else 1
+            bottles = item.quantity * bpc
+            per_bottle_cost = Decimal(str(item.unit_price)) / bpc if bpc > 1 else Decimal(str(item.unit_price))
+
+            # 找或建 mall_inventory 行
+            inv = (await db.execute(
+                select(MallInventory)
+                .where(MallInventory.warehouse_id == po.mall_warehouse_id)
+                .where(MallInventory.sku_id == sku.id)
+                .with_for_update()
+            )).scalar_one_or_none()
+            if inv is None:
+                inv = MallInventory(
+                    warehouse_id=po.mall_warehouse_id,
+                    sku_id=sku.id,
+                    quantity=0,
+                    avg_cost_price=per_bottle_cost,
+                )
+                db.add(inv)
+                await db.flush()
+
+            # 加权平均成本：新 avg = (老qty*老avg + 入库qty*本次成本) / (老qty + 入库qty)
+            old_qty = inv.quantity or 0
+            old_avg = inv.avg_cost_price or Decimal("0")
+            new_qty = old_qty + bottles
+            if new_qty > 0:
+                inv.avg_cost_price = (
+                    (Decimal(old_qty) * old_avg + Decimal(bottles) * per_bottle_cost)
+                    / Decimal(new_qty)
+                ).quantize(Decimal("0.0001"))
+            inv.quantity = new_qty
+
+            # 流水
+            db.add(MallInventoryFlow(
+                inventory_id=inv.id,
+                flow_type=MallInventoryFlowType.IN.value,
+                quantity=bottles,
+                cost_price=per_bottle_cost,
+                ref_type="purchase",
+                ref_id=po.id,
+                notes=f"采购入库 {po.po_no} ({item.quantity}{item.quantity_unit}={bottles}瓶) batch={batch_no}",
+            ))
+
+        po.status = PurchaseStatus.RECEIVED
+        po.actual_date = now.date()
+        await db.flush()
+        await log_audit(
+            db, action="receive_purchase_order", entity_type="PurchaseOrder",
+            entity_id=po.id, user=user,
+            changes={"target": "mall_warehouse", "mall_warehouse_id": po.mall_warehouse_id, "batch_no": batch_no},
+        )
+        await db.refresh(po, ["items", "supplier", "warehouse", "brand"])
+        return _po_to_response(po)
+
+    # ═══ 原 ERP 仓路径 ═══
     wh_id = po.warehouse_id
     if not wh_id:
         raise HTTPException(400, "采购单没有设置目标仓库")
 
-    from app.models.product import Product
     now = datetime.now(timezone.utc)
     for item in po.items:
         # 换算为瓶数：库存底层按瓶存储

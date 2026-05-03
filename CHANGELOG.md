@@ -127,6 +127,10 @@
   - success 消息按仓类型分别展示
 - 商城订单列表（admin）加"已折损"和"已退货" tab（原先这两种状态找不到）
 - salesman `stats` 端点修复：Commission `status=reversed`（退货冲销）原被错误算进 `pending`，现在独立返 `month_commission_reversed` 字段；小程序业务员 profile 加"退货冲销"红底卡片展示
+- admin 改派订单下拉智能化：`_helpers/salesmen` 端点补返 `is_accepting_orders / has_linked_employee / in_progress_count / open_alerts`，按"可接单 + 绑员工 优先 → 在途订单少 → 告警少"排序；前端下拉展示 3 个 tag（接单中/未开放/告警数），选中后有问题会黄色警告提示
+- 跳单告警申诉时通知 admin/boss（notify_roles）—— 原先业务员申诉后 admin 无提示，申诉沉没；现在新申诉进通知中心后 admin 一眼看到
+- 通知点击直跳订单详情：reject_payment / return 3 处通知都改 `entity_type=MallOrder + entity_id=order.id`，`workspace/notifications` 响应补 `related_order_no`（反查 MallOrder.id → order_no），C 端点通知用 order_no 直跳 orderDetail 而非兜底订单列表
+- 微信登录失败也记审计（原只有账密登录失败有），admin 追溯用户"登不上"问题有线索：openid 未注册 / disabled / archived / pending / 驳回 / 员工离职全覆盖
 - 前端采购单 UI 加目标仓库类型切换：Radio 切 ERP 仓 / 商城仓，切商城仓时下拉列出 mall_warehouses；createMutation 按 target_warehouse_type 互斥传 warehouse_id 或 mall_warehouse_id。`/api/mall/admin/warehouses` GET 角色放开 purchase（采购员录入 PO 时选商城仓用）
 - **C 端退货流程**（P0 完整落地）：新表 `mall_return_requests`（migration m5a8）+ `MallReturnStatus` 枚举（pending/approved/refunded/rejected）+ `return_service.py`（apply/approve/reject/mark_refunded）。后端接口：
   - C 端 `POST /api/mall/orders/{order_no}/return` 申请退货（completed / partial_closed 可申，同订单最多一条活跃申请）

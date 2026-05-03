@@ -315,21 +315,60 @@ export default function MallOrderList() {
               当前业务员：<strong>{reassignOrder.assigned_salesman?.nickname || '未接单'}</strong>
             </div>
             <div style={{ marginBottom: 12 }}>
-              <div style={{ marginBottom: 4 }}>目标业务员：</div>
+              <div style={{ marginBottom: 4 }}>目标业务员：<span style={{ color: '#999', fontSize: 12 }}>（按推荐程度自动排序）</span></div>
               <Select
                 showSearch
                 placeholder="选择业务员"
                 value={reassignTarget}
                 onChange={setReassignTarget}
                 style={{ width: '100%' }}
-                options={(salesmenData?.records || []).map((s: any) => ({
-                  value: s.id,
-                  label: `${s.nickname || s.username} ${s.phone ? `· ${s.phone}` : ''}`,
-                }))}
+                optionLabelProp="label"
+                options={(salesmenData?.records || []).map((s: any) => {
+                  const warn: string[] = [];
+                  if (!s.is_accepting_orders) warn.push('未开放接单');
+                  if (!s.has_linked_employee) warn.push('未绑 ERP 员工');
+                  if (s.open_alerts > 0) warn.push(`${s.open_alerts} 个告警`);
+                  return {
+                    value: s.id,
+                    label: `${s.nickname || s.username} ${s.phone ? `· ${s.phone}` : ''}`,
+                    title: warn.join(' / '),
+                    children: (
+                      <div>
+                        <div>
+                          <strong>{s.nickname || s.username}</strong>
+                          {s.phone && <span style={{ color: '#999', marginLeft: 8 }}>· {s.phone}</span>}
+                        </div>
+                        <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>
+                          在途 {s.in_progress_count}
+                          <span style={{ marginLeft: 12 }}>
+                            {s.is_accepting_orders
+                              ? <Tag color="green" style={{ marginLeft: 4 }}>接单中</Tag>
+                              : <Tag color="default" style={{ marginLeft: 4 }}>未开放</Tag>}
+                            {!s.has_linked_employee && <Tag color="red" style={{ marginLeft: 4 }}>无 ERP 员工</Tag>}
+                            {s.open_alerts > 0 && <Tag color="orange" style={{ marginLeft: 4 }}>{s.open_alerts} 告警</Tag>}
+                          </span>
+                        </div>
+                      </div>
+                    ),
+                  };
+                })}
                 filterOption={(input, option) =>
                   (option?.label as string).toLowerCase().includes(input.toLowerCase())
                 }
               />
+              {reassignTarget && (() => {
+                const s = (salesmenData?.records || []).find((x: any) => x.id === reassignTarget);
+                if (!s) return null;
+                const issues: string[] = [];
+                if (!s.is_accepting_orders) issues.push('该业务员未开放接单');
+                if (!s.has_linked_employee) issues.push('未绑定 ERP 员工，无法计提成');
+                if (s.open_alerts > 0) issues.push(`有 ${s.open_alerts} 条未解决告警`);
+                return issues.length > 0 ? (
+                  <div style={{ marginTop: 6, fontSize: 12, color: '#faad14' }}>
+                    ⚠️ 警告：{issues.join('；')}，确认仍要改派给他？
+                  </div>
+                ) : null;
+              })()}
             </div>
             <div>
               <div style={{ marginBottom: 4 }}>原因（可选）：</div>

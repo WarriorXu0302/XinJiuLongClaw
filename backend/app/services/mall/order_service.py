@@ -1200,6 +1200,16 @@ async def appeal_skip_alert(
         changes={"reason": reason, "skip_count": alert.skip_count},
     )
 
+    # 通知 admin/boss 有新申诉待裁决
+    from app.services.notification_service import notify_roles
+    nick = salesman.nickname or salesman.username or "业务员"
+    await notify_roles(
+        db, role_codes=["admin", "boss"],
+        title="跳单告警申诉待裁决",
+        content=f"业务员「{nick}」对累计 {alert.skip_count} 次跳单告警提申诉：{reason[:80]}",
+        entity_type="MallSkipAlert", entity_id=alert.id,
+    )
+
     await db.flush()
     return alert
 

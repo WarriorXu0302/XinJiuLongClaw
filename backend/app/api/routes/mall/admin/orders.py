@@ -485,6 +485,17 @@ async def list_salesmen_for_reassign(
     keyword: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
+    """改派目标下拉。返回额外字段便于 admin 判断是否合适改派：
+      - is_accepting_orders：关闭的不能被抢单，但管理员强派仍能派（service 层不校验）
+      - linked_employee_id：null 的业务员不能抢（claim_order 校验）→ 改派到他不合适
+      - in_progress_count：在途订单数（越多越不建议加派）
+      - open_alerts：未解决跳单告警数（高的不建议派）
+
+    默认返 50 条，按"可接单优先 + 在途订单少优先"排序，让 admin 一眼看到最优选。
+    """
+    from app.models.mall.base import MallOrderStatus
+    from app.models.mall.order import MallOrder, MallSkipAlert
+
     require_role(user, "admin", "boss", "finance")
     stmt = select(MallUser).where(MallUser.user_type == "salesman").where(MallUser.status == "active")
     if keyword:
@@ -492,14 +503,59 @@ async def list_salesmen_for_reassign(
         stmt = stmt.where(
             (MallUser.nickname.ilike(kw)) | (MallUser.phone.ilike(kw)) | (MallUser.username.ilike(kw))
         )
-    stmt = stmt.order_by(MallUser.created_at).limit(50)
+    stmt = stmt.limit(100)
     rows = (await db.execute(stmt)).scalars().all()
-    return {
-        "records": [
-            {"id": u.id, "nickname": u.nickname, "phone": u.phone, "username": u.username}
-            for u in rows
-        ]
-    }
+    if not rows:
+        return {"records": []}
+
+    sm_ids = [r.id for r in rows]
+
+    # 批量查每个业务员的在途订单数
+    in_progress_map: dict[str, int] = {}
+    in_rows = (await db.execute(
+        select(MallOrder.assigned_salesman_id, sa_func.count(MallOrder.id))
+        .where(MallOrder.assigned_salesman_id.in_(sm_ids))
+        .where(MallOrder.status.in_([
+            MallOrderStatus.ASSIGNED.value,
+            MallOrderStatus.SHIPPED.value,
+            MallOrderStatus.DELIVERED.value,
+            MallOrderStatus.PENDING_PAYMENT_CONFIRMATION.value,
+        ]))
+        .group_by(MallOrder.assigned_salesman_id)
+    )).all()
+    for sid, cnt in in_rows:
+        in_progress_map[sid] = int(cnt)
+
+    # 批量查 open 告警
+    alert_map: dict[str, int] = {}
+    a_rows = (await db.execute(
+        select(MallSkipAlert.salesman_user_id, sa_func.count(MallSkipAlert.id))
+        .where(MallSkipAlert.salesman_user_id.in_(sm_ids))
+        .where(MallSkipAlert.status == "open")
+        .group_by(MallSkipAlert.salesman_user_id)
+    )).all()
+    for sid, cnt in a_rows:
+        alert_map[sid] = int(cnt)
+
+    records = []
+    for u in rows:
+        records.append({
+            "id": u.id,
+            "nickname": u.nickname,
+            "phone": u.phone,
+            "username": u.username,
+            "is_accepting_orders": u.is_accepting_orders,
+            "has_linked_employee": bool(u.linked_employee_id),
+            "in_progress_count": in_progress_map.get(u.id, 0),
+            "open_alerts": alert_map.get(u.id, 0),
+        })
+    # 排序：可接单 + 有绑员工 优先 → 在途订单少 → 告警少
+    records.sort(key=lambda r: (
+        0 if (r["is_accepting_orders"] and r["has_linked_employee"]) else 1,
+        r["in_progress_count"],
+        r["open_alerts"],
+    ))
+    return {"records": records[:50]}
 
 
 class _ReassignBody(BaseModel):

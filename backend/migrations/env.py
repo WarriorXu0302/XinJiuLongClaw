@@ -20,6 +20,7 @@ from app.models import (
     InspectionCase, MarketCleanupCase,
     ManufacturerExternalIdentity,
 )
+from app.models.transfer import WarehouseTransfer, WarehouseTransferItem  # noqa: F401
 
 # Mall models（小程序）
 from app.models.mall.user import (  # noqa: F401

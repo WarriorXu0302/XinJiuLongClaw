@@ -46,6 +46,7 @@ from app.models.audit_log import AuditLog
 from app.models.notification_log import NotificationLog
 from app.models.financing import FinancingOrder, FinancingRepayment
 from app.models.expense_claim import ExpenseClaim
+from app.models.transfer import WarehouseTransfer, WarehouseTransferItem
 
 __all__ = [
     "Base",
@@ -104,4 +105,7 @@ __all__ = [
     "FinancingOrder",
     "FinancingRepayment",
     "ExpenseClaim",
+    # Warehouse Transfer (ERP + mall 跨端调拨)
+    "WarehouseTransfer",
+    "WarehouseTransferItem",
 ]

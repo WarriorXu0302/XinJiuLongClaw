@@ -371,7 +371,8 @@ pending_scan ─submit→ pending_approval ─approve→ approved ─execute→ 
 - **桥 B7 通知**：目前不推送（收银实时完成，店员看小程序即知结果）
 
 ### E2E 测试状态
-🟡 coded 未 E2E（scripts/e2e_store_sale.py TODO，下版本补）
+🟢 `scripts/e2e_store_sale.py` 覆盖 5 场景：正常闭环 / 售价越界 / credit 赊账拒 / 越权拒 / 无提成率拒
+关键断言：StoreSale 金额 + StoreSaleItem + Commission pending + Inventory 扣减 + 条码 outbound + StockFlow 六处一致
 
 ### 🔴 已知 gap
 - **退货**：当前无店面退货流程。客户来退货怎么办？是走 mall 的 MallReturnRequest 还是新建 StoreSaleReturn？需业务决策。P1

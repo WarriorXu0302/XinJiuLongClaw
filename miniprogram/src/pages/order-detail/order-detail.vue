@@ -240,12 +240,62 @@
         </view>
       </view>
 
-      <!-- 底部栏：仅终态订单（已完成/已取消/坏账关单/已退款）显示软删按钮 -->
+      <!-- 退货状态显示（已申请 / 已批准 / 已退款 / 已驳回） -->
       <view
-        v-if="isTerminalStatus"
+        v-if="returnReq"
+        :class="['return-status', `return-status--${returnReq.status}`]"
+      >
+        <view class="return-status__head">
+          退货申请
+          <text :class="['return-status__tag', `return-status__tag--${returnReq.status}`]">
+            {{ returnStatusLabel(returnReq.status) }}
+          </text>
+        </view>
+        <view class="return-status__body">
+          <text class="return-status__label">
+            申请原因：
+          </text>{{ returnReq.reason }}
+        </view>
+        <view
+          v-if="returnReq.review_note"
+          class="return-status__body"
+        >
+          <text class="return-status__label">
+            审批备注：
+          </text>{{ returnReq.review_note }}
+        </view>
+        <view
+          v-if="returnReq.refund_amount"
+          class="return-status__body"
+        >
+          <text class="return-status__label">
+            退款金额：
+          </text>¥{{ returnReq.refund_amount }}
+        </view>
+        <view
+          v-if="returnReq.refunded_at"
+          class="return-status__body"
+        >
+          <text class="return-status__label">
+            退款到账：
+          </text>{{ fmtRetDate(returnReq.refunded_at) }}（{{ refundMethodLabel(returnReq.refund_method) }}）
+        </view>
+      </view>
+
+      <!-- 底部栏 -->
+      <view
+        v-if="canApplyReturn || isTerminalStatus"
         class="order-detail-footer"
       >
         <text
+          v-if="canApplyReturn"
+          class="action-btn action-btn--return"
+          @tap="onApplyReturn"
+        >
+          申请退货
+        </text>
+        <text
+          v-if="isTerminalStatus"
           class="dele-order"
           @tap="delOrderList"
         >
@@ -291,6 +341,86 @@ const courier = ref(null) // 配送员：{nickname, mobile, wechatQrUrl, alipayQ
 const showPayQr = ref(false)
 // 终态订单 = 可从列表软删（completed / cancelled / partial_closed / refunded）
 const isTerminalStatus = computed(() => ['completed', 'cancelled', 'partial_closed', 'refunded'].includes(status.value))
+
+// 退货申请（完整后端：completed/partial_closed 可申；一个订单同时只能有一条活跃申请）
+const returnReq = ref(null)
+const canApplyReturn = computed(() => {
+  if (!['completed', 'partial_closed'].includes(status.value)) return false
+  // 已有 pending/approved/refunded 申请就不让重复申请；rejected 可以重申
+  if (returnReq.value && ['pending', 'approved', 'refunded'].includes(returnReq.value.status)) return false
+  return true
+})
+
+const returnStatusLabel = (s) => ({
+  pending: '待审批',
+  approved: '已通过，等待退款',
+  refunded: '已退款',
+  rejected: '已驳回'
+}[s] || s)
+
+const refundMethodLabel = (m) => ({
+  cash: '现金',
+  bank: '银行转账',
+  wechat: '微信',
+  alipay: '支付宝'
+}[m] || m || '-')
+
+const fmtRetDate = (iso) => {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return iso
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+const loadReturnStatus = (orderNum) => {
+  http.request({
+    url: `/api/mall/orders/${orderNum}/return`,
+    method: 'GET',
+    hasCatch: true
+  })
+    .then(({ data }) => {
+      returnReq.value = data // 可能是 null（没申请过）
+    })
+    .catch(() => {})
+}
+
+const onApplyReturn = () => {
+  let reason = ''
+  uni.showModal({
+    title: '申请退货',
+    content: '请详细说明退货原因，财务审核通过后会联系您安排退款',
+    editable: true,
+    placeholderText: '填写退货原因（必填）',
+    success: (r) => {
+      if (!r.confirm) return
+      reason = (r.content || '').trim()
+      if (!reason) {
+        uni.showToast({ title: '请填写退货原因', icon: 'none' })
+        return
+      }
+      submitReturn(reason)
+    }
+  })
+}
+
+const submitReturn = (reason) => {
+  uni.showLoading({ title: '提交中…' })
+  http.request({
+    url: `/api/mall/orders/${orderNumber.value}/return`,
+    method: 'POST',
+    data: { reason }
+  })
+    .then(({ data }) => {
+      uni.hideLoading()
+      uni.showToast({ title: '退货申请已提交，等待审核', icon: 'success' })
+      returnReq.value = data
+    })
+    .catch((e) => {
+      uni.hideLoading()
+      uni.showToast({ title: e?.detail || '提交失败', icon: 'none' })
+    })
+}
 /**
  * 加载订单数据
  */
@@ -315,6 +445,10 @@ const loadOrderDetail = (orderNum) => {
       total.value = data.totalAmount ?? data.total ?? 0
       courier.value = data.courier || null
       uni.hideLoading()
+      // completed / partial_closed / refunded 时查退货记录（可能有历史 rejected，或当前 pending/approved）
+      if (['completed', 'partial_closed', 'refunded'].includes(data.status)) {
+        loadReturnStatus(orderNum)
+      }
     })
 }
 
@@ -366,4 +500,64 @@ const delOrderList = () => {
 
 <style scoped lang="scss">
 @use './order-detail.scss';
+
+.return-status {
+  margin: 24rpx;
+  padding: 24rpx;
+  background: #fff;
+  border-radius: 16rpx;
+  border-left: 8rpx solid #C9A961;
+
+  &--pending { border-left-color: #faad14; }
+  &--approved { border-left-color: #1890ff; }
+  &--refunded { border-left-color: #52c41a; }
+  &--rejected { border-left-color: #ff4d4f; }
+
+  &__head {
+    font-size: 30rpx;
+    font-weight: 600;
+    color: #0E0E0E;
+    margin-bottom: 12rpx;
+    display: flex;
+    align-items: center;
+    gap: 12rpx;
+  }
+
+  &__tag {
+    font-size: 22rpx;
+    padding: 4rpx 16rpx;
+    border-radius: 20rpx;
+
+    &--pending { background: rgba(250,173,20,0.15); color: #faad14; }
+    &--approved { background: rgba(24,144,255,0.15); color: #1890ff; }
+    &--refunded { background: rgba(82,196,26,0.15); color: #52c41a; }
+    &--rejected { background: rgba(255,77,79,0.15); color: #ff4d4f; }
+  }
+
+  &__body {
+    font-size: 24rpx;
+    color: #555;
+    line-height: 1.6;
+    margin-top: 4rpx;
+    word-break: break-all;
+  }
+
+  &__label {
+    color: #999;
+  }
+}
+
+.action-btn {
+  display: inline-block;
+  padding: 16rpx 40rpx;
+  border-radius: 40rpx;
+  font-size: 26rpx;
+  margin-right: 16rpx;
+
+  &--return {
+    background: #fff;
+    color: #ff4d4f;
+    border: 2rpx solid #ff4d4f;
+  }
+}
 </style>

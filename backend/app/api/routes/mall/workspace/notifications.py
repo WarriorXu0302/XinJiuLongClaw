@@ -36,6 +36,20 @@ async def list_notifications(
     rows = (await db.execute(
         base.order_by(NotificationLog.created_at.desc()).offset(skip).limit(limit)
     )).scalars().all()
+
+    # 反查 MallOrder entity 的 order_no（C 端跳详情需要业务单号而非 UUID）
+    order_ids = list({
+        n.related_entity_id for n in rows
+        if n.related_entity_type == "MallOrder" and n.related_entity_id
+    })
+    order_no_map: dict[str, str] = {}
+    if order_ids:
+        from app.models.mall.order import MallOrder
+        order_rows = (await db.execute(
+            select(MallOrder.id, MallOrder.order_no).where(MallOrder.id.in_(order_ids))
+        )).all()
+        order_no_map = {r[0]: r[1] for r in order_rows}
+
     return {
         "records": [
             {
@@ -45,6 +59,7 @@ async def list_notifications(
                 "status": n.status,
                 "related_entity_type": n.related_entity_type,
                 "related_entity_id": n.related_entity_id,
+                "related_order_no": order_no_map.get(n.related_entity_id) if n.related_entity_type == "MallOrder" else None,
                 "read_at": n.read_at,
                 "created_at": n.created_at,
             }

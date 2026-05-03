@@ -167,14 +167,16 @@ async def approve(
         db, mall_user_id=req.user_id,
         title="退货申请已通过",
         content=f"您对订单 {order.order_no if order else ''} 的退货申请已通过，预计退款金额 ¥{updated.refund_amount}，等待财务打款。",
-        entity_type="MallReturnRequest", entity_id=req.id,
+        # 通知关联 order.id 让小程序点击能跳订单详情（MallReturnRequest 无对应 C 端页面）
+        entity_type="MallOrder", entity_id=(order.id if order else req.order_id),
     )
     if order and order.assigned_salesman_id:
         await notify_mall_user(
             db, mall_user_id=order.assigned_salesman_id,
             title="您配送的订单发生退货",
             content=f"订单 {order.order_no} 已通过退货申请，相关提成已回写。",
-            entity_type="MallReturnRequest", entity_id=req.id,
+            # 通知关联 order.id 让小程序点击能跳订单详情（MallReturnRequest 无对应 C 端页面）
+        entity_type="MallOrder", entity_id=(order.id if order else req.order_id),
         )
     return _return_dict(updated, order)
 
@@ -214,7 +216,8 @@ async def reject(
         db, mall_user_id=req.user_id,
         title="退货申请未通过",
         content=f"您对订单 {order.order_no if order else ''} 的退货申请未通过，原因：{body.reason}",
-        entity_type="MallReturnRequest", entity_id=req.id,
+        # 通知关联 order.id 让小程序点击能跳订单详情（MallReturnRequest 无对应 C 端页面）
+        entity_type="MallOrder", entity_id=(order.id if order else req.order_id),
     )
     return _return_dict(updated, order)
 
@@ -262,6 +265,7 @@ async def mark_refunded(
         db, mall_user_id=req.user_id,
         title="退款已到账",
         content=f"您对订单 {order.order_no if order else ''} 的退款（¥{updated.refund_amount}）已完成，请查收。",
-        entity_type="MallReturnRequest", entity_id=req.id,
+        # 通知关联 order.id 让小程序点击能跳订单详情（MallReturnRequest 无对应 C 端页面）
+        entity_type="MallOrder", entity_id=(order.id if order else req.order_id),
     )
     return _return_dict(updated, order)

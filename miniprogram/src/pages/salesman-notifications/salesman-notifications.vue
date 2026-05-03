@@ -96,7 +96,7 @@ const jumpByEntity = (n) => {
   const type = n.related_entity_type
   const id = n.related_entity_id
   if (!type || !id) return
-  // 业务员侧通知实体：MallOrder / MallSkipAlert / MallPayment / MallReturnRequest
+  // 业务员侧通知实体：MallOrder（含凭证驳回/退货，后端统一用 order.id）/ MallSkipAlert
   if (type === 'MallOrder') {
     uni.navigateTo({
       url: `/pages/salesman-order-detail/salesman-order-detail?order_id=${id}`
@@ -104,7 +104,7 @@ const jumpByEntity = (n) => {
   } else if (type === 'MallSkipAlert') {
     uni.navigateTo({ url: '/pages/salesman-alerts/salesman-alerts' })
   } else if (type === 'MallPayment' || type === 'MallReturnRequest') {
-    // 凭证驳回 / 退货相关：id 不是订单 UUID，跳我的订单列表兜底
+    // 旧通知兼容：新的已改为 MallOrder，这里兜底跳订单列表
     uni.switchTab
       ? uni.switchTab({ url: '/pages/salesman-orders/salesman-orders' })
       : uni.navigateTo({ url: '/pages/salesman-orders/salesman-orders' })

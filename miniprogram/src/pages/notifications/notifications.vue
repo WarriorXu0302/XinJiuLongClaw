@@ -102,17 +102,18 @@ const load = async () => {
 // C 端跳转：订单/退货/凭证都能用 order_no 或 order_id；简化处理
 const jumpByEntity = (n) => {
   const type = n.related_entity_type
-  const id = n.related_entity_id
-  if (!type || !id) return
+  if (!type) return
   if (type === 'MallOrder') {
-    // C 端订单详情用 orderNum（即 order_no），但通知里的 id 是 UUID；
-    // 先跳订单列表兜底，用户从列表进详情
-    uni.switchTab({
-      url: '/pages/user/user',
-      fail: () => uni.navigateTo({ url: '/pages/orderList/orderList' })
-    })
-    setTimeout(() => uni.navigateTo({ url: '/pages/orderList/orderList' }), 100)
+    // 后端在 notification response 里带 related_order_no（反查 MallOrder.id → order_no）
+    // 用 order_no 跳 orderDetail 能直达，不用再过订单列表
+    const orderNo = n.related_order_no
+    if (orderNo) {
+      uni.navigateTo({ url: `/pages/order-detail/order-detail?orderNum=${orderNo}` })
+    } else {
+      uni.navigateTo({ url: '/pages/orderList/orderList' })
+    }
   } else if (type === 'MallReturnRequest' || type === 'MallPayment') {
+    // 旧通知兼容：新代码已改用 MallOrder，这里兜底跳订单列表
     uni.navigateTo({ url: '/pages/orderList/orderList' })
   } else if (type === 'MallUser') {
     uni.switchTab({ url: '/pages/user/user' })

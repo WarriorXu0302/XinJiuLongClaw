@@ -136,6 +136,20 @@ async def approve_return(
             notes=f"退货入库 {order.order_no}（退货申请 {req.id[:8]}）",
         ))
 
+    # 条码回 IN_STOCK（与 admin_cancel 一致的处理，否则出库条码永远挂着）
+    from app.models.mall.base import MallInventoryBarcodeStatus
+    from app.models.mall.inventory import MallInventoryBarcode
+    bcs = (await db.execute(
+        select(MallInventoryBarcode)
+        .where(MallInventoryBarcode.outbound_order_id == order.id)
+        .where(MallInventoryBarcode.status == MallInventoryBarcodeStatus.OUTBOUND.value)
+    )).scalars().all()
+    for b in bcs:
+        b.status = MallInventoryBarcodeStatus.IN_STOCK.value
+        b.outbound_order_id = None
+        b.outbound_by_user_id = None
+        b.outbound_at = None
+
     # 订单 → refunded
     order.status = MallOrderStatus.REFUNDED.value
 

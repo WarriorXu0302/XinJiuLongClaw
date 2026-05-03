@@ -142,14 +142,27 @@
 | # | 动作 | 方向 | 端点 | 副作用 | 状态 |
 |---|---|---|---|---|---|
 | B6.1 | 建 mall 仓 PO | ERP→ | `POST /api/purchase-orders` with target=mall_warehouse | PO.target_warehouse_type='mall_warehouse' + mall_warehouse_id | 🟡 |
-| B6.2 | mall 仓**收货入库** | ERP→mall | `POST /api/purchase-orders/{id}/receive` | **按分支**：target=mall → MallInventory + 加权平均成本 + Flow(IN, ref_type=purchase) · **无条码** | 🟡 |
+| B6.2 | mall 仓**收货入库（必扫码）**| ERP→mall | `POST /api/purchase-orders/{id}/receive` body `barcodes_by_item` | 每 PO item 按应收瓶数扫码 · 全局 UNIQUE + 本次内去重 · MallInventory + 加权平均成本 + Flow(IN) + MallInventoryBarcode × N 行（每瓶 status=in_stock）· 任一校验失败整笔回滚 | 🟡 |
 | B6.3 | 无 MallProduct 映射时拒收 | ERP | `receive` 内校验 | 404 提示"请先建商城商品" | 🟢 |
 
-### E2E 测试状态：❌ untested
+### E2E 测试状态：❌ untested（需在有扫码枪的真实环境走一遍）
 
-### 🔴 **P0 阻塞**
-- **B6.2 + mall 仓 ship 的冲突**：收货不生成条码 → 业务员 ship 时现有 `ship_order` 要求扫条码 → **直接冲突**。已在 mall 流 8.10 gap 里点出。
-- **上线前必修**：要么 mall 仓入库也生成条码（对齐 ERP 路径），要么 ship 端点支持"按数量出库"（不扫码）。
+### 🟢 P0 已解（正确修法）
+
+白酒业务硬规矩：**每瓶必须扫厂家防伪码入库+出库**。所以采购入 mall 仓和 ERP 仓一样都必扫码，
+不存在"散装"路径。
+
+- 收货端：`receive_purchase_order` mall 分支严格要求 `barcodes_by_item`，每 PO item 条码数
+  必须等于应入瓶数；全局 UNIQUE 查重（同一厂家码不能重复入库）+ 本次内去重
+- 出库端：`ship_order` 恢复"必须扫码"，缺 `scanned_barcodes` 直接 400
+- 前端：ERP 管理台 `ReceiveScanPage.tsx` 支持按 PO item 分组扫码 + 进度可视化；
+  下架"一键收货"快捷按钮，全部走扫码页
+
+### 🔴 剩余 gap（非阻塞）
+
+- **小程序仓管端扫码入口未实现**：后端 API 就绪，miniprogram 侧 uni.scanCode 接入作为后续
+  工作。目前 admin 走 PC 端 + USB 扫码枪（键盘输入）路径。
+- **扫码枪硬件驱动**：PC 端当作普通键盘输入（无需驱动）；手机蓝牙扫码枪待引入。
 
 ---
 
@@ -268,7 +281,7 @@ ERP 既有 APScheduler 调度器被 mall 复用（plan 决策 #20）。job 在 m
 
 | # | gap | 文件位置 | 优先级 | 估工 |
 |---|---|---|---|---|
-| 1 | **mall 仓 ship 无条码扣减路径** | `order_service.ship_order` | P0 | 2-4h |
+| 1 | ~~mall 仓 ship 无条码扣减路径~~ ✅ 正确修法：采购收货必扫码 + ship 保持强校验 | `purchase.py:receive` + `order_service.ship_order` + `ReceiveScanPage.tsx` | P0 | 2-4h | **done** |
 | 2 | **partial_closed 坏账路径未 E2E** | 造数据脚本 | P0 | 1-2h |
 | 3 | **完整贯通 E2E 脚本**（注册→下单→ship→deliver→凭证→确认→退货→退款）| 新建 e2e_full_mall_flow.py | P0 | 2-3h |
 | 4 | ~~ERP 商品下架不级联 mall~~ ✅ | `products.py` mall-cascade-impact + ProductList.tsx | P1 | 1h | **done** |

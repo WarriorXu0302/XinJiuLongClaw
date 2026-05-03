@@ -20,8 +20,12 @@
 - 业务员"我的订单"在途 Tab 现在同时显示 `assigned` + `shipped` 两个状态（原仅 assigned → 导致已出库未送达的单消失）。后端 `/api/mall/salesman/orders` 的 `status` 参数支持逗号分隔多值
 - 三份业务原子化文档 `skills/xinjiulong-erp/references/business-atoms-{mall,erp,bridges}.md`：按业务流切原子动作，标注 E2E 测试状态与全局 🔴 gap 汇总
 - `GET /api/products/{id}/mall-cascade-impact` + `PUT /products/{id}?cascade_mall=true` — ERP 下架商品时提示挂靠的 mall_products 数量，可选同步下架；前端 ProductList 增加"下架/启用"按钮，有影响时弹确认框
-- `GET /api/mall/salesman/orders/{id}/ship-mode` — 返回 `scan` / `bulk` 两种出库模式；mall 仓从采购入库无条码订单走 bulk 模式，小程序先查模式再决定扫码页还是按数量弹窗（桥 B6.2 P0 阻塞已解）
-- `ship_order` 探测订单 SKU 是否有 IN_STOCK 条码：有 → 必扫码；无 → 允许散装（`scanned_barcodes=None` 或 `[]` 都走 bulk 路径）
+- 桥 B6.2（mall 仓收货 + ship 扫码）**正确修法**：白酒业务硬要求每瓶扫厂家防伪码，之前"散装 bulk 路径"思路废弃并回滚
+  - `POST /api/purchase-orders/{id}/receive` 改为 body 入参；mall 仓路径**必传** `barcodes_by_item = [{item_id, barcodes: [...]}]`
+  - 每 PO item 条码数必须精确等于应入瓶数；全局 UNIQUE（同厂家码不能入库两次）+ 本次内去重；通过后生成 MallInventoryBarcode × N 行（每瓶 status=in_stock）
+  - `ship_order` 强化：`scanned_barcodes` 缺失直接 400（原宽松兜底逻辑改为硬校验）
+  - ERP 前端 `ReceiveScanPage.tsx` 重写：按 PO item 分组扫码（点击切换当前目标） + 进度 `got/expected` 可视化 + 所有 item 扫满才能提交 + Excel 批量导入到当前 item；删除"mall 仓快捷入库"错误分支
+  - 前端 PurchaseOrderList 删除"一键收货"快捷按钮，收货一律走扫码页
 - `PUT /api/mall/admin/salesmen/{id}/rebind-employee` — 管理员换绑业务员的 ERP 员工，校验 active + 未占用 + 无在途订单 + bump token_version；ERP 前端 SalesmanList 加"换绑员工"按钮
 - 热搜词 admin 管理：`mall_hot_search_keywords` 表 + `/api/mall/admin/search-keywords` CRUD + ERP 前端 `/mall/search-keywords` 页；`/api/mall/search/hot-keywords` 改读 DB（硬编码 5 个词降级为 fallback）
 - `backend/app/scripts/seed_regions_national.py` — 全国 34 省/自治区 + 全地级市/自治州 level 1+2 行政区划 seed（区县仍由 `seed_regions_henan.py` 分省补）

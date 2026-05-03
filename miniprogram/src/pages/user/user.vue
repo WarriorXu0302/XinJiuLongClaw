@@ -209,6 +209,16 @@
           </view>
           <view class="arrowhead" />
         </view>
+        <view
+          class="memu-item"
+          @tap="toNotices"
+        >
+          <view class="i-name">
+            <image src="@/static/images/icon/myAddr.png" />
+            <text>店铺公告</text>
+          </view>
+          <view class="arrowhead" />
+        </view>
       </view>
       <!--end 列表项 -->
 
@@ -286,6 +296,10 @@ const toAddressList = () => {
 
 const toNotifications = () => {
   uni.navigateTo({ url: '/pages/notifications/notifications' })
+}
+
+const toNotices = () => {
+  uni.navigateTo({ url: '/pages/recent-news/recent-news' })
 }
 
 const toOrderListPage = (e) => {

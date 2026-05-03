@@ -253,6 +253,8 @@ def issue_tokens(user: MallUser) -> dict[str, Any]:
         "user_id": user.id,
         "nickname": user.nickname,
         "must_change_password": user.must_change_password,
+        # 门店店员标记（前端据此显示收银入口；非店员为 null）
+        "assigned_store_id": user.assigned_store_id,
     }
 
 

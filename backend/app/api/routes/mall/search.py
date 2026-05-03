@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_mall_db
 from app.core.security import CurrentMallUserOptional
 from app.models.mall.base import MallProductStatus
+from app.models.mall.content import MallHotSearchKeyword
 from app.models.mall.product import MallProduct
 from app.schemas.mall.product import MallPage, MallProductListItemVO
 from app.services.mall.pricing_service import apply_price_visibility
@@ -17,7 +18,9 @@ from app.services.mall.pricing_service import apply_price_visibility
 router = APIRouter()
 
 
-HOT_KEYWORDS = ["飞天茅台", "五粮液", "青岛啤酒", "汾酒", "水井坊"]
+# Fallback used only before DB seed completes; admin CRUD is via
+# /api/mall/admin/search-keywords → 管理台维护
+_FALLBACK_HOT_KEYWORDS = ["飞天茅台", "五粮液", "青岛啤酒", "汾酒", "水井坊"]
 
 
 @router.get("/products", response_model=MallPage)
@@ -56,5 +59,13 @@ async def search_products(
 
 
 @router.get("/hot-keywords")
-async def hot_keywords():
-    return {"records": HOT_KEYWORDS}
+async def hot_keywords(db: AsyncSession = Depends(get_mall_db)):
+    rows = (await db.execute(
+        select(MallHotSearchKeyword.keyword)
+        .where(MallHotSearchKeyword.is_active.is_(True))
+        .order_by(MallHotSearchKeyword.sort_order, MallHotSearchKeyword.id)
+        .limit(20)
+    )).scalars().all()
+    if not rows:
+        return {"records": _FALLBACK_HOT_KEYWORDS}
+    return {"records": list(rows)}

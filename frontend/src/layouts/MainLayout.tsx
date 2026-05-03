@@ -126,6 +126,7 @@ const menuItems: MenuItem[] = [
       { key: '/mall/skip-alerts', icon: <WarningOutlined />, label: '跳单告警', roles: ['admin', 'boss'] },
       { key: '/mall/invite-codes', icon: <BarcodeOutlined />, label: '邀请码', roles: ['admin', 'boss'] },
       { key: '/mall/notices', icon: <BellOutlined />, label: '店铺公告', roles: ['admin', 'boss'] },
+      { key: '/mall/search-keywords', icon: <BellOutlined />, label: '热搜词', roles: ['admin', 'boss'] },
       { key: '/mall/housekeeping-logs', icon: <ClockCircleOutlined />, label: '定时任务', roles: ['admin', 'boss'] },
       {
         key: 'mall-audit', icon: <FileSearchOutlined />, label: '商城审计',

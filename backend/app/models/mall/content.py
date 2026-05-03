@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     Index,
     Integer,
@@ -38,6 +39,28 @@ class MallNotice(Base):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=MallNoticeStatus.DRAFT.value
     )
+
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        onupdate=func.now(), nullable=True
+    )
+
+
+class MallHotSearchKeyword(Base):
+    """热搜词。C 端 /mall/search/hot-keywords 读 is_active=true 的，按 sort_order 展示。
+
+    admin CRUD 在 /mall/admin/search-keywords。
+    """
+
+    __tablename__ = "mall_hot_search_keywords"
+    __table_args__ = (
+        Index("ix_mall_hot_search_keywords_active_sort", "is_active", "sort_order"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    keyword: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(

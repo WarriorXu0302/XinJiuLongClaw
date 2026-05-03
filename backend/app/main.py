@@ -255,6 +255,7 @@ def create_app() -> FastAPI:
         payments as ma_payments,
         products as ma_products,
         salesmen as ma_salesmen,
+        search_keywords as ma_search_keywords,
         user_applications as ma_user_applications,
         users as ma_users,
         warehouses as ma_warehouses,
@@ -284,6 +285,11 @@ def create_app() -> FastAPI:
     app.include_router(ma_audit_logs.router, prefix="/api/mall/admin/audit-logs", tags=["Mall-Admin"])
     app.include_router(ma_login_logs.router, prefix="/api/mall/admin/login-logs", tags=["Mall-Admin"])
     app.include_router(ma_notices.router, prefix="/api/mall/admin/notices", tags=["Mall-Admin"])
+    app.include_router(
+        ma_search_keywords.router,
+        prefix="/api/mall/admin/search-keywords",
+        tags=["Mall-Admin"],
+    )
     app.include_router(ms_invite.router, prefix="/api/mall/salesman/invite-codes", tags=["Mall-Salesman"])
     app.include_router(ms_customers.router, prefix="/api/mall/salesman/my-customers", tags=["Mall-Salesman"])
     app.include_router(ms_stats.router, prefix="/api/mall/salesman/stats", tags=["Mall-Salesman"])

@@ -67,6 +67,7 @@ import MallHousekeepingLogs from '../pages/mall/operations/HousekeepingLogs';
 import MallWarehouseList from '../pages/mall/inventory/WarehouseList';
 import MallInventoryQuery from '../pages/mall/inventory/InventoryQuery';
 import MallNoticeList from '../pages/mall/operations/NoticeList';
+import MallSearchKeywords from '../pages/mall/operations/SearchKeywords';
 import MallAuditLogList from '../pages/mall/audit/AuditLogList';
 import MallLoginLogList from '../pages/mall/audit/LoginLogList';
 import MallLoginLogStats from '../pages/mall/audit/LoginLogStats';
@@ -172,6 +173,7 @@ const routes: RouteObject[] = [
       { path: 'mall/warehouses', element: <MallWarehouseList /> },
       { path: 'mall/inventory', element: <MallInventoryQuery /> },
       { path: 'mall/notices', element: <MallNoticeList /> },
+      { path: 'mall/search-keywords', element: <MallSearchKeywords /> },
       { path: 'mall/audit/operations', element: <AuthGuard requiredRoles={['admin', 'boss']}><MallAuditLogList /></AuthGuard> },
       { path: 'mall/audit/login-logs', element: <AuthGuard requiredRoles={['admin', 'boss']}><MallLoginLogList /></AuthGuard> },
       { path: 'mall/audit/login-stats', element: <AuthGuard requiredRoles={['admin', 'boss']}><MallLoginLogStats /></AuthGuard> },

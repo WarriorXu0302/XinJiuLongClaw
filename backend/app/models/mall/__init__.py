@@ -1,7 +1,7 @@
 """
 Mall (小程序) ORM models.
 """
-from app.models.mall.content import MallNotice
+from app.models.mall.content import MallHotSearchKeyword, MallNotice
 from app.models.mall.inventory import (
     MallInventory,
     MallInventoryBarcode,
@@ -48,6 +48,7 @@ __all__ = [
     "MallInventoryBarcode",
     # content (M2)
     "MallNotice",
+    "MallHotSearchKeyword",
     # order (M3)
     "MallCartItem", "MallOrder", "MallOrderItem", "MallOrderClaimLog",
     # fulfilment (M4a)

@@ -88,6 +88,13 @@ class Product(Base):
     sale_price: Mapped[Optional[Decimal]] = mapped_column(
         Numeric(15, 2), nullable=True
     )
+    # 门店零售售价区间（老板维护；店员收银时必须在区间内，超出 400）
+    min_sale_price: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(15, 2), nullable=True
+    )
+    max_sale_price: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(15, 2), nullable=True
+    )
     points_per_case: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     barcode: Mapped[Optional[str]] = mapped_column(
         String(100), nullable=True, index=True

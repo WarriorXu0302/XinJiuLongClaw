@@ -147,6 +147,10 @@ class Employee(Base):
     social_security: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     company_social_security: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     expected_manufacturer_subsidy: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+    # 门店店员归属（position='cashier' 的员工必填，其他员工为空）
+    assigned_store_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("warehouses.id"), nullable=True
+    )
     status: Mapped[str] = mapped_column(
         String(20),
         default=EmployeeStatus.ACTIVE,
@@ -230,11 +234,15 @@ class Commission(Base):
     order_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("orders.id"), nullable=True
     )
-    # Mall 订单提成（M4a 加）。mall_order_id 和 order_id 互斥：
-    #   - 传统 B2B 订单 → order_id 非空、mall_order_id 为空
-    #   - 小程序商城订单 → mall_order_id 非空、order_id 为空
+    # Mall 订单提成（M4a 加）+ 门店零售提成（M6b 加）。三者互斥：
+    #   - B2B 订单 → order_id 非空
+    #   - 小程序商城订单 → mall_order_id 非空
+    #   - 门店零售 → store_sale_id 非空
     mall_order_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("mall_orders.id"), nullable=True
+    )
+    store_sale_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("store_sales.id"), nullable=True
     )
     commission_amount: Mapped[Decimal] = mapped_column(
         Numeric(15, 2), nullable=False

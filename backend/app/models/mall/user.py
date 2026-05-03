@@ -103,6 +103,11 @@ class MallUser(Base):
     assigned_brand_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("brands.id"), nullable=True
     )
+    # 门店店员归属：指向 warehouses.id（warehouse_type='store'）
+    # 非店员为空；店员才有值。和 Employee.assigned_store_id 双向同步。
+    assigned_store_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("warehouses.id"), nullable=True
+    )
     is_accepting_orders: Mapped[bool] = mapped_column(
         Boolean, default=True, nullable=False
     )

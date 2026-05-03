@@ -302,6 +302,8 @@ class WarehouseType(str, enum.Enum):
     ACTIVITY = "activity"
     RETAIL = "retail"
     WHOLESALE = "wholesale"
+    STORE = "store"        # 专卖店 / 门店仓（青花郎/五粮液/华致名酒库/鑫久酒）
+    TASTING = "tasting"    # 品鉴仓（早期业务，warehouses 表已有此值但 enum 漏写，补全）
 
 
 class FinancingOrderStatus(str, enum.Enum):

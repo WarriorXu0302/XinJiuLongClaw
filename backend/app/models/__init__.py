@@ -47,6 +47,7 @@ from app.models.notification_log import NotificationLog
 from app.models.financing import FinancingOrder, FinancingRepayment
 from app.models.expense_claim import ExpenseClaim
 from app.models.transfer import WarehouseTransfer, WarehouseTransferItem
+from app.models.store_sale import RetailCommissionRate, StoreSale, StoreSaleItem
 
 __all__ = [
     "Base",
@@ -108,4 +109,8 @@ __all__ = [
     # Warehouse Transfer (ERP + mall 跨端调拨)
     "WarehouseTransfer",
     "WarehouseTransferItem",
+    # 门店零售（专卖店收银）
+    "StoreSale",
+    "StoreSaleItem",
+    "RetailCommissionRate",
 ]

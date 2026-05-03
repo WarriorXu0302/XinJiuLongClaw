@@ -21,6 +21,11 @@ from app.models import (
     ManufacturerExternalIdentity,
 )
 from app.models.transfer import WarehouseTransfer, WarehouseTransferItem  # noqa: F401
+from app.models.store_sale import (  # noqa: F401
+    RetailCommissionRate,
+    StoreSale,
+    StoreSaleItem,
+)
 
 # Mall models（小程序）
 from app.models.mall.user import (  # noqa: F401

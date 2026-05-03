@@ -92,7 +92,14 @@ function ProductList() {
   const handleEdit = (record: ProductItem) => {
     setEditingRecord(record);
     setModalOpen(true);
-    form.setFieldsValue({ code: record.code, name: record.name, category: record.category, unit: record.unit, bottles_per_case: record.bottles_per_case, spec: record.spec ?? '', purchase_price: record.purchase_price, sale_price: record.sale_price });
+    form.setFieldsValue({
+      code: record.code, name: record.name, category: record.category,
+      unit: record.unit, bottles_per_case: record.bottles_per_case,
+      spec: record.spec ?? '',
+      purchase_price: record.purchase_price, sale_price: record.sale_price,
+      min_sale_price: (record as any).min_sale_price,
+      max_sale_price: (record as any).max_sale_price,
+    });
   };
 
   // 下架/启用切换：下架前查 mall 侧挂靠商品数，有则弹确认框问"是否同步下架商城商品"
@@ -234,6 +241,16 @@ function ProductList() {
               <InputNumber min={0} precision={2} style={{ width: '100%' }} prefix="¥" />
             </Form.Item>
             <Form.Item name="sale_price" label="售价" style={{ flex: 1 }}>
+              <InputNumber min={0} precision={2} style={{ width: '100%' }} prefix="¥" />
+            </Form.Item>
+          </div>
+          <div style={{ display: 'flex', gap: 16 }}>
+            <Form.Item name="min_sale_price" label="门店零售下限"
+              tooltip="专卖店店员收银时售价不得低于此值；空 = 未启用门店零售" style={{ flex: 1 }}>
+              <InputNumber min={0} precision={2} style={{ width: '100%' }} prefix="¥" />
+            </Form.Item>
+            <Form.Item name="max_sale_price" label="门店零售上限"
+              tooltip="专卖店店员收银时售价不得超过此值" style={{ flex: 1 }}>
               <InputNumber min={0} precision={2} style={{ width: '100%' }} prefix="¥" />
             </Form.Item>
           </div>

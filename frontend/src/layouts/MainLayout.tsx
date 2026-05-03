@@ -140,6 +140,16 @@ const menuItems: MenuItem[] = [
       },
     ],
   },
+  // ─── 门店零售 ───
+  {
+    type: 'group', label: '门店',
+    roles: ['admin', 'boss', 'finance', 'warehouse', 'hr'],
+    children: [
+      { key: '/store/sales', icon: <ShoppingCartOutlined />, label: '门店销售流水', roles: ['admin', 'boss', 'finance', 'warehouse', 'hr'] },
+      { key: '/store/stores', icon: <InboxOutlined />, label: '门店管理', roles: ['admin', 'boss'] },
+      { key: '/store/commission-rates', icon: <DollarOutlined />, label: '店员提成率', roles: ['admin', 'boss', 'finance', 'hr'] },
+    ],
+  },
   // ─── 人事 ───
   {
     type: 'group', label: '人事',

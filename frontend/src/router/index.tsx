@@ -21,6 +21,9 @@ import WholesaleWarehouseManage from '../pages/inventory/WholesaleWarehouseManag
 import BackupWarehouseManage from '../pages/inventory/BackupWarehouseManage';
 import TransferList from '../pages/inventory/TransferList';
 import TransferCreate from '../pages/inventory/TransferCreate';
+import StoreList from '../pages/store/StoreList';
+import StoreSaleList from '../pages/store/StoreSaleList';
+import RetailCommissionRates from '../pages/store/RetailCommissionRates';
 import ReceiveScanPage from '../pages/purchase/ReceiveScanPage';
 import CashFlowManage from '../pages/finance/CashFlowManage';
 import ExpenseList from '../pages/finance/ExpenseList';
@@ -118,6 +121,11 @@ const routes: RouteObject[] = [
       { path: 'inventory/wholesale-warehouse', element: <WholesaleWarehouseManage /> },
       { path: 'inventory/transfers', element: <TransferList /> },
       { path: 'inventory/transfers/new', element: <TransferCreate /> },
+
+      // 门店零售（专卖店收银系统）
+      { path: 'store/stores', element: <StoreList /> },
+      { path: 'store/sales', element: <StoreSaleList /> },
+      { path: 'store/commission-rates', element: <RetailCommissionRates /> },
 
       // 财务
       { path: 'finance/profit-ledger', element: <ProfitLedger /> },

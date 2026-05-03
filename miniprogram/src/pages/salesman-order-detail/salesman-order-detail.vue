@@ -375,51 +375,9 @@ const onNavigate = () => {
   }
 }
 
-const onShip = async () => {
-  // 先问后端该走扫码还是散装：mall 仓采购入库不生成条码，强行扫码会卡死
-  let mode = 'scan'
-  let requiredBottles = 0
-  try {
-    const res = await http.request({
-      url: `/api/mall/salesman/orders/${orderId.value}/ship-mode`,
-      method: 'GET'
-    })
-    mode = res?.data?.mode || 'scan'
-    requiredBottles = res?.data?.required_bottles || 0
-  } catch (e) {
-    uni.showToast({ title: '查询出库方式失败', icon: 'none' })
-    return
-  }
-
-  if (mode === 'scan') {
-    uni.navigateTo({
-      url: `/pages/salesman-ship-scan/salesman-ship-scan?order_id=${orderId.value}&order_no=${orderNo.value}`
-    })
-    return
-  }
-  // bulk：弹确认 + 按数量直接 POST /ship
-  uni.showModal({
-    title: '按数量出库',
-    content: `此订单在 mall 仓为散装库存，应发 ${requiredBottles} 瓶。确认按数量出库？（不扫码）`,
-    confirmText: '确认出库',
-    cancelText: '取消',
-    success: async (r) => {
-      if (!r.confirm) return
-      uni.showLoading({ title: '出库中...' })
-      try {
-        await http.request({
-          url: `/api/mall/salesman/orders/${orderId.value}/ship`,
-          method: 'POST',
-          data: { scanned_barcodes: [] }
-        })
-        uni.hideLoading()
-        uni.showToast({ title: '已出库', icon: 'success' })
-        loadOrder()
-      } catch (err) {
-        uni.hideLoading()
-        uni.showToast({ title: err?.detail || '出库失败', icon: 'none' })
-      }
-    }
+const onShip = () => {
+  uni.navigateTo({
+    url: `/pages/salesman-ship-scan/salesman-ship-scan?order_id=${orderId.value}&order_no=${orderNo.value}`
   })
 }
 

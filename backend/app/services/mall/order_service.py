@@ -1309,25 +1309,19 @@ async def ship_order(
     scanned_barcodes: Optional[list[str]] = None,
     request=None,
 ) -> MallOrder:
-    """业务员出库。assigned → shipped。
+    """业务员扫码出库。assigned → shipped。
 
-    两条路径（由"订单 SKU 是否有条码"自动分流，见 bridges B6.2）：
+    白酒业务硬规矩：**每瓶必须扫厂家防伪码**（防串货/防假货/可追溯）。
+    收货入库时每瓶已录进 mall_inventory_barcodes.status='in_stock'，出库时
+    逐码核销 in_stock → outbound。绝不允许按数量散装出库。
 
-    A. 扫码路径（条码仓，ERP 路径 + mall 生成过条码的仓）：
-       (1) 每个 SKU 的订单数量必须被恰好 N 个条码覆盖
-       (2) 条码必须 status='in_stock' 且指向同一 SKU
-       (3) 核销成功 → 条码 IN_STOCK → OUTBOUND，回填 outbound_order_id/user/at
-       (4) 任一校验失败整笔回滚，不允许"扫一半"
-
-    B. 无条码散装路径（mall 仓从采购直入，没生成条码；见 bridges B6.2）：
-       (1) 必须确认订单所在仓 **没有任何** IN_STOCK 条码
-       (2) 不动 MallInventoryBarcode 表；订单 assigned → shipped
-       (3) 库存扣减已在 create_order 时完成（deduct_for_order），ship 不重复扣
-
-    分流规则：
-      - 传了 scanned_barcodes → A 路径
-      - 未传 scanned_barcodes + 订单 SKU 有 in_stock 条码 → 422 要求扫码（防散装绕过扫码）
-      - 未传 scanned_barcodes + 订单 SKU 无 in_stock 条码 → B 路径
+    对齐 ERP 扫码规则：
+      (1) scanned_barcodes 必传，长度 == 订单应发总瓶数
+      (2) 每个条码在库 + status='in_stock' + 指向订单 SKU 之一
+      (3) 按 SKU 核数：应发 vs 扫码数必须一一匹配
+      (4) 不允许扫到订单外的 SKU，不允许重复扫
+      (5) 核销成功 → 条码 IN_STOCK → OUTBOUND；回填 outbound_order_id/user/at
+      (6) 任一校验失败整笔回滚，绝不允许"散装"或"扫一半"
     """
     from app.models.mall.base import MallInventoryBarcodeStatus, MallInventoryBarcodeType
     from app.models.mall.inventory import MallInventoryBarcode
@@ -1339,32 +1333,14 @@ async def ship_order(
     if order.status != MallOrderStatus.ASSIGNED.value:
         raise HTTPException(status_code=409, detail=f"订单状态 {order.status} 不可出库")
 
-    now = datetime.now(timezone.utc)
-
-    # 空数组等价于 None：都表示"明确以散装模式出库"
-    if scanned_barcodes is not None and len(scanned_barcodes) == 0:
-        scanned_barcodes = None
-
-    # 路径探测：订单涉及的 SKU 在仓内有没有 in_stock 条码
-    order_items_for_probe = await get_order_items(db, order.id)
-    sku_ids_of_order = [oi.sku_id for oi in order_items_for_probe]
-    has_barcodes_in_stock = False
-    if sku_ids_of_order:
-        probe = (await db.execute(
-            select(MallInventoryBarcode.id)
-            .where(MallInventoryBarcode.sku_id.in_(sku_ids_of_order))
-            .where(MallInventoryBarcode.status == MallInventoryBarcodeStatus.IN_STOCK.value)
-            .limit(1)
-        )).first()
-        has_barcodes_in_stock = probe is not None
-
-    if scanned_barcodes is None and has_barcodes_in_stock:
+    # 白酒硬要求：必须扫码，不允许缺省
+    if not scanned_barcodes:
         raise HTTPException(
-            status_code=422,
-            detail="此订单的 SKU 在仓内存在条码库存，必须扫码出库（请切换到扫码模式）",
+            status_code=400,
+            detail="白酒出库必须扫防伪码（每瓶一码），不允许按数量出库",
         )
 
-    used_bulk_mode = scanned_barcodes is None
+    now = datetime.now(timezone.utc)
 
     # ── 扫码核销 ────────────────────────────────────────────
     if scanned_barcodes is not None:
@@ -1468,8 +1444,7 @@ async def ship_order(
             "order_no": order.order_no,
             "warehouse_id": warehouse_id,
             "scanned_barcode_count": len(scanned_barcodes) if scanned_barcodes else 0,
-            "used_scan_verification": not used_bulk_mode,
-            "used_bulk_mode": used_bulk_mode,  # mall 仓散装直发
+            "used_scan_verification": scanned_barcodes is not None,
         },
     )
 

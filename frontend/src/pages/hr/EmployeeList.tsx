@@ -18,6 +18,12 @@ interface EmployeeItem {
   social_security?: number;
   company_social_security?: number;
   expected_manufacturer_subsidy?: number;
+  assigned_store_id?: string | null;
+}
+
+interface StoreWarehouse {
+  id: string; code: string; name: string;
+  warehouse_type: string; is_active: boolean;
 }
 
 interface UserAccount { id: string; username: string; employee_id: string | null; is_active: boolean; roles: string[] }
@@ -73,6 +79,14 @@ function EmployeeList() {
     queryKey: ['positions'],
     queryFn: () => api.get('/payroll/positions').then(r => extractItems<Position>(r.data)),
   });
+  // 门店仓（warehouse_type=store）：店员归属用
+  const { data: allWhs = [] } = useQuery<StoreWarehouse[]>({
+    queryKey: ['warehouses-for-employee-store'],
+    queryFn: () => api.get('/warehouses').then(r => extractItems<StoreWarehouse>(r.data)),
+  });
+  const storeWhs = allWhs.filter(w => w.warehouse_type === 'store' && w.is_active);
+  const storeNameById: Record<string, string> = {};
+  storeWhs.forEach(w => { storeNameById[w.id] = w.name; });
 
   const { data: empBPs = [] } = useQuery<BrandPosition[]>({
     queryKey: ['emp-bps', bpEmp?.id],
@@ -207,6 +221,7 @@ function EmployeeList() {
       social_security: r.social_security ?? 0,
       company_social_security: r.company_social_security ?? 0,
       expected_manufacturer_subsidy: r.expected_manufacturer_subsidy ?? 0,
+      assigned_store_id: r.assigned_store_id ?? undefined,
     });
   };
 
@@ -249,6 +264,8 @@ function EmployeeList() {
           </Space>
         );
       }},
+    { title: '归属门店', dataIndex: 'assigned_store_id', width: 160,
+      render: (id: string | null) => id ? <Tag color="gold">{storeNameById[id] || id.slice(0, 8)}</Tag> : <Text type="secondary" style={{ fontSize: 12 }}>-</Text> },
     { title: '电话', dataIndex: 'phone', width: 110, render: (v: string) => v || '-' },
     { title: '状态', dataIndex: 'status', width: 70,
       render: (s: string) => { const info = STATUS_MAP[s] ?? { color: 'default', label: s }; return <Tag color={info.color}>{info.label}</Tag>; }},
@@ -314,8 +331,29 @@ function EmployeeList() {
             <Col span={8}><Form.Item name="phone" label="电话"><Input placeholder="手机号" /></Form.Item></Col>
           </Row>
           <Row gutter={12}>
-            <Col span={12}><Form.Item name="position" label="职务（文字描述）"><Input placeholder="如：资深业务员" /></Form.Item></Col>
+            <Col span={12}><Form.Item name="position" label="职务（文字描述）" tooltip="门店店员请填 cashier，用于收银端识别"><Input placeholder="如：资深业务员 / cashier" /></Form.Item></Col>
             <Col span={12}><Form.Item name="hire_date" label="入职日期"><DatePicker style={{ width: '100%' }} /></Form.Item></Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={24}>
+              <Form.Item
+                name="assigned_store_id"
+                label="归属门店（店员必填）"
+                tooltip="专卖店店员必须绑定门店仓，绑定后可在小程序端收银；非店员留空"
+                extra="仅 warehouse_type='store' 的仓会出现在此下拉"
+              >
+                <Select
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder="非门店员工留空"
+                  options={storeWhs.map(w => ({
+                    value: w.id,
+                    label: `${w.name} [${w.code}]`,
+                  }))}
+                />
+              </Form.Item>
+            </Col>
           </Row>
           <div style={{ padding: 8, background: '#fffbe6', borderRadius: 4, marginBottom: 12, fontSize: 12 }}>
             <Text type="secondary">固定底薪 / 浮动底薪 / 全勤奖全额由"主属品牌 × 岗位"的薪酬方案决定，请到"薪酬方案"页配置。</Text>

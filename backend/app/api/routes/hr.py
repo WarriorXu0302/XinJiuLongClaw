@@ -36,6 +36,8 @@ class EmployeeCreate(BaseModel):
     social_security: Optional[float] = 0.0
     company_social_security: Optional[float] = 0.0
     expected_manufacturer_subsidy: Optional[float] = 0.0
+    # 门店店员归属（position='cashier' 时应填）；空串视为 None
+    assigned_store_id: Optional[str] = None
 
 
 class EmployeeUpdate(BaseModel):
@@ -50,6 +52,7 @@ class EmployeeUpdate(BaseModel):
     social_security: Optional[float] = None
     company_social_security: Optional[float] = None
     expected_manufacturer_subsidy: Optional[float] = None
+    assigned_store_id: Optional[str] = None
 
 
 class EmployeeResponse(BaseModel):
@@ -66,6 +69,7 @@ class EmployeeResponse(BaseModel):
     social_security: Optional[float] = None
     company_social_security: Optional[float] = None
     expected_manufacturer_subsidy: Optional[float] = None
+    assigned_store_id: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -75,10 +79,33 @@ class EmployeeResponse(BaseModel):
 # ═══════════════════════════════════════════════════════════════════
 
 
+async def _validate_store_ref(db: AsyncSession, store_id: Optional[str]) -> None:
+    """assigned_store_id 非空时必须指向 warehouse_type='store' + is_active 的仓。"""
+    if not store_id:
+        return
+    from app.models.base import WarehouseType
+    from app.models.product import Warehouse
+    wh = await db.get(Warehouse, store_id)
+    if wh is None:
+        raise HTTPException(400, "归属门店不存在")
+    if wh.warehouse_type != WarehouseType.STORE.value:
+        raise HTTPException(
+            400,
+            f"仓库 [{wh.name}] 不是门店类型（warehouse_type={wh.warehouse_type}）",
+        )
+    if not wh.is_active:
+        raise HTTPException(400, f"门店 [{wh.name}] 已停用")
+
+
 @router.post("/employees", response_model=EmployeeResponse, status_code=201)
 async def create_employee(body: EmployeeCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     require_role(user, "boss", "hr")
-    obj = Employee(id=str(uuid.uuid4()), **body.model_dump())
+    # 空串归一化为 None（前端 Select allowClear 可能送来 ''）
+    payload = body.model_dump()
+    if payload.get("assigned_store_id") == "":
+        payload["assigned_store_id"] = None
+    await _validate_store_ref(db, payload.get("assigned_store_id"))
+    obj = Employee(id=str(uuid.uuid4()), **payload)
     db.add(obj)
     await db.flush()
     return obj
@@ -120,7 +147,13 @@ async def update_employee(
     obj = await db.get(Employee, emp_id)
     if obj is None:
         raise HTTPException(404, "Employee not found")
-    for k, v in body.model_dump(exclude_unset=True).items():
+    updates = body.model_dump(exclude_unset=True)
+    # 空串归一化为 None
+    if updates.get("assigned_store_id") == "":
+        updates["assigned_store_id"] = None
+    if "assigned_store_id" in updates:
+        await _validate_store_ref(db, updates["assigned_store_id"])
+    for k, v in updates.items():
         setattr(obj, k, v)
     await db.flush()
     return obj

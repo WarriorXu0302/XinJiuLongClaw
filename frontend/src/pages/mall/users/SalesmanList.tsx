@@ -29,11 +29,17 @@ interface Salesman {
   status: string;
   linked_employee_id?: string;
   assigned_brand_id?: string;
+  assigned_store_id?: string;
   is_accepting_orders: boolean;
   must_change_password: boolean;
   created_at: string;
   employee?: { id: string; name: string; status: string };
   brand?: { id: string; name: string };
+}
+
+interface StoreWarehouse {
+  id: string; code: string; name: string;
+  warehouse_type: string; is_active: boolean;
 }
 
 export default function SalesmanList() {
@@ -78,6 +84,18 @@ export default function SalesmanList() {
     queryFn: () => api.get('/mall/admin/salesmen/_helpers/brands').then(r => r.data),
     enabled: createOpen || !!editTarget,
   });
+  // 门店仓（warehouse_type=store）—— 店员可选归属门店
+  const { data: storeData = [] } = useQuery<StoreWarehouse[]>({
+    queryKey: ['warehouses-for-salesman-store'],
+    queryFn: async () => {
+      const r = await api.get('/warehouses');
+      const items = (r.data?.items || r.data || []) as StoreWarehouse[];
+      return items.filter(w => w.warehouse_type === 'store' && w.is_active);
+    },
+    enabled: createOpen || !!editTarget,
+  });
+  const storeNameById: Record<string, string> = {};
+  storeData.forEach(w => { storeNameById[w.id] = w.name; });
 
   const createMut = useMutation({
     mutationFn: (body: any) => api.post('/mall/admin/salesmen', body).then(r => r.data),
@@ -189,6 +207,12 @@ export default function SalesmanList() {
       render: (_, r) => r.brand ? <Tag color="blue">{r.brand.name}</Tag> : '-',
     },
     {
+      title: '归属门店',
+      dataIndex: 'assigned_store_id',
+      width: 140,
+      render: (v: string | undefined) => v ? <Tag color="gold">{storeNameById[v] || v.slice(0, 8)}</Tag> : '-',
+    },
+    {
       title: '状态',
       dataIndex: 'status',
       width: 90,
@@ -230,6 +254,7 @@ export default function SalesmanList() {
                   nickname: r.nickname,
                   phone: r.phone,
                   assigned_brand_id: r.assigned_brand_id,
+                  assigned_store_id: r.assigned_store_id,
                 });
               }}
             />
@@ -391,6 +416,19 @@ export default function SalesmanList() {
               }))}
             />
           </Form.Item>
+          <Form.Item name="assigned_store_id" label="归属门店（店员必填，否则留空）"
+            extra="专卖店店员填；小程序端据此显示「门店收银」入口"
+          >
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder="非店员留空"
+              options={storeData.map(w => ({
+                value: w.id, label: `${w.name} [${w.code}]`,
+              }))}
+            />
+          </Form.Item>
         </Form>
       </Modal>
 
@@ -421,6 +459,19 @@ export default function SalesmanList() {
               placeholder="选择品牌"
               options={(brandData?.records || []).map((b: any) => ({
                 value: b.id, label: b.name,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="assigned_store_id" label="归属门店"
+            extra="切换此字段会同步更新 Employee.assigned_store_id"
+          >
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder="非店员留空"
+              options={storeData.map(w => ({
+                value: w.id, label: `${w.name} [${w.code}]`,
               }))}
             />
           </Form.Item>

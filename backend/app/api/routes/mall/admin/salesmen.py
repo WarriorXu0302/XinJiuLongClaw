@@ -45,6 +45,7 @@ def _salesman_dict(u: MallUser) -> dict:
         "status": u.status,
         "linked_employee_id": u.linked_employee_id,
         "assigned_brand_id": u.assigned_brand_id,
+        "assigned_store_id": u.assigned_store_id,
         "is_accepting_orders": u.is_accepting_orders,
         "must_change_password": u.must_change_password,
         "created_at": u.created_at,
@@ -199,6 +200,8 @@ class _CreateSalesmanBody(BaseModel):
     password: str = Field(min_length=6, max_length=128)
     linked_employee_id: str = Field(min_length=36, max_length=36)
     assigned_brand_id: Optional[str] = None
+    # 门店店员归属门店仓（warehouse_type='store'）；非店员为 None
+    assigned_store_id: Optional[str] = None
     nickname: Optional[str] = None
     phone: Optional[str] = None
 
@@ -234,6 +237,24 @@ async def create_salesman(
     if dup:
         raise HTTPException(status_code=409, detail="账号已存在")
 
+    # 门店店员校验（assigned_store_id 非空时必须指向 warehouse_type='store' 的 active 仓）
+    if body.assigned_store_id:
+        from app.models.base import WarehouseType
+        from app.models.product import Warehouse
+        wh = await db.get(Warehouse, body.assigned_store_id)
+        if wh is None:
+            raise HTTPException(status_code=400, detail="归属门店不存在")
+        if wh.warehouse_type != WarehouseType.STORE.value:
+            raise HTTPException(
+                status_code=400,
+                detail=f"[{wh.name}] 不是门店类型（warehouse_type={wh.warehouse_type}）",
+            )
+        if not wh.is_active:
+            raise HTTPException(status_code=400, detail=f"门店 [{wh.name}] 已停用")
+        # 同步到 employees.assigned_store_id（双边一致）
+        if emp.assigned_store_id != body.assigned_store_id:
+            emp.assigned_store_id = body.assigned_store_id
+
     sm = MallUser(
         username=body.username,
         hashed_password=get_password_hash(body.password),
@@ -243,6 +264,7 @@ async def create_salesman(
         user_type=MallUserType.SALESMAN.value,
         linked_employee_id=body.linked_employee_id,
         assigned_brand_id=body.assigned_brand_id,
+        assigned_store_id=body.assigned_store_id,
         is_accepting_orders=True,
         must_change_password=True,
         token_version=1,
@@ -263,6 +285,7 @@ async def create_salesman(
             "linked_employee_id": body.linked_employee_id,
             "employee_name": emp.name,
             "assigned_brand_id": body.assigned_brand_id,
+            "assigned_store_id": body.assigned_store_id,
         },
     )
     return _salesman_dict(sm)
@@ -276,6 +299,7 @@ class _UpdateSalesmanBody(BaseModel):
     nickname: Optional[str] = None
     phone: Optional[str] = None
     assigned_brand_id: Optional[str] = None  # 传空字符串或 null 清除
+    assigned_store_id: Optional[str] = None  # 门店店员归属切换；同时同步到 Employee 表
     is_accepting_orders: Optional[bool] = None
 
 
@@ -293,14 +317,39 @@ async def update_salesman(
         raise HTTPException(status_code=404, detail="业务员不存在")
 
     updates = body.model_dump(exclude_unset=True)
-    # assigned_brand_id 空字符串视为清除
+    # 空串归一化为 None
     if updates.get("assigned_brand_id") == "":
         updates["assigned_brand_id"] = None
+    if updates.get("assigned_store_id") == "":
+        updates["assigned_store_id"] = None
 
     if "assigned_brand_id" in updates and updates["assigned_brand_id"]:
         b = await db.get(Brand, updates["assigned_brand_id"])
         if b is None:
             raise HTTPException(status_code=400, detail="品牌不存在")
+
+    # assigned_store_id 变更校验 + 同步到 Employee.assigned_store_id
+    if "assigned_store_id" in updates:
+        new_store = updates["assigned_store_id"]
+        if new_store:
+            from app.models.base import WarehouseType
+            from app.models.product import Warehouse
+            wh = await db.get(Warehouse, new_store)
+            if wh is None:
+                raise HTTPException(status_code=400, detail="归属门店不存在")
+            if wh.warehouse_type != WarehouseType.STORE.value:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"[{wh.name}] 不是门店类型",
+                )
+            if not wh.is_active:
+                raise HTTPException(status_code=400, detail=f"门店 [{wh.name}] 已停用")
+        # 同步到 employees 表（双边一致）
+        if sm.linked_employee_id:
+            from app.models.user import Employee
+            emp = await db.get(Employee, sm.linked_employee_id)
+            if emp is not None:
+                emp.assigned_store_id = new_store
 
     for k, v in updates.items():
         setattr(sm, k, v)

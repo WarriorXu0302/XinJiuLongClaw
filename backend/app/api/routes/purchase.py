@@ -403,10 +403,28 @@ async def cancel_paid_purchase_order(po_id: str, user: CurrentUser, db: AsyncSes
 # ═══════════════════════════════════════════════════════════════════
 
 
+class POReceiveMallBarcodesItem(BaseModel):
+    """mall 仓收货时每个 PO 条目的条码列表。"""
+    item_id: str
+    barcodes: list[str]
+
+
+class POReceiveBody(BaseModel):
+    """收货请求 body。
+
+    ERP 仓路径：barcodes_by_item 可以省略（ERP 自己有条码入库端点 batch-import）。
+    mall 仓路径：barcodes_by_item 必填，且每个 PO item 的条码数必须等于应入瓶数。
+    """
+    batch_no: str
+    # mall 仓专用：每个 item_id → 该 item 应收瓶数的条码数组。
+    # 厂家防伪码，扫码枪 key-in 或手输；后端做全局唯一 + 本次去重两层校验。
+    barcodes_by_item: Optional[list[POReceiveMallBarcodesItem]] = None
+
+
 @router.post("/{po_id}/receive", response_model=POResponse)
 async def receive_purchase_order(
     po_id: str, user: CurrentUser,
-    batch_no: str = Query(..., description="入库批次号"),
+    body: POReceiveBody,
     db: AsyncSession = Depends(get_db),
 ):
     require_role(user, "boss", "warehouse", "purchase")
@@ -417,6 +435,7 @@ async def receive_purchase_order(
         raise HTTPException(400, f"采购单已收货，状态: {po.status}")
 
     is_mall = po.target_warehouse_type == "mall_warehouse"
+    batch_no = body.batch_no
 
     # Normal PO must be paid first; tasting warehouse auto-approved so always ok
     wh = await db.get(Warehouse, po.warehouse_id) if po.warehouse_id else None
@@ -427,13 +446,83 @@ async def receive_purchase_order(
     from app.models.product import Product
 
     if is_mall:
-        # mall 仓入库：需要 mall_product + mall_sku 映射才能写 mall_inventory
-        # 查 mall_products 表里 source_product_id == ERP product.id 的映射
-        from app.models.mall.inventory import MallInventory, MallInventoryFlow
+        # mall 仓入库：必须逐瓶扫描厂家防伪码（白酒业务硬要求）
+        # 流程：
+        #   (1) 前端传 barcodes_by_item = [{item_id, barcodes: [...]}]
+        #   (2) 后端校验每个 item：bars 数量 == 应入瓶数 + 全局唯一 + 本次无重复
+        #   (3) 写 MallInventory + 加权平均成本 + MallInventoryBarcode（每瓶一行，status=in_stock）
+        #   (4) 任何校验失败整笔回滚
+        from app.models.mall.base import (
+            MallInventoryBarcodeStatus,
+            MallInventoryBarcodeType,
+            MallInventoryFlowType,
+        )
+        from app.models.mall.inventory import (
+            MallInventory,
+            MallInventoryBarcode,
+            MallInventoryFlow,
+        )
         from app.models.mall.product import MallProduct, MallProductSku
-        from app.models.mall.base import MallInventoryFlowType
+
         if not po.mall_warehouse_id:
             raise HTTPException(400, "PO 标记为 mall 仓但未指定 mall_warehouse_id")
+
+        # 强校验 barcodes 必传
+        if body.barcodes_by_item is None:
+            raise HTTPException(
+                status_code=400,
+                detail="mall 仓收货必须提交厂家防伪码列表（barcodes_by_item）",
+            )
+
+        # 索引：item_id → barcodes
+        barcodes_map: dict[str, list[str]] = {
+            b.item_id: [c.strip() for c in b.barcodes if c.strip()]
+            for b in body.barcodes_by_item
+        }
+
+        # 确保 PO 每个 item 都有条码，不允许漏报
+        po_item_ids = {it.id for it in po.items}
+        missing_items = po_item_ids - set(barcodes_map)
+        if missing_items:
+            raise HTTPException(
+                status_code=400,
+                detail=f"以下 PO item 未提交条码：{list(missing_items)[:3]}（共 {len(missing_items)} 条）",
+            )
+        extra_items = set(barcodes_map) - po_item_ids
+        if extra_items:
+            raise HTTPException(
+                status_code=400,
+                detail=f"提交的 item_id 不属于本 PO：{list(extra_items)[:3]}",
+            )
+
+        # 本次所有条码扁平化 + 本次内去重校验
+        all_codes_this_batch: list[str] = []
+        for codes in barcodes_map.values():
+            all_codes_this_batch.extend(codes)
+        if len(set(all_codes_this_batch)) != len(all_codes_this_batch):
+            # 找出重复的
+            seen = set()
+            dups = []
+            for c in all_codes_this_batch:
+                if c in seen:
+                    dups.append(c)
+                seen.add(c)
+            raise HTTPException(
+                status_code=400,
+                detail=f"本次提交的条码存在重复：{dups[:5]}",
+            )
+
+        # 全局唯一：查 mall_inventory_barcodes 是否已存在任一条码
+        if all_codes_this_batch:
+            existing = (await db.execute(
+                select(MallInventoryBarcode.barcode)
+                .where(MallInventoryBarcode.barcode.in_(all_codes_this_batch))
+            )).scalars().all()
+            if existing:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"以下条码已存在于库存（不可重复入库）：{list(existing)[:5]}",
+                )
 
         now = datetime.now(timezone.utc)
         for item in po.items:
@@ -464,6 +553,17 @@ async def receive_purchase_order(
                 bpc = prod.bottles_per_case if prod and prod.bottles_per_case else 1
             bottles = item.quantity * bpc
             per_bottle_cost = Decimal(str(item.unit_price)) / bpc if bpc > 1 else Decimal(str(item.unit_price))
+
+            # 校验条码数量 == 应入瓶数
+            item_barcodes = barcodes_map[item.id]
+            if len(item_barcodes) != bottles:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"item {item.id} 应入 {bottles} 瓶（{item.quantity}{item.quantity_unit}×{bpc}），"
+                        f"提交条码 {len(item_barcodes)} 个，不匹配"
+                    ),
+                )
 
             # 找或建 mall_inventory 行
             inv = (await db.execute(
@@ -504,13 +604,31 @@ async def receive_purchase_order(
                 notes=f"采购入库 {po.po_no} ({item.quantity}{item.quantity_unit}={bottles}瓶) batch={batch_no}",
             ))
 
+            # 批量写条码（每瓶一行）
+            for code in item_barcodes:
+                db.add(MallInventoryBarcode(
+                    barcode=code,
+                    barcode_type=MallInventoryBarcodeType.BOTTLE.value,
+                    sku_id=sku.id,
+                    product_id=mall_prod.id,
+                    warehouse_id=po.mall_warehouse_id,
+                    batch_no=batch_no,
+                    status=MallInventoryBarcodeStatus.IN_STOCK.value,
+                    cost_price=per_bottle_cost,
+                ))
+
         po.status = PurchaseStatus.RECEIVED
         po.actual_date = now.date()
         await db.flush()
         await log_audit(
             db, action="receive_purchase_order", entity_type="PurchaseOrder",
             entity_id=po.id, user=user,
-            changes={"target": "mall_warehouse", "mall_warehouse_id": po.mall_warehouse_id, "batch_no": batch_no},
+            changes={
+                "target": "mall_warehouse",
+                "mall_warehouse_id": po.mall_warehouse_id,
+                "batch_no": batch_no,
+                "barcode_count": len(all_codes_this_batch),
+            },
         )
         await db.refresh(po, ["items", "supplier", "warehouse", "brand"])
         return _po_to_response(po)

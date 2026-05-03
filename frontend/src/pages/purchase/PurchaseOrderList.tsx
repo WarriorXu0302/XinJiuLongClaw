@@ -92,11 +92,8 @@ function PurchaseOrderList() {
     onSuccess: () => { message.success('采购单已驳回'); queryClient.invalidateQueries({ queryKey: ['purchase-orders'] }); },
     onError: (e: any) => message.error(e?.response?.data?.detail ?? '驳回失败'),
   });
-  const receiveMut = useMutation({
-    mutationFn: (id: string) => api.post(`/purchase-orders/${id}/receive?batch_no=PO-${Date.now()}`),
-    onSuccess: () => { message.success('收货入库成功'); queryClient.invalidateQueries({ queryKey: ['purchase-orders'] }); queryClient.invalidateQueries({ queryKey: ['inventory'] }); },
-    onError: (e: any) => message.error(e?.response?.data?.detail ?? '收货失败'),
-  });
+  // 收货必须走 /purchase/receive 扫码页（白酒业务硬要求：每瓶扫防伪码入库），
+  // 不再提供列表页的"一键收货"快捷按钮
 
   const createMutation = useMutation({
     mutationFn: async (values: any) => {

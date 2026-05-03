@@ -38,21 +38,48 @@
     >
       <view class="card__top">
         <view class="card__avatar">
-          {{ c.nickname?.[0] || '客' }}
+          {{ (c.real_name || c.nickname || '客')[0] }}
         </view>
         <view class="card__info">
           <view class="card__name">
-            <text>{{ c.nickname }}</text>
+            <text>{{ c.real_name || c.nickname }}</text>
             <text
-              class="card__phone"
-              @tap="onCall(c.phone)"
+              v-if="c.archived"
+              class="card__tag card__tag--archived"
             >
-              {{ maskPhone(c.phone) }}
+              已归档
             </text>
           </view>
           <view class="card__bound">
             绑定于 {{ formatDate(c.bound_at) }}
           </view>
+          <view
+            v-if="c.default_address"
+            class="card__addr"
+          >
+            {{ c.default_address.province }}{{ c.default_address.city }}{{ c.default_address.area }} {{ c.default_address.addr }}
+          </view>
+        </view>
+      </view>
+
+      <view class="card__quick">
+        <view
+          :class="['quick-btn', !c.phone && 'quick-btn--disabled']"
+          @tap="onCall(c.phone)"
+        >
+          <text class="quick-btn__icon">
+            📞
+          </text>
+          <text>{{ c.phone || '无电话' }}</text>
+        </view>
+        <view
+          :class="['quick-btn', !c.default_address && 'quick-btn--disabled']"
+          @tap="onNavigate(c)"
+        >
+          <text class="quick-btn__icon">
+            📍
+          </text>
+          <text>导航</text>
         </view>
       </view>
 
@@ -94,7 +121,6 @@ const total = ref(0)
 const totalGmvServer = ref(null)
 const loading = ref(false)
 
-const maskPhone = salesman.maskPhone
 const fmtMoney = salesman.fmtMoney
 const relativeTime = salesman.relativeTime
 
@@ -126,8 +152,38 @@ const load = async () => {
 }
 
 const onCall = (phone) => {
-  if (!phone) return
+  if (!phone) {
+    uni.showToast({ title: '客户未留电话', icon: 'none' })
+    return
+  }
   uni.makePhoneCall({ phoneNumber: phone, fail: () => {} })
+}
+
+// 调用地图：mp-weixin 直接打开地图；h5/其他端弹复制地址
+const onNavigate = (c) => {
+  const a = c?.default_address
+  if (!a) {
+    uni.showToast({ title: '客户未留收货地址', icon: 'none' })
+    return
+  }
+  const full = `${a.province || ''}${a.city || ''}${a.area || ''} ${a.addr || ''}`.trim()
+  // #ifdef MP-WEIXIN
+  // 微信端无经纬度也能打开地图（传地址让用户搜索）
+  uni.openLocation({
+    latitude: a.lat || 0,
+    longitude: a.lng || 0,
+    name: c.real_name || c.nickname || '客户',
+    address: full,
+    fail: () => {
+      uni.setClipboardData({ data: full })
+      uni.showToast({ title: '地址已复制', icon: 'none' })
+    }
+  })
+  // #endif
+  // #ifndef MP-WEIXIN
+  uni.setClipboardData({ data: full })
+  uni.showToast({ title: '地址已复制，请前往地图应用粘贴', icon: 'none', duration: 2000 })
+  // #endif
 }
 
 onMounted(() => load())
@@ -202,18 +258,31 @@ onMounted(() => load())
     font-weight: 600;
     color: $color-ink-soft;
   }
-  &__phone {
-    font-size: 22rpx;
-    color: $color-gold-deep;
-    padding: 2rpx 12rpx;
-    background: rgba(201,169,97,0.12);
-    border-radius: 12rpx;
-    font-weight: normal;
+  &__tag {
+    font-size: 20rpx;
+    padding: 2rpx 10rpx;
+    border-radius: 10rpx;
+
+    &--archived {
+      color: $color-err;
+      background: rgba(255, 77, 79, 0.1);
+    }
   }
   &__bound {
     margin-top: 4rpx;
     font-size: 22rpx;
     color: $color-hint;
+  }
+  &__addr {
+    margin-top: 6rpx;
+    font-size: 22rpx;
+    color: $color-hint;
+    line-height: 1.4;
+  }
+  &__quick {
+    margin-top: 16rpx;
+    display: flex;
+    gap: 16rpx;
   }
 
   &__stats {
@@ -242,6 +311,26 @@ onMounted(() => load())
   &__stat-divider {
     width: 2rpx;
     background: $color-line;
+  }
+}
+
+.quick-btn {
+  flex: 1;
+  height: 64rpx;
+  line-height: 64rpx;
+  text-align: center;
+  background: $color-cream;
+  color: $color-ink-soft;
+  border: 1rpx solid $color-line;
+  border-radius: 10rpx;
+  font-size: 24rpx;
+
+  &__icon {
+    margin-right: 6rpx;
+  }
+
+  &--disabled {
+    opacity: 0.4;
   }
 }
 </style>

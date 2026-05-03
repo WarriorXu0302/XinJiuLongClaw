@@ -182,6 +182,44 @@
         </view>
       </view>
 
+      <!-- 凭证列表（仅存在时展示；驳回条目高亮红底 + 原因） -->
+      <view
+        v-if="order.payments && order.payments.length"
+        class="section"
+      >
+        <view class="section__title">
+          收款凭证
+        </view>
+        <view
+          v-for="p in order.payments"
+          :key="p.id"
+          :class="['voucher', `voucher--${p.status}`]"
+        >
+          <view class="voucher__head">
+            <text class="voucher__amt">
+              {{ fmtMoney(p.amount) }}
+            </text>
+            <text :class="['voucher__status', `voucher__status--${p.status}`]">
+              {{ paymentStatusLabel(p.status) }}
+            </text>
+          </view>
+          <view class="voucher__meta">
+            <text>{{ paymentMethodLabel(p.paymentMethod || p.payment_method) }}</text>
+            <text>·</text>
+            <text>{{ fmtDate(p.createdAt || p.created_at) }}</text>
+          </view>
+          <view
+            v-if="p.status === 'rejected' && (p.rejectedReason || p.rejected_reason)"
+            class="voucher__reject"
+          >
+            <text class="voucher__reject-label">
+              驳回原因：
+            </text>
+            <text>{{ p.rejectedReason || p.rejected_reason }}</text>
+          </view>
+        </view>
+      </view>
+
       <!-- 操作按钮 -->
       <view class="actions">
         <view
@@ -210,7 +248,7 @@
           class="actions__primary"
           @tap="onUploadVoucher"
         >
-          <text>上传收款凭证</text>
+          <text>{{ needReupload ? '重新上传收款凭证' : '上传收款凭证' }}</text>
         </view>
       </view>
     </block>
@@ -243,6 +281,35 @@ const nextStepHint = computed(() => {
   if (s === 'partial_closed') return '订单已折损，按实收金额结算'
   return ''
 })
+
+// 订单 delivered 状态下若有 rejected 凭证 → 按钮文案改"重新上传"
+const needReupload = computed(() => {
+  if (!order.value) return false
+  if (order.value.status !== 'delivered') return false
+  const pays = order.value.payments || []
+  return pays.some(p => p.status === 'rejected')
+})
+
+const paymentStatusLabel = (s) => ({
+  pending_confirmation: '待财务确认',
+  confirmed: '已确认',
+  rejected: '已驳回'
+}[s] || s)
+
+const paymentMethodLabel = (m) => ({
+  cash: '现金',
+  bank: '银行转账',
+  wechat: '微信',
+  alipay: '支付宝'
+}[m] || m || '-')
+
+const fmtDate = (iso) => {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return iso
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
 
 const timeline = computed(() => {
   if (!order.value) return []
@@ -600,6 +667,73 @@ onLoad((query) => {
     font-size: 30rpx;
     font-weight: 600;
     letter-spacing: 2rpx;
+  }
+}
+
+.voucher {
+  padding: 20rpx 0;
+  border-bottom: 1rpx solid $color-line;
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8rpx;
+  }
+
+  &__amt {
+    font-size: 32rpx;
+    font-weight: 600;
+    color: $color-ink-soft;
+  }
+
+  &__status {
+    font-size: 22rpx;
+    padding: 4rpx 16rpx;
+    border-radius: 20rpx;
+
+    &--pending_confirmation {
+      background: rgba(201, 169, 97, 0.15);
+      color: $color-gold-deep;
+    }
+    &--confirmed {
+      background: rgba(82, 196, 26, 0.15);
+      color: #52c41a;
+    }
+    &--rejected {
+      background: rgba(255, 77, 79, 0.15);
+      color: $color-err;
+    }
+  }
+
+  &__meta {
+    display: flex;
+    gap: 10rpx;
+    font-size: 22rpx;
+    color: $color-hint;
+  }
+
+  &__reject {
+    margin-top: 12rpx;
+    padding: 16rpx;
+    background: rgba(255, 77, 79, 0.08);
+    border-left: 4rpx solid $color-err;
+    border-radius: 8rpx;
+    font-size: 26rpx;
+    color: $color-err;
+    line-height: 1.5;
+  }
+
+  &__reject-label {
+    font-weight: 600;
+  }
+
+  &--rejected {
+    background: rgba(255, 77, 79, 0.02);
   }
 }
 </style>

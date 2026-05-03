@@ -356,10 +356,13 @@ async def change_referrer(
     )
     await db.flush()
 
-    # 通知涉及的两个业务员：原推荐人 + 新推荐人（可能为空 = 解绑）
-    # 推荐关系变更会影响后续订单的抢单独占期 + 提成归属，业务员需被告知
+    # 通知涉及的两个业务员 + 消费者本人（推荐关系变更会影响服务对接，三方都要知道）
     from app.services.notification_service import notify_mall_user
     customer_nick = u.nickname or u.username or "客户"
+    new_nick = None
+    if body.new_referrer_id:
+        new_ref = await db.get(MallUser, body.new_referrer_id)
+        new_nick = new_ref.nickname or new_ref.username or "新业务员" if new_ref else "新业务员"
     if old and old != body.new_referrer_id:
         await notify_mall_user(
             db, mall_user_id=old,
@@ -374,6 +377,22 @@ async def change_referrer(
             content=f"管理员将客户「{customer_nick}」的推荐关系绑定到您。",
             entity_type="MallUser", entity_id=u.id,
         )
+    # 消费者本人：换绑了要告诉他"您的业务员已调整"
+    if old != body.new_referrer_id:
+        if body.new_referrer_id:
+            await notify_mall_user(
+                db, mall_user_id=u.id,
+                title="您的业务员已调整",
+                content=f"管理员已为您调整对接业务员「{new_nick}」，后续订单将由该业务员服务。",
+                entity_type="MallUser", entity_id=u.id,
+            )
+        else:
+            await notify_mall_user(
+                db, mall_user_id=u.id,
+                title="推荐业务员已解绑",
+                content="管理员已解除您的推荐业务员绑定，下单前需重新联系业务员获取邀请码。",
+                entity_type="MallUser", entity_id=u.id,
+            )
 
     return _user_dict(u)
 

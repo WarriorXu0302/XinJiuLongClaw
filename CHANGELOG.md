@@ -104,6 +104,9 @@
 - 消费者的推荐业务员被禁用时 `create_order` 直接 403 拒绝下单（原先订单进 pending_assignment 但独占期内没人能看到 → 开放期才被其他业务员抢）
 - 业务员登录（账密 / 微信 / refresh）新增 `assert_salesman_linked_employee_active` 校验：linked ERP employee 的 status != 'active' 时直接 403，防离职业务员继续通过 mall token 刷 ERP 复用端点
 - `reject_application` 释放 openid / username 唯一键（改 `rejected_<ts>_` 前缀），否则被驳回用户无法用同一微信/账号重注册，测试环境里尤其堵
+- 业务员订单详情（salesman-order-detail）展示凭证列表 + 驳回原因 + 重传按钮文案切换：后端 `MallOrderDetailVO` 补 `payments` 字段；delivered 状态下有 rejected 凭证时按钮文案改成"重新上传收款凭证"。原先业务员不知道凭证被驳回为何/下一步做什么
+- `salesman-my-customers` 加一键拨号 + 导航按钮；后端返完整 `contact_phone`（注册留的电话，原只返脱敏）+ `default_address`（默认收货地址）。业务员跟客户对接/送货时不用手工输地址
+- admin `change_referrer`（换绑推荐人）补通知消费者本人："您的业务员已调整 XXX"。原先只通知了新老业务员，C 端用户完全不知道自己推荐人被换了
 - `cancel_order` 退库存按原出库流水的 inventory 定位目标仓，不再依赖 `get_default_warehouse()`。**修复**：默认仓换过后，取消订单会把货退到错的仓
 - `release_order` 仅允许在 `assigned` 状态释放；`shipped` 后条码已 OUTBOUND 绑定原业务员，不再允许自行释放（出库后须走管理员改派）
 - `admin_reassign` 在 shipped/delivered/pending_payment_confirmation 状态改派时，同步把本订单的 OUTBOUND 条码 `outbound_by_user_id` 过户到新业务员，避免归属数据错乱

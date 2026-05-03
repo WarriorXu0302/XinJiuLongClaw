@@ -317,4 +317,13 @@ async def order_detail(
         })
         for it in items
     ]
+    # 凭证列表（业务员端详情要能看到是否被驳回 + 原因，方便重传）
+    from app.models.mall.order import MallPayment
+    from app.schemas.mall.order import MallOrderPaymentVO
+    pays = (await db.execute(
+        select(MallPayment)
+        .where(MallPayment.order_id == order.id)
+        .order_by(MallPayment.created_at.desc())
+    )).scalars().all()
+    vo.payments = [MallOrderPaymentVO.model_validate(p, from_attributes=True) for p in pays]
     return vo

@@ -110,6 +110,23 @@ class MallCourierVO(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class MallOrderPaymentVO(BaseModel):
+    """订单凭证（业务员详情页展示 / 驳回后重传判断）。"""
+    id: str
+    amount: Decimal
+    payment_method: str = Field(serialization_alias="paymentMethod")
+    status: str
+    rejected_reason: Optional[str] = Field(
+        default=None, serialization_alias="rejectedReason"
+    )
+    created_at: Optional[Any] = Field(default=None, serialization_alias="createdAt")
+    confirmed_at: Optional[Any] = Field(
+        default=None, serialization_alias="confirmedAt"
+    )
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
 class MallOrderDetailVO(MallOrderListItemVO):
     """订单详情。"""
     address: Optional[dict] = Field(
@@ -125,6 +142,9 @@ class MallOrderDetailVO(MallOrderListItemVO):
     customer_confirmed_at: Optional[Any] = Field(
         default=None, serialization_alias="customerConfirmedAt"
     )
+
+    # 凭证列表（含驳回原因，业务员端详情读这个判断是否需要重传）
+    payments: List[MallOrderPaymentVO] = Field(default_factory=list)
 
     # 配送员信息：pending_assignment 时为 null（还没人接单）
     courier: Optional[MallCourierVO] = None

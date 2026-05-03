@@ -143,6 +143,57 @@ async def ship(
     return {"order_no": order.order_no, "status": order.status}
 
 
+@router.get("/{order_id}/ship-mode")
+async def ship_mode(
+    order_id: str,
+    current: CurrentMallUser,
+    db: AsyncSession = Depends(get_mall_db),
+):
+    """前端 ship 前先查：此订单该扫码还是散装出库？
+
+    逻辑：订单所含 SKU 在 mall_inventory_barcodes 里有任何 IN_STOCK 条码 → scan；
+    否则 → bulk（mall 仓采购入库不生成条码，业务员按数量直发）。
+    """
+    from app.models.mall.base import MallInventoryBarcodeStatus
+    from app.models.mall.inventory import MallInventoryBarcode
+    from app.models.mall.order import MallOrder, MallOrderItem
+
+    _require_salesman(current)
+    user = await auth_service.verify_token_and_load_user(db, current)
+
+    order = (await db.execute(
+        select(MallOrder).where(MallOrder.id == order_id)
+    )).scalar_one_or_none()
+    if order is None or order.assigned_salesman_id != user.id:
+        raise HTTPException(status_code=404, detail="订单不存在或无权操作")
+
+    items = (await db.execute(
+        select(MallOrderItem).where(MallOrderItem.order_id == order.id)
+    )).scalars().all()
+    sku_ids = [i.sku_id for i in items]
+    total_qty = sum(i.quantity for i in items)
+
+    has_in_stock = False
+    if sku_ids:
+        probe = (await db.execute(
+            select(MallInventoryBarcode.id)
+            .where(MallInventoryBarcode.sku_id.in_(sku_ids))
+            .where(MallInventoryBarcode.status == MallInventoryBarcodeStatus.IN_STOCK.value)
+            .limit(1)
+        )).first()
+        has_in_stock = probe is not None
+
+    return {
+        "order_id": order.id,
+        "order_no": order.order_no,
+        "mode": "scan" if has_in_stock else "bulk",
+        "required_bottles": total_qty,
+        "sku_breakdown": [
+            {"sku_id": i.sku_id, "quantity": i.quantity} for i in items
+        ],
+    }
+
+
 # ── 实时校验单个条码（小程序扫一次请求一次，失败立刻提示） ────────────────
 @router.get("/{order_id}/verify-barcode")
 async def verify_barcode(

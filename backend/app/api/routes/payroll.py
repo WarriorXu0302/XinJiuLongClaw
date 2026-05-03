@@ -1347,6 +1347,49 @@ async def generate_salary_records(
                 })
                 total_receipt += receipt
 
+        # =====================================================================
+        # 门店零售提成（桥 B12）：Commission.store_sale_id IS NOT NULL 的待结算条目
+        # =====================================================================
+        store_commission_rows = (await db.execute(
+            select(Commission)
+            .where(Commission.employee_id == emp.id)
+            .where(Commission.store_sale_id.is_not(None))
+            .where(Commission.status == "pending")
+        )).scalars().all()
+
+        if store_commission_rows:
+            # 去重：已挂过的 commission_id 跳过（幂等重生成工资单）
+            sc_ids = [c.id for c in store_commission_rows]
+            already_store_linked = (await db.execute(
+                select(SalaryOrderLink.commission_id)
+                .where(SalaryOrderLink.commission_id.in_(sc_ids))
+                .where(SalaryOrderLink.store_sale_id.is_not(None))
+            )).scalars().all()
+            already_store_set = set(x for x in already_store_linked if x)
+
+            from app.models.store_sale import StoreSale
+            for c in store_commission_rows:
+                if c.id in already_store_set:
+                    continue
+                sale = await db.get(StoreSale, c.store_sale_id)
+                if sale is None:
+                    continue
+                # 零售提成按销售额走"rate"展示（业务逻辑是按利润计算，这里 rate 只是展示用）
+                receipt = Decimal(str(sale.total_sale_amount or 0))
+                amount = Decimal(str(c.commission_amount or 0))
+                commission_total += amount
+                order_links.append({
+                    "store_sale_id": c.store_sale_id,
+                    "commission_id": c.id,
+                    "brand_id": c.brand_id,
+                    "receipt_amount": receipt,
+                    "rate": receipt and (amount / receipt) or Decimal("0"),
+                    "coef": Decimal("1"),
+                    "amount": amount,
+                    "is_manager": False,
+                })
+                total_receipt += receipt
+
         # 考勤汇总（用于判全勤 + 迟到扣款）
         from app.models.attendance import CheckinRecord, LeaveRequest
         from datetime import date as _d
@@ -1519,14 +1562,15 @@ async def generate_salary_records(
         db.add(rec)
         await db.flush()
 
-        # 订单明细（B2B order_id 或 mall_order_id 二选一）
+        # 订单明细（三选一：B2B order_id / 商城 mall_order_id / 门店零售 store_sale_id）
         for link in order_links:
             db.add(SalaryOrderLink(
                 id=str(uuid.uuid4()),
                 salary_record_id=rec.id,
                 order_id=link.get("order_id"),
                 mall_order_id=link.get("mall_order_id"),
-                commission_id=link.get("commission_id"),  # mall 路径带上；B2B 为 None
+                store_sale_id=link.get("store_sale_id"),
+                commission_id=link.get("commission_id"),  # mall/store 路径带上；B2B 为 None
                 brand_id=link.get("brand_id"),
                 receipt_amount=link["receipt_amount"],
                 commission_rate_used=link["rate"],
@@ -1679,16 +1723,33 @@ async def batch_pay_salary(
 
         # 同步标记 mall commission settled（批量发放路径）
         from sqlalchemy import update as _su
-        mall_ids = (await db.execute(
+        # 按 commission_id 统一 settled（mall / store / B2B 全覆盖）
+        link_commission_ids = (await db.execute(
+            select(SalaryOrderLink.commission_id)
+            .where(SalaryOrderLink.salary_record_id == rec.id)
+            .where(SalaryOrderLink.commission_id.is_not(None))
+            .where(SalaryOrderLink.is_manager_share.is_(False))
+        )).scalars().all()
+        link_commission_ids = [c for c in link_commission_ids if c]
+        if link_commission_ids:
+            await db.execute(
+                _su(Commission)
+                .where(Commission.id.in_(link_commission_ids))
+                .where(Commission.status == "pending")
+                .values(status="settled", settled_at=now)
+            )
+        # 兼容：m5a4 之前的 link 没 commission_id，降级按 mall_order_id 扫（旧数据）
+        mall_ids_legacy = (await db.execute(
             select(SalaryOrderLink.mall_order_id)
             .where(SalaryOrderLink.salary_record_id == rec.id)
+            .where(SalaryOrderLink.commission_id.is_(None))
             .where(SalaryOrderLink.mall_order_id.is_not(None))
             .where(SalaryOrderLink.is_manager_share.is_(False))
         )).scalars().all()
-        if mall_ids:
+        if mall_ids_legacy:
             await db.execute(
                 _su(Commission)
-                .where(Commission.mall_order_id.in_(mall_ids))
+                .where(Commission.mall_order_id.in_(mall_ids_legacy))
                 .where(Commission.employee_id == rec.employee_id)
                 .where(Commission.status == "pending")
                 .values(status="settled", settled_at=now)

@@ -15,6 +15,18 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **P0**: payroll.generate_salary_records 漏扫门店零售提成（Commission.store_sale_id 非空那条路径从未进过工资单，店员辛苦扫码的提成永远发不出去）。
+  改动（migration m6b3）:
+  - salary_order_links 加 store_sale_id 列 + FK
+  - 旧 CHECK（"order_id XOR mall_order_id"）改为"三者恰一个非空"
+  - 新增 UNIQUE(store_sale_id, commission_id) 防同一门店提成重复入工资单
+  - generate_salary_records 加 store_commission 扫描分支（同 mall 分支模式）
+  - SalaryOrderLink 构造时传 store_sale_id
+  - /pay-all 批量发薪时按 commission_id 统一 settled（覆盖 B2B/mall/store 三路径），不再只按 mall_order_id
+  - E2E `scripts/e2e_store_commission_in_payroll.py` 验证 payroll 扫描能挂上门店 Commission
+
 ### Added
 
 - **门店退货（桥 B12 延伸）** — 客户来店退货的完整闭环

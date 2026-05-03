@@ -200,8 +200,8 @@ class SalaryOrderLink(Base):
     唯一约束 (order_id, is_manager_share)：一个 B2B 订单最多挂两次——员工本人提成
     一次 + 经理分成一次。并发生成工资单时约束兜底避免双发。
 
-    M4d 扩展：`mall_order_id` 字段用于商城订单归集。order_id 和 mall_order_id
-    二选一非空；两者都 NULL 不合法（CHECK 约束保证）。
+    三种 ref 三选一非空：order_id（B2B）/ mall_order_id（商城）/ store_sale_id（门店零售）。
+    CHECK 约束保证三者恰有一个非空。
     """
     __tablename__ = "salary_order_links"
     __table_args__ = (
@@ -212,9 +212,18 @@ class SalaryOrderLink(Base):
             "mall_order_id", "commission_id", "is_manager_share",
             name="uq_mall_commission_linked_once",
         ),
-        # 二选一非空
+        # 门店零售一单一条 commission，按 commission_id 去重
+        UniqueConstraint(
+            "store_sale_id", "commission_id",
+            name="uq_store_sale_commission_linked_once",
+        ),
+        # 三选一非空（恰有一个非空）
         CheckConstraint(
-            "(order_id IS NOT NULL AND mall_order_id IS NULL) OR (order_id IS NULL AND mall_order_id IS NOT NULL)",
+            "("
+            "(order_id IS NOT NULL)::int + "
+            "(mall_order_id IS NOT NULL)::int + "
+            "(store_sale_id IS NOT NULL)::int"
+            ") = 1",
             name="ck_salary_order_link_exclusive_ref",
         ),
     )
@@ -226,6 +235,9 @@ class SalaryOrderLink(Base):
     order_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("orders.id"), nullable=True)
     mall_order_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("mall_orders.id"), nullable=True,
+    )
+    store_sale_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("store_sales.id"), nullable=True,
     )
     commission_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("commissions.id", ondelete="SET NULL"), nullable=True, index=True,

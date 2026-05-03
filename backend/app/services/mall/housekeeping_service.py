@@ -4,8 +4,16 @@ Mall housekeeping 定时任务。
 由 APScheduler 调度（app/core/scheduler.py 注册），也可通过 admin 端点手动触发。
 
 每个 `job_*` 函数自己开 admin_session_factory 事务，与 FastAPI 请求上下文隔离。
+
+所有 job 都被 @_with_job_log 装饰器包裹，执行结果写入 mall_job_logs 表：
+  - started_at / finished_at / duration_ms
+  - status='success' + result (JSON) 或 status='error' + error_message
+admin 可通过 GET /api/mall/admin/housekeeping/logs 查执行历史。
 """
+import functools
 import logging
+import traceback
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -15,15 +23,67 @@ from app.core.config import settings
 from app.core.database import admin_session_factory
 from app.models.mall.base import MallOrderStatus, MallUserStatus, MallUserType
 from app.models.mall.order import MallCartItem, MallOrder
-from app.models.mall.user import MallLoginLog, MallUser
+from app.models.mall.user import MallJobLog, MallLoginLog, MallUser
 
 logger = logging.getLogger(__name__)
+
+# 当前触发源：admin 端点调 job 前设置为 'manual'；否则默认 'scheduler'
+_job_trigger_ctx: ContextVar[str] = ContextVar("mall_job_trigger", default="scheduler")
+
+
+def set_job_trigger(trigger: str) -> None:
+    """admin 端点调 job 前调：set_job_trigger('manual')。"""
+    _job_trigger_ctx.set(trigger)
+
+
+def _with_job_log(func_):
+    """装饰器：把 job_* 的执行包成 mall_job_logs 一条记录。"""
+    @functools.wraps(func_)
+    async def wrapper(*args, **kwargs):
+        started_at = datetime.now(timezone.utc)
+        start_ts = started_at.timestamp()
+        trigger = _job_trigger_ctx.get()
+        job_name = func_.__name__
+        status = "success"
+        error_message = None
+        result: dict | None = None
+        try:
+            result = await func_(*args, **kwargs)
+            return result
+        except Exception as exc:
+            status = "error"
+            error_message = (
+                f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
+            )[:2000]
+            raise
+        finally:
+            finished_at = datetime.now(timezone.utc)
+            duration_ms = int((finished_at.timestamp() - start_ts) * 1000)
+            try:
+                async with admin_session_factory() as s:
+                    log = MallJobLog(
+                        job_name=job_name,
+                        trigger=trigger,
+                        status=status,
+                        result=result if isinstance(result, dict) else None,
+                        error_message=error_message,
+                        duration_ms=duration_ms,
+                        started_at=started_at,
+                        finished_at=finished_at,
+                    )
+                    s.add(log)
+                    await s.commit()
+            except Exception as log_exc:
+                # 日志写入失败不影响 job 本身（打个 warn 就行）
+                logger.warning("mall_job_log 写入失败: %s", log_exc)
+    return wrapper
 
 
 # =============================================================================
 # 1. 超时未接单 → skip_log
 # =============================================================================
 
+@_with_job_log
 async def job_detect_unclaimed_timeout() -> dict:
     """订单 pending_assignment 且超过独占期 → 给推荐人记 skip_log（幂等）。
 
@@ -67,6 +127,7 @@ def _archive_threshold_days(order_count: int) -> int:
     return settings.MALL_INACTIVE_DAYS_LOYAL
 
 
+@_with_job_log
 async def job_archive_inactive_consumers() -> dict:
     """按 3 级停用策略归档不活跃消费者。
 
@@ -156,6 +217,7 @@ async def job_archive_inactive_consumers() -> dict:
     return {"archived": archived}
 
 
+@_with_job_log
 async def job_notify_archive_pre_notice() -> dict:
     """距归档 7 天给客户发预告通知。每天跑一次；避免重复推送。
 
@@ -217,6 +279,7 @@ async def job_notify_archive_pre_notice() -> dict:
 # 3. delivered 60 天未全款 → partial_closed
 # =============================================================================
 
+@_with_job_log
 async def job_detect_partial_close() -> dict:
     """订单 delivered / pending_payment_confirmation 且 delivered_at 距今 > 60 天且未全款
     → status=partial_closed；若 received_amount > 0 且未生成提成则按已收额计提成。
@@ -319,6 +382,7 @@ async def job_detect_partial_close() -> dict:
 # 4. 清 90 天前登录日志
 # =============================================================================
 
+@_with_job_log
 async def job_purge_old_login_logs() -> dict:
     cutoff = datetime.now(timezone.utc) - timedelta(
         days=settings.MALL_LOGIN_LOG_RETENTION_DAYS

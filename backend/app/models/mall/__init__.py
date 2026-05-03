@@ -30,6 +30,7 @@ from app.models.mall.product import (
 from app.models.mall.user import (
     MallAddress,
     MallInviteCode,
+    MallJobLog,
     MallLoginLog,
     MallRegion,
     MallUser,
@@ -37,7 +38,7 @@ from app.models.mall.user import (
 
 __all__ = [
     # user (M1)
-    "MallUser", "MallAddress", "MallRegion", "MallInviteCode", "MallLoginLog",
+    "MallUser", "MallAddress", "MallRegion", "MallInviteCode", "MallLoginLog", "MallJobLog",
     # product (M2)
     "MallCategory", "MallProductTag", "MallProductTagRel",
     "MallProduct", "MallProductSku", "MallCollection",

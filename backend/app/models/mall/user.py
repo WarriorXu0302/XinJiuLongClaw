@@ -282,3 +282,37 @@ class MallLoginLog(Base):
     session_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     login_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+# =============================================================================
+# MallJobLog —— 定时任务执行历史
+# =============================================================================
+
+class MallJobLog(Base):
+    """定时任务执行日志。
+
+    每次 APScheduler 触发或 admin 手动触发某个 job_* 都落一条：
+      - job_name：函数名（detect_unclaimed_timeout / archive_inactive_consumers ...）
+      - trigger：'scheduler' | 'manual'
+      - status：'success' | 'error'
+      - result：service 返的 dict（JSON）
+      - error_message：失败时存 traceback
+      - duration_ms：耗时
+    admin 通过 /api/mall/admin/housekeeping/logs 查询追溯。
+    """
+
+    __tablename__ = "mall_job_logs"
+    __table_args__ = (
+        Index("ix_mall_job_logs_name_started", "job_name", "started_at"),
+        Index("ix_mall_job_logs_started", "started_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    job_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    trigger: Mapped[str] = mapped_column(String(20), nullable=False, default="scheduler")
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    result: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(String(2000), nullable=True)
+    duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    finished_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)

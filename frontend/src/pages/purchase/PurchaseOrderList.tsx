@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Card, Col, DatePicker, Divider, Form, Input, InputNumber, message, Modal, Row, Select, Space, Statistic, Table, Tag, Typography, Upload } from 'antd';
+import { Button, Card, Col, DatePicker, Divider, Form, Input, InputNumber, message, Modal, Radio, Row, Select, Space, Statistic, Table, Tag, Typography, Upload } from 'antd';
 import { PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
@@ -47,6 +47,14 @@ function PurchaseOrderList() {
     queryKey: ['products-select', brandId],
     queryFn: () => api.get('/products', { params }).then(r => extractItems(r.data)),
   });
+
+  // mall 仓下拉（用于 target_warehouse_type=mall_warehouse 时选仓）
+  const { data: mallWarehousesResp } = useQuery<any>({
+    queryKey: ['mall-warehouses-select'],
+    queryFn: () => api.get('/mall/admin/warehouses', { params: { is_active: true, limit: 100 } })
+      .then(r => r.data).catch(() => ({ records: [] })),
+  });
+  const mallWarehouses: any[] = mallWarehousesResp?.records || mallWarehousesResp?.items || [];
   const { data: accounts = [] } = useQuery<any[]>({
     queryKey: ['accounts-select', brandId],
     queryFn: () => api.get('/accounts', { params }).then(r => extractItems(r.data)),
@@ -61,6 +69,9 @@ function PurchaseOrderList() {
   const isManufacturer = selectedSupplier?.type === 'manufacturer';
   const selectedWarehouseId = Form.useWatch('warehouse_id', form);
   const isTastingWarehouse = tastingWarehouses.some(w => w.id === selectedWarehouseId);
+  // 目标仓库类型：'erp_warehouse'（默认）或 'mall_warehouse'（进商城仓）
+  const targetWarehouseType = Form.useWatch('target_warehouse_type', form) || 'erp_warehouse';
+  const isMallTarget = targetWarehouseType === 'mall_warehouse';
 
   const approveMut = useMutation({
     mutationFn: (id: string) => api.post(`/purchase-orders/${id}/approve`),
@@ -83,7 +94,9 @@ function PurchaseOrderList() {
       const payload = {
         brand_id: brandId,
         supplier_id: values.supplier_id,
-        warehouse_id: values.warehouse_id,
+        target_warehouse_type: values.target_warehouse_type || 'erp_warehouse',
+        warehouse_id: values.target_warehouse_type === 'mall_warehouse' ? null : values.warehouse_id,
+        mall_warehouse_id: values.target_warehouse_type === 'mall_warehouse' ? values.mall_warehouse_id : null,
         cash_amount: values.cash_amount || 0,
         f_class_amount: values.f_class_amount || 0,
         cash_account_id: values.cash_account_id || null,
@@ -148,7 +161,7 @@ function PurchaseOrderList() {
         onOk={() => form.validateFields().then(v => createMutation.mutate(v))}
         onCancel={() => { setModalOpen(false); form.resetFields(); }}
         confirmLoading={createMutation.isPending} okText="提交采购单" destroyOnHidden={false}>
-        <Form form={form} layout="vertical" initialValues={{ items: [{}] }}>
+        <Form form={form} layout="vertical" initialValues={{ items: [{}], target_warehouse_type: 'erp_warehouse' }}>
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item name="supplier_id" label="供货方" rules={[{ required: true }]}>
@@ -158,11 +171,41 @@ function PurchaseOrderList() {
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="warehouse_id" label={isManufacturer ? '入库仓库' : '入库仓库'} rules={[{ required: true }]}>
-                <Select showSearch optionFilterProp="label" placeholder={isManufacturer ? '选择仓库（主仓/品鉴物料仓）' : '选择仓库'}
-                  options={(isManufacturer ? manufacturerWarehouses : supplierWarehouses).map((w: any) => ({ value: w.id, label: w.name }))} />
+              <Form.Item name="target_warehouse_type" label="目标仓库类型" rules={[{ required: true }]}>
+                <Radio.Group
+                  onChange={() => form.setFieldsValue({ warehouse_id: undefined, mall_warehouse_id: undefined })}
+                >
+                  <Radio value="erp_warehouse">ERP 仓</Radio>
+                  <Radio value="mall_warehouse">商城仓</Radio>
+                </Radio.Group>
               </Form.Item>
             </Col>
+          </Row>
+          <Row gutter={16}>
+            {!isMallTarget ? (
+              <Col span={24}>
+                <Form.Item name="warehouse_id" label={isManufacturer ? '入库仓库' : '入库仓库'} rules={[{ required: true, message: '请选择 ERP 仓' }]}>
+                  <Select showSearch optionFilterProp="label" placeholder={isManufacturer ? '选择仓库（主仓/品鉴物料仓）' : '选择仓库'}
+                    options={(isManufacturer ? manufacturerWarehouses : supplierWarehouses).map((w: any) => ({ value: w.id, label: w.name }))} />
+                </Form.Item>
+              </Col>
+            ) : (
+              <Col span={24}>
+                <Form.Item
+                  name="mall_warehouse_id"
+                  label="商城仓库"
+                  rules={[{ required: true, message: '请选择商城仓' }]}
+                  extra="入商城仓后，商品必须已在「商城商品」映射过（source_product_id = ERP 商品 id）"
+                >
+                  <Select
+                    showSearch
+                    optionFilterProp="label"
+                    placeholder={mallWarehouses.length ? '选择商城仓' : '未找到商城仓，请先在「商城仓库」管理页创建'}
+                    options={mallWarehouses.map((w: any) => ({ value: w.id, label: `${w.code ? w.code + ' · ' : ''}${w.name}` }))}
+                  />
+                </Form.Item>
+              </Col>
+            )}
           </Row>
 
           <Divider>采购商品明细</Divider>

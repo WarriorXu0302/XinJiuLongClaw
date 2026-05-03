@@ -70,7 +70,8 @@ async def list_warehouses(
     is_active: Optional[bool] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    require_role(user, "admin", "boss", "warehouse")
+    # purchase 角色也要能看：采购录入 PO 时选商城仓用
+    require_role(user, "admin", "boss", "warehouse", "purchase")
     stmt = select(MallWarehouse)
     if keyword:
         kw = f"%{keyword}%"

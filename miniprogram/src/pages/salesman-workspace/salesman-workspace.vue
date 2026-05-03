@@ -51,7 +51,7 @@
       </view>
       <view class="grid">
         <view
-          v-for="e in entries"
+          v-for="e in visibleEntries"
           :key="e.key"
           class="grid__cell"
           @tap="toPage(e.path)"
@@ -89,8 +89,20 @@ const entries = [
   { key: 'expense', icon: '💰', label: '报销', path: '/pages/salesman-expense/salesman-expense' },
   { key: 'inspection', icon: '🔍', label: '扫码稽查', path: '/pages/salesman-inspection/salesman-inspection' },
   { key: 'kpi', icon: '📊', label: 'KPI', path: '/pages/salesman-kpi/salesman-kpi' },
-  { key: 'notifications', icon: '🔔', label: '通知', path: '/pages/salesman-notifications/salesman-notifications' }
+  { key: 'notifications', icon: '🔔', label: '通知', path: '/pages/salesman-notifications/salesman-notifications' },
+  // 门店收银（仅 assigned_store_id 非空的店员可见）
+  { key: 'store_cashier', icon: '🏪', label: '门店收银', path: '/pages/store-cashier/store-cashier', requireStore: true },
+  { key: 'store_my_sales', icon: '📈', label: '门店业绩', path: '/pages/store-my-sales/store-my-sales', requireStore: true }
 ]
+
+const isStoreCashier = computed(() => {
+  const lr = uni.getStorageSync('loginResult') || {}
+  return !!lr.assigned_store_id
+})
+
+const visibleEntries = computed(() =>
+  entries.filter(e => !e.requireStore || isStoreCashier.value)
+)
 
 const toPage = (url) => uni.navigateTo({ url })
 

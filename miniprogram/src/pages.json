@@ -234,6 +234,14 @@
     {
       "path": "pages/salesman-upload-voucher/salesman-upload-voucher",
       "style": { "navigationBarTitleText": "上传收款凭证" }
+    },
+    {
+      "path": "pages/store-cashier/store-cashier",
+      "style": { "navigationBarTitleText": "门店收银" }
+    },
+    {
+      "path": "pages/store-my-sales/store-my-sales",
+      "style": { "navigationBarTitleText": "我的门店业绩" }
     }
   ],
   "tabBar": {

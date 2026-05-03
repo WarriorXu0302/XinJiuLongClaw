@@ -59,6 +59,7 @@ import MallCategoryTree from '../pages/mall/products/CategoryTree';
 import MallProductList from '../pages/mall/products/ProductList';
 import MallConsumerList from '../pages/mall/users/ConsumerList';
 import MallUserApplicationList from '../pages/mall/users/UserApplicationList';
+import MallReturnList from '../pages/mall/orders/ReturnList';
 import MallSkipAlertList from '../pages/mall/operations/SkipAlertList';
 import MallDashboard from '../pages/mall/Dashboard';
 import MallInviteCodeList from '../pages/mall/operations/InviteCodeList';
@@ -160,6 +161,7 @@ const routes: RouteObject[] = [
       { path: 'mall/products', element: <MallProductList /> },
       { path: 'mall/consumers', element: <MallConsumerList /> },
       { path: 'mall/user-applications', element: <MallUserApplicationList /> },
+      { path: 'mall/returns', element: <MallReturnList /> },
       { path: 'mall/skip-alerts', element: <MallSkipAlertList /> },
       { path: 'mall/invite-codes', element: <MallInviteCodeList /> },
       { path: 'mall/audit/operations', element: <AuthGuard requiredRoles={['admin', 'boss']}><MallAuditLogList /></AuthGuard> },

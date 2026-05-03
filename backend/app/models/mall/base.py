@@ -73,6 +73,20 @@ class MallPaymentChannel(str, enum.Enum):
     ALIPAY = "alipay"
 
 
+class MallReturnStatus(str, enum.Enum):
+    """退货申请状态机。
+
+    pending（用户已申请，待审批）
+      → approved（财务同意退货，已退库存）
+         → refunded（线下退款已完成，订单 status=refunded）
+      → rejected（财务拒绝）
+    """
+    PENDING = "pending"
+    APPROVED = "approved"
+    REFUNDED = "refunded"
+    REJECTED = "rejected"
+
+
 class MallClaimAction(str, enum.Enum):
     """抢单/改派操作类型。"""
     CLAIM = "claim"

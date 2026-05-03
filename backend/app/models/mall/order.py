@@ -38,6 +38,7 @@ from app.models.mall.base import (
     MallOrderStatus,
     MallPaymentApprovalStatus,
     MallPaymentChannel,
+    MallReturnStatus,
     MallShipmentStatus,
     MallSkipAlertStatus,
     MallSkipType,
@@ -486,6 +487,73 @@ class MallSkipAlert(Base):
     appeal_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        onupdate=func.now(), nullable=True
+    )
+
+
+# =============================================================================
+# MallReturnRequest —— C 端退货申请
+# =============================================================================
+
+class MallReturnRequest(Base):
+    """C 端退货申请。
+
+    状态流：pending → approved → refunded  /  pending → rejected
+
+    约束：
+      - 一个订单在一个活跃状态（pending/approved）的退货申请同时只能有一条
+        （unique partial index 在 migration 里做；应用层前置校验）
+      - 发起时订单 status 必须是 completed / partial_closed
+      - approved 时：退库存（按 item 反向 inbound）+ 订单 status=refunded
+      - refunded 时：记 refunded_at，不再反向改动库存（已在 approved 做过）
+    """
+
+    __tablename__ = "mall_return_requests"
+    __table_args__ = (
+        Index("ix_mall_return_requests_order", "order_id"),
+        Index("ix_mall_return_requests_user", "user_id"),
+        Index("ix_mall_return_requests_status", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    order_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("mall_orders.id", ondelete="RESTRICT"), nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("mall_users.id", ondelete="RESTRICT"), nullable=False
+    )
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # MallReturnStatus: pending / approved / refunded / rejected
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=MallReturnStatus.PENDING.value
+    )
+
+    # 审批信息（approved / rejected 时填）
+    reviewer_employee_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("employees.id", ondelete="SET NULL"), nullable=True
+    )
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    review_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # 退款金额（approved 时从订单 received_amount 复制，可由财务调整）
+    refund_amount: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(15, 2), nullable=True
+    )
+    refunded_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    refund_method: Mapped[Optional[str]] = mapped_column(
+        String(20), nullable=True  # cash / bank / wechat / alipay
+    )
+    refund_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(

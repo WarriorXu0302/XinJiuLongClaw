@@ -1,0 +1,210 @@
+"""
+Mall 退货申请服务。
+
+核心流程：
+  C 端发起（pending）
+    → admin approve（退库存 + 订单→refunded + reverse 已入账 commission）
+      → admin mark_refunded（记 refunded_at，资金流线下走完毕）
+  或
+    → admin reject（申请作废，订单/库存不动）
+
+关键设计：
+  - approved 时已做库存回退 + 订单 status=refunded。refunded 态是"资金结算完成"标记，
+    并不需要再回改任何状态数据；只是让财务流程有据可查（什么时候真的把钱退给客户了）
+  - 提成回写：已入账 commission 批量改为 REVERSED 状态（MallCommission 表），
+    月结前会把它扣除（已实现：工资生成查 pending + settled 排除 reversed）
+  - 利润台账：订单 status=refunded 后自动从 profit_service 聚合中排除（profit 查 completed/partial_closed）
+"""
+from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Optional
+
+from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.mall.base import (
+    MallInventoryFlowType,
+    MallOrderStatus,
+    MallReturnStatus,
+)
+from app.models.mall.inventory import MallInventory, MallInventoryFlow
+from app.models.mall.order import (
+    MallOrder,
+    MallOrderItem,
+    MallReturnRequest,
+)
+
+
+async def apply_return(
+    db: AsyncSession,
+    *,
+    order: MallOrder,
+    user_id: str,
+    reason: str,
+) -> MallReturnRequest:
+    """C 端申请退货。只允许 completed / partial_closed 订单；同时只能有一条活跃申请。"""
+    if order.user_id != user_id:
+        raise HTTPException(status_code=403, detail="订单不属于当前用户")
+    if order.status not in (
+        MallOrderStatus.COMPLETED.value,
+        MallOrderStatus.PARTIAL_CLOSED.value,
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=f"订单状态 {order.status} 不可申请退货（仅已完成/部分付款可退）",
+        )
+
+    # 活跃申请检查（DB 有 unique partial index 兜底，但先给友好提示）
+    active = (await db.execute(
+        select(MallReturnRequest)
+        .where(MallReturnRequest.order_id == order.id)
+        .where(MallReturnRequest.status.in_([
+            MallReturnStatus.PENDING.value,
+            MallReturnStatus.APPROVED.value,
+        ]))
+    )).scalar_one_or_none()
+    if active:
+        raise HTTPException(
+            status_code=409,
+            detail=f"该订单已有退货申请（status={active.status}），请等待处理结果",
+        )
+
+    req = MallReturnRequest(
+        order_id=order.id,
+        user_id=user_id,
+        reason=reason,
+        status=MallReturnStatus.PENDING.value,
+    )
+    db.add(req)
+    await db.flush()
+    return req
+
+
+async def approve_return(
+    db: AsyncSession,
+    *,
+    req: MallReturnRequest,
+    reviewer_employee_id: str,
+    refund_amount: Optional[Decimal] = None,
+    review_note: Optional[str] = None,
+) -> MallReturnRequest:
+    """财务批准退货：
+      1. 按原订单 item.quantity 反向入库（按原出库 flow 定位仓）
+      2. 订单 status → refunded
+      3. 提成回写（pending commission 标 reversed，已 settled 的只记审计不追溯）
+    """
+    if req.status != MallReturnStatus.PENDING.value:
+        raise HTTPException(
+            status_code=409,
+            detail=f"申请状态 {req.status} 不可审批",
+        )
+
+    order = await db.get(MallOrder, req.order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="订单不存在")
+
+    # 反向入库（按原出库流水的 inventory 定位目标仓）
+    items = (await db.execute(
+        select(MallOrderItem).where(MallOrderItem.order_id == order.id)
+    )).scalars().all()
+    flows = (await db.execute(
+        select(MallInventoryFlow, MallInventory)
+        .join(MallInventory, MallInventoryFlow.inventory_id == MallInventory.id)
+        .where(MallInventoryFlow.ref_type == "order")
+        .where(MallInventoryFlow.ref_id == order.id)
+        .where(MallInventoryFlow.flow_type == MallInventoryFlowType.OUT.value)
+    )).all()
+    sku_to_inv = {inv.sku_id: inv for _, inv in flows}
+
+    for it in items:
+        inv = sku_to_inv.get(it.sku_id)
+        if inv is None:
+            raise HTTPException(
+                status_code=500,
+                detail=f"找不到 SKU {it.sku_id} 的原出库流水，无法退货",
+            )
+        # 直接回加库存（不改 avg_cost_price，退货按原单成本记录流水）
+        inv.quantity = (inv.quantity or 0) + it.quantity
+        db.add(MallInventoryFlow(
+            inventory_id=inv.id,
+            flow_type=MallInventoryFlowType.IN.value,
+            quantity=it.quantity,
+            cost_price=it.cost_price_snapshot,
+            ref_type="return",
+            ref_id=req.id,
+            notes=f"退货入库 {order.order_no}（退货申请 {req.id[:8]}）",
+        ))
+
+    # 订单 → refunded
+    order.status = MallOrderStatus.REFUNDED.value
+
+    # 提成回写：pending commission 标 reversed
+    from app.models.user import Commission
+    commissions = (await db.execute(
+        select(Commission).where(Commission.mall_order_id == order.id)
+    )).scalars().all()
+    reversed_count = 0
+    for c in commissions:
+        if c.status == "pending":
+            c.status = "reversed"
+            c.notes = ((c.notes or "") + f"\n[退货回写] reason={req.reason[:80]}").strip()
+            reversed_count += 1
+        # 已 settled 的不动（工资已发），只记审计；业务上一般通过下月工资扣回
+    # 退货后 order.commission_posted 不改（保持历史痕迹），profit_service 查 refunded 不纳入聚合
+
+    req.status = MallReturnStatus.APPROVED.value
+    req.reviewer_employee_id = reviewer_employee_id
+    req.reviewed_at = datetime.now(timezone.utc)
+    req.review_note = review_note
+    # refund_amount 默认取订单已收金额（financial 可在 mark_refunded 时调整）
+    req.refund_amount = refund_amount if refund_amount is not None else (order.received_amount or Decimal("0"))
+
+    await db.flush()
+    return req
+
+
+async def reject_return(
+    db: AsyncSession,
+    *,
+    req: MallReturnRequest,
+    reviewer_employee_id: str,
+    review_note: str,
+) -> MallReturnRequest:
+    """财务驳回退货：不动订单/库存，只改申请状态。"""
+    if req.status != MallReturnStatus.PENDING.value:
+        raise HTTPException(
+            status_code=409,
+            detail=f"申请状态 {req.status} 不可驳回",
+        )
+    req.status = MallReturnStatus.REJECTED.value
+    req.reviewer_employee_id = reviewer_employee_id
+    req.reviewed_at = datetime.now(timezone.utc)
+    req.review_note = review_note
+    await db.flush()
+    return req
+
+
+async def mark_refunded(
+    db: AsyncSession,
+    *,
+    req: MallReturnRequest,
+    refund_method: str,
+    refund_note: Optional[str] = None,
+    refund_amount: Optional[Decimal] = None,
+) -> MallReturnRequest:
+    """财务在线下完成退款后确认。"""
+    if req.status != MallReturnStatus.APPROVED.value:
+        raise HTTPException(
+            status_code=409,
+            detail=f"申请状态 {req.status} 不可标记已退款（仅 approved 可进入 refunded）",
+        )
+    req.status = MallReturnStatus.REFUNDED.value
+    req.refunded_at = datetime.now(timezone.utc)
+    req.refund_method = refund_method
+    if refund_note:
+        req.refund_note = refund_note
+    if refund_amount is not None:
+        req.refund_amount = refund_amount
+    await db.flush()
+    return req

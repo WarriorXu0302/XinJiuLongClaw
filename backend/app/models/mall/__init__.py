@@ -16,6 +16,7 @@ from app.models.mall.order import (
     MallOrderClaimLog,
     MallOrderItem,
     MallPayment,
+    MallReturnRequest,
     MallShipment,
     MallSkipAlert,
 )
@@ -52,4 +53,6 @@ __all__ = [
     # fulfilment (M4a)
     "MallPayment", "MallShipment", "MallAttachment",
     "MallCustomerSkipLog", "MallSkipAlert",
+    # returns (M5+)
+    "MallReturnRequest",
 ]

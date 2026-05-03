@@ -109,6 +109,15 @@
 - admin `change_referrer`（换绑推荐人）补通知消费者本人："您的业务员已调整 XXX"。原先只通知了新老业务员，C 端用户完全不知道自己推荐人被换了
 - **采购跨仓**（P0）：`purchase_orders` 加 `target_warehouse_type`（'erp_warehouse'/'mall_warehouse'）+ `mall_warehouse_id`（migration m5a6）；`POST /api/purchase` 接受 `target_warehouse_type=mall_warehouse + mall_warehouse_id` 创建入商城仓的 PO；`receive_purchase_order` 按 target 分支到 `mall_inventory` + 加权平均成本 + MallInventoryFlow 流水。前提：ERP 商品必须有对应 `MallProduct`（source_product_id 映射），没有会拒绝并提示先建商城商品
 - **定时任务执行历史**：`MallJobLog` 表（migration m5a7）+ 装饰器 `_with_job_log` 包裹所有 `job_*`（unclaimed_timeout / archive_inactive / pre_notice / partial_close / purge_login_logs），每次执行落条记录（started/finished/duration/status/result/error）。admin 端新端点 `GET /api/mall/admin/housekeeping/logs` + `/logs/summary`（按 job_name 取最近一次），看 dashboard 能知道定时任务是否真的跑了
+- **C 端退货流程**（P0 完整落地）：新表 `mall_return_requests`（migration m5a8）+ `MallReturnStatus` 枚举（pending/approved/refunded/rejected）+ `return_service.py`（apply/approve/reject/mark_refunded）。后端接口：
+  - C 端 `POST /api/mall/orders/{order_no}/return` 申请退货（completed / partial_closed 可申，同订单最多一条活跃申请）
+  - C 端 `GET /api/mall/orders/{order_no}/return` 查状态
+  - Admin `GET /api/mall/admin/returns` 列表（4 tab：待审批 / 已通过待退款 / 已退款 / 已驳回）
+  - Admin `POST /{id}/approve` 批准：退库存（反向 MallInventoryFlow.IN）+ 订单→refunded + pending commission→reversed
+  - Admin `POST /{id}/reject` 驳回（通知消费者）
+  - Admin `POST /{id}/mark-refunded` 线下退款打款完成后标记（refund_method + 通知消费者）
+  - ERP 前端新菜单"退货审批"（`/mall/returns`）：详情抽屉含订单明细、退款金额可调、审批/驳回/标记完成按钮
+  - 通知齐：申请时通知 admin/boss/finance；批准时通知消费者 + 配送业务员；退款完成时通知消费者
 - `cancel_order` 退库存按原出库流水的 inventory 定位目标仓，不再依赖 `get_default_warehouse()`。**修复**：默认仓换过后，取消订单会把货退到错的仓
 - `release_order` 仅允许在 `assigned` 状态释放；`shipped` 后条码已 OUTBOUND 绑定原业务员，不再允许自行释放（出库后须走管理员改派）
 - `admin_reassign` 在 shipped/delivered/pending_payment_confirmation 状态改派时，同步把本订单的 OUTBOUND 条码 `outbound_by_user_id` 过户到新业务员，避免归属数据错乱

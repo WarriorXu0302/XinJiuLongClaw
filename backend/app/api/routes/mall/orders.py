@@ -4,6 +4,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, Request
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_mall_db
@@ -162,6 +163,106 @@ async def confirm_receipt(
     order = await order_service.confirm_receipt(db, user, order_no, request=request)
     items = await order_service.get_order_items(db, order.id)
     return await _build_detail_vo(db, order, items)
+
+
+# =============================================================================
+# 退货申请（C 端）
+# =============================================================================
+
+class _ReturnApplyBody(BaseModel):
+    reason: str = Field(min_length=1, max_length=500)
+
+
+@router.post("/{order_no}/return")
+async def apply_return(
+    order_no: str,
+    body: _ReturnApplyBody,
+    current: CurrentMallUser,
+    request: Request,
+    db: AsyncSession = Depends(get_mall_db),
+):
+    """C 端申请退货。completed/partial_closed 订单可申请，一个订单活跃申请只能一条。"""
+    from sqlalchemy import select
+    from fastapi import HTTPException
+    from app.models.mall.order import MallOrder
+    from app.services.mall import return_service
+    from app.services.audit_service import log_audit
+    from app.services.notification_service import notify_roles
+
+    user = await auth_service.verify_token_and_load_user(db, current)
+    order = (await db.execute(
+        select(MallOrder)
+        .where(MallOrder.order_no == order_no)
+        .where(MallOrder.user_id == user.id)
+    )).scalar_one_or_none()
+    if order is None:
+        raise HTTPException(status_code=404, detail="订单不存在")
+
+    req = await return_service.apply_return(
+        db, order=order, user_id=user.id, reason=body.reason,
+    )
+    await log_audit(
+        db, action="mall_return.apply", entity_type="MallReturnRequest",
+        entity_id=req.id, mall_user_id=user.id, actor_type="mall_user",
+        request=request,
+        changes={"order_no": order.order_no, "reason": body.reason},
+    )
+    # 通知 admin/boss/finance 有新退货申请
+    await notify_roles(
+        db, role_codes=["admin", "boss", "finance"],
+        title="新退货申请待审批",
+        content=f"订单 {order.order_no}（客户 {user.nickname or user.username}）发起退货：{body.reason[:50]}",
+        entity_type="MallReturnRequest", entity_id=req.id,
+    )
+    return {
+        "id": req.id,
+        "order_no": order.order_no,
+        "status": req.status,
+        "reason": req.reason,
+        "created_at": req.created_at.isoformat() if req.created_at else None,
+    }
+
+
+@router.get("/{order_no}/return")
+async def get_return_status(
+    order_no: str,
+    current: CurrentMallUser,
+    db: AsyncSession = Depends(get_mall_db),
+):
+    """查订单的退货申请状态（如果有）。"""
+    from sqlalchemy import select, desc
+    from fastapi import HTTPException
+    from app.models.mall.order import MallOrder, MallReturnRequest
+
+    user = await auth_service.verify_token_and_load_user(db, current)
+    order = (await db.execute(
+        select(MallOrder)
+        .where(MallOrder.order_no == order_no)
+        .where(MallOrder.user_id == user.id)
+    )).scalar_one_or_none()
+    if order is None:
+        raise HTTPException(status_code=404, detail="订单不存在")
+
+    req = (await db.execute(
+        select(MallReturnRequest)
+        .where(MallReturnRequest.order_id == order.id)
+        .order_by(desc(MallReturnRequest.created_at))
+        .limit(1)
+    )).scalar_one_or_none()
+    if req is None:
+        return None
+    return {
+        "id": req.id,
+        "order_no": order.order_no,
+        "status": req.status,
+        "reason": req.reason,
+        "review_note": req.review_note,
+        "reviewed_at": req.reviewed_at.isoformat() if req.reviewed_at else None,
+        "refund_amount": str(req.refund_amount) if req.refund_amount else None,
+        "refunded_at": req.refunded_at.isoformat() if req.refunded_at else None,
+        "refund_method": req.refund_method,
+        "created_at": req.created_at.isoformat() if req.created_at else None,
+    }
 
 
 # =============================================================================

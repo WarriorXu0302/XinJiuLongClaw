@@ -193,6 +193,10 @@ def create_app() -> FastAPI:
     from app.api.routes.mall.admin import housekeeping as ma_housekeeping
     app.include_router(ma_housekeeping.router, prefix="/api/mall/admin/housekeeping", tags=["Mall-Admin"])
 
+    # M5a.8: 商城退货审批（admin/boss/finance）
+    from app.api.routes.mall.admin import returns as ma_returns
+    app.include_router(ma_returns.router, prefix="/api/mall/admin/returns", tags=["Mall-Admin"])
+
     # M4c: workspace 薄转发（ERP 复用模块 — 通知 / 打卡 / 拜访 / 请假 / 报销 / 稽查 / KPI / 客户）
     from app.api.routes.mall.workspace import (
         attendance as mw_attendance,

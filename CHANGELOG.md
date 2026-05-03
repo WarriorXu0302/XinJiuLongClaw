@@ -17,6 +17,21 @@
 
 ### Added
 
+- **门店零售收银系统（桥 B12）** — 4 家专卖店店员用小程序记账式收银
+  - 新表 `store_sales` + `store_sale_items`（每瓶一行）+ `retail_commission_rates`（每员工×每商品一个利润提成率）
+  - `products` 加 `min_sale_price/max_sale_price`（老板配售价区间）
+  - `employees` + `mall_users` 加 `assigned_store_id`（店员归属）
+  - `commissions` 加 `store_sale_id`（零售提成挂靠，和 order_id/mall_order_id 三者互斥）
+  - `WarehouseType` 枚举加 `STORE` + 补 `TASTING`（原漏写）
+  - 后端 service `store_sale_service.create_store_sale`：扫码 + 售价区间校验 + 客户校验 + 逐瓶算提成 + 生成 Commission pending，整笔回滚保证一致性
+  - 端点：`/api/store-sales`（admin 列表/统计/详情/创建）+ `/api/retail-commission-rates`（提成率 CRUD）
+  - 小程序店员端：`/api/mall/workspace/store-sales`（扫码校验 + 提交收银 + 查自己流水/本月业绩 + 搜索客户）
+  - 付款方式限定：cash/wechat/alipay/card（DB CheckConstraint 强制，不允许赊账）
+  - ERP 管理台新菜单组"门店"：门店管理 / 销售流水 + 统计 / 店员提成率
+  - 小程序工作页加"门店收银"+"门店业绩"入口（仅 `assigned_store_id` 非空店员可见）
+  - 小程序登录响应补 `assigned_store_id` 字段，前端据此渲染入口
+  - migration m6b1
+
 - **仓库调拨（桥 B11）** — 跨 ERP + mall 的条码过户
   - 新表 `warehouse_transfers` + `warehouse_transfer_items`（每瓶一行），migration m6a1
   - 业务规则：品牌主仓（`warehouse_type=main AND brand_id NOT NULL`）**出入都禁**；只能通过采购单入 + 销售订单出。其他仓（ERP 非主 + 所有 mall）互相可调拨

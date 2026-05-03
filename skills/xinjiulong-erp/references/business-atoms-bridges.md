@@ -316,6 +316,70 @@ pending_scan ─submit→ pending_approval ─approve→ approved ─execute→ 
 
 ---
 
+## 桥 12：门店零售（专卖店收银系统）
+
+### 业务场景
+4 家品牌专卖店（青花郎专卖店 / 五粮液专卖店 / 华致名酒库 / 鑫久酒），店员用小程序收银，记账不在线收款。每瓶扫厂家防伪码出库，老板给售价区间，店员输入实际成交价（须在区间内），付款方式只记"现金/微信/支付宝/刷卡"四种不含赊账。
+
+### 数据模型
+- 门店 = ERP `warehouses.warehouse_type='store'`（新增枚举值）的仓——4 家店对应 4 个仓
+- 门店商品清单 = 仓库当前有库存的所有 SKU（不另建映射表）
+- 店员：`employees.position='cashier'` + `employees.assigned_store_id` 指向门店仓
+  同步 `mall_users.assigned_store_id`（小程序端收银入口可见性判定）
+- 售价区间：`products.min_sale_price` / `max_sale_price`（老板维护）
+- 提成：`retail_commission_rates(employee_id, product_id, rate_on_profit)` 每员工×每商品一条
+  → 提成 = (售价 - 成本) × rate_on_profit；成本用 `Inventory.cost_price`（按 batch 精确）
+- 销售单：`store_sales` + `store_sale_items`（每瓶一行）+ `commissions.store_sale_id`
+
+### 状态机
+只有一个终态：`completed`。扫码即成交，不走审批（店员现场操作，没时间审批）。
+
+### 原子动作表
+
+| # | 动作 | 角色 | 端点 | 前置 | 副作用 | 状态 |
+|---|---|---|---|---|---|---|
+| B12.1 | 店员预校验条码（扫一瓶查商品 + 区间）| cashier | `GET /api/mall/workspace/store-sales/verify-barcode` | 小程序店员 | 返回 product + min/max_sale_price | 🟢 |
+| B12.2 | 搜索客户 | cashier | `GET /.../store-sales/customers/search` | mall_users.user_type=consumer | 返回姓名 + 电话匹配的前 20 条 | 🟢 |
+| B12.3 | **提交收银**（核心）| cashier | `POST /api/mall/workspace/store-sales` | 客户+扫码+售价+付款方式 | Inventory 扣 + Barcode OUTBOUND + StockFlow(retail_sale) + StoreSale + Commission pending | 🟢 |
+| B12.4 | 店员查自己流水 | cashier | `GET /.../store-sales/my/sales` | — | 列表 | 🟢 |
+| B12.5 | 店员查本月业绩 | cashier | `GET /.../store-sales/my/summary` | — | 销售额/利润/提成/瓶数聚合 | 🟢 |
+| B12.6 | admin 查销售流水 | boss/finance/warehouse/hr | `GET /api/store-sales` + `/stats` | — | 全局看板 | 🟢 |
+| B12.7 | admin 管理提成率 | boss/finance/hr | `/api/retail-commission-rates/*` CRUD | — | 决定收银能否提交 | 🟢 |
+| B12.8 | admin 配售价区间 | boss | `PUT /api/products/{id}` 含 min/max_sale_price | — | 决定收银能否提交 | 🟢 |
+
+### 收银流程校验链（提交时全跑）
+1. 付款方式 ∈ {cash, wechat, alipay, card}
+2. 门店仓 warehouse_type='store' + is_active
+3. 店员 employees.status='active' + assigned_store_id 匹配当前门店
+4. 客户 mall_users.user_type='consumer' + status='active'
+5. 每瓶条码：存在 + 在本门店仓 + status='in_stock' + 去重
+6. 每瓶售价 ∈ [product.min_sale_price, product.max_sale_price]
+7. 门店库存足够（按 product_id + batch_no 聚合扣减）
+8. 每个商品都有 `retail_commission_rates(cashier, product)` 配置（没配 → 400 指引管理员先配）
+
+任一失败整笔回滚，不允许"扫一半"。
+
+### 利润 / 提成口径
+- **利润（按瓶）** = sale_price - Inventory.cost_price（按源 batch_no 精确）
+- **提成（按瓶）** = 利润 × retail_commission_rates.rate_on_profit
+- 一个销售单产生 **一条 Commission**（按店员聚合多瓶合计 commission_amount）
+- Commission.store_sale_id 非空 + status=pending → 月结工资单自动纳入（payroll 扫描时加 or 条件）
+
+### 桥 12 和既有桥的交互
+- **桥 B11 仓库调拨**：门店仓不是品牌主仓，**可以**互相调拨 + 品牌主仓下游调入 + mall 仓互调
+- **桥 B1 身份**：店员 mall_user 也必须 linked_employee_id 非空（复用 ERP 员工档案算工资）
+- **桥 B7 通知**：目前不推送（收银实时完成，店员看小程序即知结果）
+
+### E2E 测试状态
+🟡 coded 未 E2E（scripts/e2e_store_sale.py TODO，下版本补）
+
+### 🔴 已知 gap
+- **退货**：当前无店面退货流程。客户来退货怎么办？是走 mall 的 MallReturnRequest 还是新建 StoreSaleReturn？需业务决策。P1
+- **客户首次到店**：如果没注册过 mall_user，店员能不能临时建个客户？目前必须客户自己注册完才能买。P1 业务决策
+- **条码来源 = 采购入仓或调拨入仓**：门店仓进货靠 B11 从品牌主仓调过来或 B6 采购直入。两条路径都支撑，但**店仓目前没进货接口前端**——桥 B6 的收货页已经能选 store 仓，但 B11 调拨的前端也行，所以不缺端点缺的是"从哪个品牌主仓货源搬来"的运营流程文档。P2
+
+---
+
 ## 业务网总图
 
 ```

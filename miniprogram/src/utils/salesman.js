@@ -64,14 +64,16 @@ export const ORDER_TAB_GROUP = {
   IN_TRANSIT: [ORDER_STATUS.ASSIGNED, ORDER_STATUS.SHIPPED], // 待配送
   AWAITING_PAYMENT: [ORDER_STATUS.DELIVERED], // 待收款
   AWAITING_FINANCE: [ORDER_STATUS.PENDING_PAYMENT_CONFIRMATION], // 待财务确认
-  COMPLETED: [ORDER_STATUS.COMPLETED, ORDER_STATUS.PARTIAL_CLOSED] // 已完成
+  COMPLETED: [ORDER_STATUS.COMPLETED, ORDER_STATUS.PARTIAL_CLOSED], // 已完成
+  REFUNDED: [ORDER_STATUS.REFUNDED] // 已退货
 }
 
 export const ORDER_TAB_LABELS = [
   { key: 'in_transit', label: '待配送', statuses: ORDER_TAB_GROUP.IN_TRANSIT },
   { key: 'awaiting_payment', label: '待收款', statuses: ORDER_TAB_GROUP.AWAITING_PAYMENT },
   { key: 'awaiting_finance', label: '待财务确认', statuses: ORDER_TAB_GROUP.AWAITING_FINANCE },
-  { key: 'completed', label: '已完成', statuses: ORDER_TAB_GROUP.COMPLETED }
+  { key: 'completed', label: '已完成', statuses: ORDER_TAB_GROUP.COMPLETED },
+  { key: 'refunded', label: '已退货', statuses: ORDER_TAB_GROUP.REFUNDED }
 ]
 
 // ─── 跳单告警 ────────────────────────────────────────────

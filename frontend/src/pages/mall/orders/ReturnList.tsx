@@ -4,7 +4,8 @@
  * Tab：待审批 / 已通过 / 已退款 / 已驳回 / 全部
  * 详情抽屉：订单 + 商品明细 + 审批 / 已退 / 驳回按钮
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Button, Descriptions, Drawer, Empty, InputNumber, message, Modal, Space, Table, Tabs, Tag, Typography,
 } from 'antd';
@@ -55,10 +56,16 @@ interface ReturnDetail extends ReturnRow {
 
 export default function ReturnList() {
   const queryClient = useQueryClient();
-  const [statusTab, setStatusTab] = useState<string>('pending');
+  const [searchParams] = useSearchParams();
+  const initialStatus = searchParams.get('status') || 'pending';
+  const [statusTab, setStatusTab] = useState<string>(initialStatus);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [detailId, setDetailId] = useState<string | null>(null);
+  useEffect(() => {
+    const s = searchParams.get('status');
+    if (s) { setStatusTab(s); setPage(1); }
+  }, [searchParams]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['mall-returns', statusTab, page, pageSize],

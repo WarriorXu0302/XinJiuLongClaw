@@ -26,6 +26,9 @@ interface Summary {
     pending_payment_confirmation: number;
     open_skip_alerts: number;
     low_stock_count: number;
+    pending_applications?: number;
+    pending_returns?: number;
+    approved_returns_awaiting_refund?: number;
   };
   month: { orders: number; received: string; new_users: number };
   trend: { day: string; orders: number; received: string }[];
@@ -188,6 +191,24 @@ export default function MallDashboard() {
             style={{ fontSize: 14, padding: '4px 12px' }}>
             <InboxOutlined /> 低库存 SKU <strong>{data.pending.low_stock_count}</strong>
           </Tag>
+          <a onClick={() => navigate('/mall/user-applications')}>
+            <Tag color={(data.pending.pending_applications ?? 0) > 0 ? 'purple' : 'default'}
+              style={{ fontSize: 14, padding: '4px 12px' }}>
+              📝 注册待审 <strong>{data.pending.pending_applications ?? 0}</strong>
+            </Tag>
+          </a>
+          <a onClick={() => navigate('/mall/returns?status=pending')}>
+            <Tag color={(data.pending.pending_returns ?? 0) > 0 ? 'magenta' : 'default'}
+              style={{ fontSize: 14, padding: '4px 12px' }}>
+              ↩️ 退货待审 <strong>{data.pending.pending_returns ?? 0}</strong>
+            </Tag>
+          </a>
+          <a onClick={() => navigate('/mall/returns?status=approved')}>
+            <Tag color={(data.pending.approved_returns_awaiting_refund ?? 0) > 0 ? 'cyan' : 'default'}
+              style={{ fontSize: 14, padding: '4px 12px' }}>
+              💰 待退款 <strong>{data.pending.approved_returns_awaiting_refund ?? 0}</strong>
+            </Tag>
+          </a>
         </Space>
       </Card>
 

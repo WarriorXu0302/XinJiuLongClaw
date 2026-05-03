@@ -20,6 +20,7 @@ from app.models.mall.order import (
     MallOrder,
     MallOrderItem,
     MallPayment,
+    MallReturnRequest,
     MallSkipAlert,
 )
 from app.models.mall.product import MallProduct, MallProductSku
@@ -111,6 +112,23 @@ async def dashboard_summary(
     open_alerts = int((await db.execute(
         select(sa_func.count(MallSkipAlert.id))
         .where(MallSkipAlert.status == "open")
+    )).scalar() or 0)
+
+    # 注册待审批 / 退货待审批 / 退货已通过待退款（财务侧 KPI）
+    pending_applications = int((await db.execute(
+        select(sa_func.count(MallUser.id))
+        .where(MallUser.user_type == "consumer")
+        .where(MallUser.application_status == "pending")
+    )).scalar() or 0)
+
+    pending_returns = int((await db.execute(
+        select(sa_func.count(MallReturnRequest.id))
+        .where(MallReturnRequest.status == "pending")
+    )).scalar() or 0)
+
+    approved_returns_awaiting_refund = int((await db.execute(
+        select(sa_func.count(MallReturnRequest.id))
+        .where(MallReturnRequest.status == "approved")
     )).scalar() or 0)
 
     # 低库存仅统计 active SKU 且所属商品 on_sale；下架商品库存低不算告警
@@ -292,6 +310,9 @@ async def dashboard_summary(
             "pending_payment_confirmation": pending_confirm,
             "open_skip_alerts": open_alerts,
             "low_stock_count": low_stock_count,
+            "pending_applications": pending_applications,
+            "pending_returns": pending_returns,
+            "approved_returns_awaiting_refund": approved_returns_awaiting_refund,
         },
         "month": {
             "orders": m_orders,

@@ -116,7 +116,8 @@ const TAB_STATUS_MAP = {
   in_transit: 'assigned,shipped',
   awaiting_payment: 'delivered',
   awaiting_finance: 'pending_payment_confirmation',
-  completed: 'completed'
+  completed: 'completed,partial_closed',
+  refunded: 'refunded'
 }
 
 const loadOrders = async () => {

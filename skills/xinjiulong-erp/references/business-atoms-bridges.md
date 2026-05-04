@@ -380,7 +380,7 @@ pending_scan ─submit→ pending_approval ─approve→ approved ─execute→ 
 
 ### 🔴 已知 gap
 - ~~**退货**：当前无店面退货流程~~ ✅ **已实现**：`StoreSaleReturn` + `StoreSaleReturnItem` 整单退，pending→approved/rejected→refunded 状态机，批准后 6 处一致性（原单 refunded / 条码 IN_STOCK / Inventory 回加 / StockFlow retail_return / Commission reversed / 退货单状态）。小程序店员从"我的业绩"发起，管理台审批中心新 tab"门店退货待审"审批。E2E `scripts/e2e_store_return.py` 覆盖 5 场景。
-- **客户首次到店**：如果没注册过 mall_user，店员能不能临时建个客户？目前必须客户自己注册完才能买。P1 业务决策
+- ~~**客户首次到店**：没注册过 mall_user 的散客能否直接买？~~ ✅ 决策 #3（m6c2 散客支持）：customer_id nullable + 可选 walk_in_name/phone 快照 + 小程序会员/散客 Toggle
 - **条码来源 = 采购入仓或调拨入仓**：门店仓进货靠 B11 从品牌主仓调过来或 B6 采购直入。两条路径都支撑，但**店仓目前没进货接口前端**——桥 B6 的收货页已经能选 store 仓，但 B11 调拨的前端也行，所以不缺端点缺的是"从哪个品牌主仓货源搬来"的运营流程文档。P2
 
 ---
@@ -426,20 +426,22 @@ pending_scan ─submit→ pending_approval ─approve→ approved ─execute→ 
 | # | gap | 文件位置 | 优先级 | 估工 |
 |---|---|---|---|---|
 | 1 | ~~mall 仓 ship 无条码扣减路径~~ ✅ 正确修法：采购收货必扫码 + ship 保持强校验 | `purchase.py:receive` + `order_service.ship_order` + `ReceiveScanPage.tsx` | P0 | 2-4h | **done** |
-| 2 | **partial_closed 坏账路径未 E2E** | 造数据脚本 | P0 | 1-2h |
-| 3 | **完整贯通 E2E 脚本**（注册→下单→ship→deliver→凭证→确认→退货→退款）| 新建 e2e_full_mall_flow.py | P0 | 2-3h |
+| 2 | ~~partial_closed 坏账路径未 E2E~~ ✅ | `scripts/e2e_mall_partial_close.py` | P0 | 1-2h | **done** |
+| 3 | ~~完整贯通 E2E 脚本~~（注册→下单→ship→deliver→凭证→确认→退货→退款）| `scripts/e2e_full_mall_flow.py` | P0 | 2-3h | **done** |
 | 4 | ~~ERP 商品下架不级联 mall~~ ✅ | `products.py` mall-cascade-impact + ProductList.tsx | P1 | 1h | **done** |
 | 5 | ~~mall 业务员绑错 employee 无"换绑"~~ ✅ | admin/salesmen.py rebind-employee | P2 | 1h | **done** |
 | 6 | ~~ERP employee 停用后 mall 前端无友好提示~~ ✅ | miniprogram http.js 识别 detail | P2 | 30min | **done** |
 | 7 | ~~行政区划仅河南 + 北京 smoke~~ ✅ | `seed_regions_national.py`（全国 34 省 + 地级市） | P1 | 1-2h | **done** |
 | 8 | ~~热搜词 admin 管理页~~ ✅ | search_keywords.py + ERP 前端 SearchKeywords.tsx + migration m5a9 | P2 | 1h | **done** |
 | 9 | ~~dismissed skip_log 阈值计算回归~~ ✅ | `scripts/e2e_skip_alert_threshold.py` | P1 | 30min | **done** |
-| 10 | 9.8 跨月退货对 KPI 影响设计决策 | 业务决策 · 文档见 `business-decisions-pending.md` | P1 | 决策 + 0-1h 实现 |
-| 11 | 6.4 settled commission 下月工资单处理 | 业务决策 · 文档见 `business-decisions-pending.md` | P1 | 决策 + 1-2h 实现 |
+| 10 | ~~9.8 跨月退货对 KPI 影响~~ ✅ 决策 #2（m6c4 月榜快照 + 实时双显） | `dashboard.salesman-ranking` + `kpi_snapshot_service` + 前端 Dashboard | P1 | **done** |
+| 11 | ~~6.4 settled commission 下月工资单处理~~ ✅ 决策 #1（m6c1 追回 adjustment + 工资不足挂账） | `return_service/store_return_service.approve_return` + `payroll.generate_salary_records` + `salary_adjustments_pending` | P1 | **done** |
+| 13 | ~~门店散客支持~~ ✅ 决策 #3（m6c2 customer_id nullable + walk_in 字段） | `store_sale_service` + `store-cashier.vue` | P1 | **done** |
+| 14 | ~~商品销量 total vs net~~ ✅ 决策 #4（m6c3 双字段） | `MallProduct.net_sales` + `return_service.approve_return` 扣减 + 榜单排序切 net_sales + ProductList 双显 | P1 | **done** |
 | 12 | ~~reversed commission 是否被下月工资单排除**回归**~~ ✅ | `scripts/e2e_reversed_commission_excluded.py` | P1 | 30min | **done** |
 
-### P0 三项加起来 5-9 小时。做完即可上线。
-### P1 七项加起来 7-11 小时。建议上线后一周内完成。
+### ✅ P0 三项全部完成。
+### ✅ P1 六项（#4/7/9/10/11/12）+ 新增决策三项（#13/14）全部完成。
 
 ---
 

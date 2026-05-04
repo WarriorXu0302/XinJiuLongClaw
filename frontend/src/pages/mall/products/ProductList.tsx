@@ -40,6 +40,7 @@ interface Product {
   min_price?: string;
   max_price?: string;
   total_sales: number;
+  net_sales: number;
   sku_count: number;
   created_at: string;
 }
@@ -163,9 +164,20 @@ export default function MallProductList() {
       ) : <span style={{ color: '#ccc' }}>无 SKU</span>,
     },
     {
-      title: '销量',
-      dataIndex: 'total_sales',
-      width: 80,
+      title: '销量（总/净）',
+      key: 'sales_dual',
+      width: 120,
+      render: (_, r) => (
+        <Tooltip title={`累计售出 ${r.total_sales} 瓶（含退货），净销量 ${r.net_sales} 瓶`}>
+          <span>
+            <strong>{r.total_sales}</strong>
+            <span style={{ color: '#999', margin: '0 4px' }}>/</span>
+            <span style={{ color: r.net_sales < r.total_sales ? '#d4380d' : undefined }}>
+              {r.net_sales}
+            </span>
+          </span>
+        </Tooltip>
+      ),
     },
     {
       title: '状态',

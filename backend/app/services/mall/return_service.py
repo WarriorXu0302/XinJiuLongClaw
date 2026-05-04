@@ -153,6 +153,16 @@ async def approve_return(
     # 订单 → refunded
     order.status = MallOrderStatus.REFUNDED.value
 
+    # 决策 #4 商品销量双数据：退货时扣 net_sales（total_sales 保留历史）
+    from app.models.mall.product import MallProduct
+    qty_by_product: dict[int, int] = {}
+    for it in items:
+        qty_by_product[it.product_id] = qty_by_product.get(it.product_id, 0) + it.quantity
+    for pid, qty in qty_by_product.items():
+        prod = await db.get(MallProduct, pid)
+        if prod is not None:
+            prod.net_sales = max(0, (prod.net_sales or 0) - qty)
+
     # 提成回写（决策 #1）：
     # - pending → reversed（本月还没发工资，直接抹掉）
     # - settled → 建负数 Commission(is_adjustment=True, status=pending)

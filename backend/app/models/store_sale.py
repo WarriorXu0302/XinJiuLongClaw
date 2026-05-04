@@ -68,9 +68,19 @@ class StoreSale(Base):
         String(36), ForeignKey("employees.id"), nullable=False,
         comment="扫码出库的店员，提成归属",
     )
-    customer_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("mall_users.id"), nullable=False,
-        comment="消费者（必填，不允许匿名）",
+    # customer_id 允许 NULL（决策 #3 散客支持）：店员遇到未注册客户时可选不填
+    # customer_walk_in_* 是散客的非正式记录（不强制），仅用于回头率/营销分析
+    customer_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("mall_users.id"), nullable=True,
+        comment="注册会员；散客为空",
+    )
+    customer_walk_in_name: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True,
+        comment="散客姓名（选填，营销用）",
+    )
+    customer_walk_in_phone: Mapped[Optional[str]] = mapped_column(
+        String(20), nullable=True,
+        comment="散客手机号（选填，营销用）",
     )
 
     # 金额（从 items 累加冗余写入）
@@ -236,9 +246,9 @@ class StoreSaleReturn(Base):
     initiator_employee_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("employees.id"), nullable=False,
     )
-    # 客户（从原单复制）
-    customer_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("mall_users.id"), nullable=False,
+    # 客户（从原单复制；散客原单此处也为 NULL）
+    customer_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("mall_users.id"), nullable=True,
     )
 
     reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

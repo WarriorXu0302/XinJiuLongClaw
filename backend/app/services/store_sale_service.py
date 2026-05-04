@@ -77,7 +77,9 @@ async def create_store_sale(
     *,
     cashier_employee_id: str,
     store_id: str,
-    customer_id: str,
+    customer_id: Optional[str] = None,
+    customer_walk_in_name: Optional[str] = None,
+    customer_walk_in_phone: Optional[str] = None,
     line_items: list[dict],  # [{barcode, sale_price}]
     payment_method: str,
     notes: Optional[str] = None,
@@ -86,6 +88,12 @@ async def create_store_sale(
 
     参数 line_items 每个元素 {barcode: str, sale_price: Decimal}。
     售价由店员输入，必须在 product.min_sale_price..max_sale_price 之间。
+
+    客户标识（决策 #3 散客支持）：
+      - customer_id 非空：走 mall_user 会员，校验 user_type=consumer + active
+      - customer_id 为空：散客，可选填 customer_walk_in_name/phone（仅用于
+        回头率分析，不建 mall_user 账号）
+      二者至少填其一的提示由前端给，服务端允许两者都空（纯匿名）
 
     成功返回 StoreSale（含 total_* 字段）；失败抛 HTTPException。
     所有校验失败整笔回滚（事务外层由调用方的 get_db 管理）。
@@ -110,14 +118,16 @@ async def create_store_sale(
             detail=f"店员 {cashier.name} 不属于门店 {store_wh.name}",
         )
 
-    # 4. 客户校验
-    customer = await db.get(MallUser, customer_id)
-    if customer is None:
-        raise HTTPException(status_code=404, detail="客户不存在")
-    if customer.user_type != MallUserType.CONSUMER.value:
-        raise HTTPException(status_code=400, detail="客户必须是 consumer 类型")
-    if customer.status != MallUserStatus.ACTIVE.value:
-        raise HTTPException(status_code=400, detail=f"客户已停用（{customer.status}）")
+    # 4. 客户校验（会员 vs 散客）
+    if customer_id:
+        customer = await db.get(MallUser, customer_id)
+        if customer is None:
+            raise HTTPException(status_code=404, detail="客户不存在")
+        if customer.user_type != MallUserType.CONSUMER.value:
+            raise HTTPException(status_code=400, detail="客户必须是 consumer 类型")
+        if customer.status != MallUserStatus.ACTIVE.value:
+            raise HTTPException(status_code=400, detail=f"客户已停用（{customer.status}）")
+    # 散客（customer_id=None）不校验；customer_walk_in_* 纯文本记录即可
 
     # 5. line_items 校验
     if not line_items:
@@ -297,6 +307,8 @@ async def create_store_sale(
         store_id=store_id,
         cashier_employee_id=cashier_employee_id,
         customer_id=customer_id,
+        customer_walk_in_name=customer_walk_in_name,
+        customer_walk_in_phone=customer_walk_in_phone,
         total_sale_amount=total_sale,
         total_cost=total_cost,
         total_profit=total_profit,

@@ -114,6 +114,7 @@ async def list_products(
             "min_price": str(r.min_price) if r.min_price else None,
             "max_price": str(r.max_price) if r.max_price else None,
             "total_sales": r.total_sales,
+            "net_sales": r.net_sales,
             "sku_count": sku_counts.get(r.id, 0),
             "created_at": r.created_at,
             "updated_at": r.updated_at,
@@ -162,6 +163,7 @@ async def get_product(
         "min_price": str(p.min_price) if p.min_price else None,
         "max_price": str(p.max_price) if p.max_price else None,
         "total_sales": p.total_sales,
+        "net_sales": p.net_sales,
         "created_at": p.created_at,
         "updated_at": p.updated_at,
         "skus": [
@@ -241,6 +243,7 @@ async def create_product(
         detail_html=body.detail_html,
         status=body.status,
         total_sales=0,
+        net_sales=0,
     )
     db.add(p)
     await db.flush()

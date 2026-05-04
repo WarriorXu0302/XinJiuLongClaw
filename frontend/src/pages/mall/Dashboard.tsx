@@ -6,13 +6,15 @@
  * 本月 30 天趋势（迷你折线 SVG）
  * 业务员排行 / 商品排行 / 低库存
  */
-import { Card, Col, Empty, Row, Space, Statistic, Table, Tag, Typography } from 'antd';
+import { Button, Card, Col, DatePicker, Empty, Row, Segmented, Space, Statistic, Table, Tag, Tooltip, Typography, message } from 'antd';
 import {
   ShoppingCartOutlined, DollarOutlined, UserAddOutlined, StopOutlined,
   WarningOutlined, FireOutlined, InboxOutlined, TrophyOutlined,
+  CameraOutlined, ClockCircleOutlined,
 } from '@ant-design/icons';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { useState } from 'react';
 import dayjs from 'dayjs';
 import api from '../../api/client';
 
@@ -96,6 +98,152 @@ function MiniLineChart({
     </div>
   );
 }
+
+// =============================================================================
+// 决策 #2：业务员排行 — 实时 vs 快照双模式
+// =============================================================================
+
+interface RankingRow {
+  salesman_id?: string;
+  employee_id?: string;
+  nickname?: string;
+  gmv: string;
+  order_count: number;
+  commission_amount?: string;
+  snapshot_at?: string;
+}
+
+interface RankingResp {
+  mode: 'realtime' | 'snapshot';
+  period: string;
+  is_frozen: boolean;
+  records: RankingRow[];
+  snapshot_count?: number;
+}
+
+function SalesmanRankingCard() {
+  const [mode, setMode] = useState<'realtime' | 'snapshot'>('realtime');
+  const [ymDay, setYmDay] = useState(dayjs());
+  const yearMonth = ymDay.format('YYYY-MM');
+  const queryClient = useQueryClient();
+
+  const { data, isLoading } = useQuery<RankingResp>({
+    queryKey: ['salesman-ranking', mode, yearMonth],
+    queryFn: () => api.get('/mall/admin/dashboard/salesman-ranking', {
+      params: { mode, year_month: yearMonth, limit: 10 },
+    }).then(r => r.data),
+  });
+
+  const buildMut = useMutation({
+    mutationFn: () => api.post('/mall/admin/dashboard/salesman-ranking/build-snapshot', null, {
+      params: { year_month: yearMonth },
+    }).then(r => r.data),
+    onSuccess: (res) => {
+      message.success(`已冻结 ${yearMonth}：${res.upserted} 行`);
+      queryClient.invalidateQueries({ queryKey: ['salesman-ranking'] });
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail || '冻结失败'),
+  });
+
+  const records = data?.records || [];
+  const isSnapshot = mode === 'snapshot';
+  const isEmptySnapshot = isSnapshot && records.length === 0;
+
+  return (
+    <Card
+      title={<><TrophyOutlined /> 业务员 GMV 排行</>}
+      size="small"
+      extra={
+        <Space size="small">
+          <DatePicker.MonthPicker
+            value={ymDay}
+            onChange={(d) => d && setYmDay(d)}
+            allowClear={false}
+            size="small"
+            style={{ width: 110 }}
+          />
+          <Segmented
+            size="small"
+            value={mode}
+            onChange={(v) => setMode(v as any)}
+            options={[
+              { label: <><ClockCircleOutlined /> 实时</>, value: 'realtime' },
+              { label: <><CameraOutlined /> 快照</>, value: 'snapshot' },
+            ]}
+          />
+        </Space>
+      }
+    >
+      {isSnapshot && (
+        <div style={{ marginBottom: 8, fontSize: 12, color: '#666' }}>
+          {records.length > 0 && records[0].snapshot_at ? (
+            <Tooltip title="快照冻结时间。之后的退货不会再修改此数据">
+              <Tag icon={<CameraOutlined />} color="gold">
+                冻结于 {dayjs(records[0].snapshot_at).format('YYYY-MM-DD HH:mm')}
+              </Tag>
+            </Tooltip>
+          ) : (
+            <Space size="small">
+              <Tag color="default">{yearMonth} 尚未冻结</Tag>
+              <Button size="small" type="link" loading={buildMut.isPending}
+                onClick={() => buildMut.mutate()}>
+                立即冻结
+              </Button>
+            </Space>
+          )}
+        </div>
+      )}
+      {!isSnapshot && (
+        <div style={{ marginBottom: 8, fontSize: 12, color: '#999' }}>
+          实时聚合：客户退货后数字会变动；用于看趋势。
+        </div>
+      )}
+      {isLoading ? (
+        <div style={{ padding: 32, textAlign: 'center', color: '#999' }}>加载中…</div>
+      ) : isEmptySnapshot ? (
+        <Empty description={
+          <>
+            <div>{yearMonth} 快照未生成</div>
+            <Button size="small" type="primary" style={{ marginTop: 8 }}
+              loading={buildMut.isPending}
+              onClick={() => buildMut.mutate()}>
+              立即冻结
+            </Button>
+          </>
+        } />
+      ) : records.length === 0 ? (
+        <Empty description="无数据" />
+      ) : (
+        <Table
+          dataSource={records}
+          rowKey={(r) => r.salesman_id || r.employee_id || ''}
+          pagination={false}
+          size="small"
+          columns={[
+            {
+              title: '排名', key: 'rank', width: 50, align: 'center' as const,
+              render: (_, __, idx) => {
+                if (idx < 3) return <span style={{ fontSize: 18 }}>{['🥇', '🥈', '🥉'][idx]}</span>;
+                return <span style={{ color: '#999' }}>{idx + 1}</span>;
+              },
+            },
+            { title: '业务员', dataIndex: 'nickname', render: (v) => v || <span style={{ color: '#ccc' }}>—</span> },
+            { title: '订单', dataIndex: 'order_count', width: 60, align: 'right' as const },
+            {
+              title: 'GMV', dataIndex: 'gmv', width: 110, align: 'right' as const,
+              render: (v: string) => <strong>¥{Number(v).toLocaleString()}</strong>,
+            },
+            ...(isSnapshot ? [{
+              title: '提成', dataIndex: 'commission_amount', width: 90, align: 'right' as const,
+              render: (v?: string) => v ? `¥${Number(v).toLocaleString()}` : '—',
+            }] : []),
+          ]}
+        />
+      )}
+    </Card>
+  );
+}
+
 
 export default function MallDashboard() {
   const navigate = useNavigate();
@@ -235,34 +383,7 @@ export default function MallDashboard() {
       {/* 排行 */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={12}>
-          <Card title={<><TrophyOutlined /> 本月业务员 GMV Top 5</>} size="small">
-            {data.salesman_rank.length === 0 ? <Empty description="本月暂无已完成订单" /> : (
-              <Table
-                dataSource={data.salesman_rank}
-                rowKey="id"
-                pagination={false}
-                size="small"
-                columns={[
-                  { title: '排名', key: 'rank', width: 60, align: 'center' as const,
-                    render: (_, __, idx) => {
-                      if (idx < 3) return <span style={{ fontSize: 18 }}>
-                        {['🥇', '🥈', '🥉'][idx]}
-                      </span>;
-                      return <span style={{ color: '#999' }}>{idx + 1}</span>;
-                    }},
-                  { title: '业务员', dataIndex: 'nickname' },
-                  { title: '订单', dataIndex: 'order_count', width: 70, align: 'right' as const },
-                  {
-                    title: 'GMV',
-                    dataIndex: 'gmv',
-                    width: 120,
-                    align: 'right' as const,
-                    render: (v: string) => <strong>¥{Number(v).toLocaleString()}</strong>,
-                  },
-                ]}
-              />
-            )}
-          </Card>
+          <SalesmanRankingCard />
         </Col>
         <Col span={12}>
           <Card title={<><FireOutlined /> 本月商品销量 Top 10</>} size="small">

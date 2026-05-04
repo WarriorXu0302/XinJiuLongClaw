@@ -116,7 +116,10 @@ class _LineItem(BaseModel):
 
 
 class _CreateBody(BaseModel):
-    customer_id: str
+    # 决策 #3 散客支持：customer_id 可选
+    customer_id: Optional[str] = None
+    customer_walk_in_name: Optional[str] = Field(default=None, max_length=100)
+    customer_walk_in_phone: Optional[str] = Field(default=None, max_length=20)
     line_items: list[_LineItem] = Field(min_length=1)
     payment_method: str = Field(pattern="^(cash|wechat|alipay|card)$")
     notes: Optional[str] = Field(default=None, max_length=500)
@@ -134,6 +137,8 @@ async def create_sale(
         cashier_employee_id=user.linked_employee_id,
         store_id=user.assigned_store_id,
         customer_id=body.customer_id,
+        customer_walk_in_name=body.customer_walk_in_name,
+        customer_walk_in_phone=body.customer_walk_in_phone,
         line_items=[{"barcode": li.barcode, "sale_price": li.sale_price}
                     for li in body.line_items],
         payment_method=body.payment_method,
@@ -172,8 +177,8 @@ async def list_my_sales(
     )).scalar() or 0)
     rows = (await db.execute(stmt.offset(skip).limit(limit))).scalars().all()
 
-    # 客户姓名注入
-    cust_ids = list({r.customer_id for r in rows})
+    # 客户姓名注入（散客 customer_id=None 跳过）
+    cust_ids = list({r.customer_id for r in rows if r.customer_id})
     cust_map = {}
     if cust_ids:
         for c in (await db.execute(
@@ -181,12 +186,21 @@ async def list_my_sales(
         )).scalars():
             cust_map[c.id] = c.real_name or c.nickname or c.username or c.id[:8]
 
+    def _cust_display(r: StoreSale) -> str:
+        if r.customer_id:
+            return cust_map.get(r.customer_id) or r.customer_id[:8]
+        if r.customer_walk_in_name:
+            return r.customer_walk_in_name
+        if r.customer_walk_in_phone:
+            return f"散客 {r.customer_walk_in_phone[-4:]}"
+        return "散客"
+
     return {
         "records": [
             {
                 "id": r.id,
                 "sale_no": r.sale_no,
-                "customer_name": cust_map.get(r.customer_id),
+                "customer_name": _cust_display(r),
                 "total_sale_amount": str(r.total_sale_amount),
                 "total_profit": str(r.total_profit),
                 "total_commission": str(r.total_commission),

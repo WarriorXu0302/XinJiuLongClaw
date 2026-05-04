@@ -57,7 +57,10 @@ class StoreSaleLineItem(BaseModel):
 class StoreSaleCreateBody(BaseModel):
     store_id: str
     cashier_employee_id: str
-    customer_id: str
+    # 决策 #3 散客支持：customer_id 可选
+    customer_id: Optional[str] = None
+    customer_walk_in_name: Optional[str] = Field(default=None, max_length=100)
+    customer_walk_in_phone: Optional[str] = Field(default=None, max_length=20)
     line_items: list[StoreSaleLineItem] = Field(min_length=1)
     payment_method: str = Field(pattern="^(cash|wechat|alipay|card)$")
     notes: Optional[str] = Field(default=None, max_length=500)
@@ -87,6 +90,8 @@ def _sale_to_dict(s: StoreSale) -> dict:
         "store_id": s.store_id,
         "cashier_employee_id": s.cashier_employee_id,
         "customer_id": s.customer_id,
+        "customer_walk_in_name": s.customer_walk_in_name,
+        "customer_walk_in_phone": s.customer_walk_in_phone,
         "total_sale_amount": str(s.total_sale_amount),
         "total_cost": str(s.total_cost),
         "total_profit": str(s.total_profit),
@@ -113,6 +118,8 @@ async def create_sale(
         cashier_employee_id=body.cashier_employee_id,
         store_id=body.store_id,
         customer_id=body.customer_id,
+        customer_walk_in_name=body.customer_walk_in_name,
+        customer_walk_in_phone=body.customer_walk_in_phone,
         line_items=[{"barcode": li.barcode, "sale_price": li.sale_price}
                     for li in body.line_items],
         payment_method=body.payment_method,
@@ -144,7 +151,8 @@ async def create_sale(
 async def _enrich_sale_list(db: AsyncSession, records: list[dict]) -> list[dict]:
     store_ids = list({r["store_id"] for r in records})
     emp_ids = list({r["cashier_employee_id"] for r in records})
-    cust_ids = list({r["customer_id"] for r in records})
+    # 散客 customer_id 为 None，过滤掉再查
+    cust_ids = list({r["customer_id"] for r in records if r.get("customer_id")})
 
     store_map = {}
     if store_ids:
@@ -168,7 +176,15 @@ async def _enrich_sale_list(db: AsyncSession, records: list[dict]) -> list[dict]
     for r in records:
         r["store_name"] = store_map.get(r["store_id"])
         r["cashier_name"] = emp_map.get(r["cashier_employee_id"])
-        r["customer_name"] = cust_map.get(r["customer_id"])
+        if r.get("customer_id"):
+            r["customer_name"] = cust_map.get(r["customer_id"])
+        else:
+            # 散客：优先显示 walk_in 快照，都没有则展示"散客"
+            r["customer_name"] = (
+                r.get("customer_walk_in_name")
+                or (f"散客 {r['customer_walk_in_phone'][-4:]}"
+                    if r.get("customer_walk_in_phone") else "散客")
+            )
     return records
 
 

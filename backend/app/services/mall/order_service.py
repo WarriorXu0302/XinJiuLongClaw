@@ -1724,6 +1724,7 @@ async def confirm_payment(
             user.last_order_at = now
 
         # 累加商品销量（每个 product 按订单里的总数量）
+        # 决策 #4：total_sales 累计"曾售卖过的瓶数"（不回退），net_sales 算净销量（退货时扣）
         items = await get_order_items(db, order.id)
         qty_by_product: dict[int, int] = {}
         for it in items:
@@ -1732,6 +1733,7 @@ async def confirm_payment(
             prod = await db.get(MallProduct, pid)
             if prod is not None:
                 prod.total_sales = (prod.total_sales or 0) + qty
+                prod.net_sales = (prod.net_sales or 0) + qty
 
         await db.flush()
         await post_commission_for_order(db, order)

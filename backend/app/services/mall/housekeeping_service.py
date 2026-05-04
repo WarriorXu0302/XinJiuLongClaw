@@ -342,7 +342,9 @@ async def job_detect_partial_close() -> dict:
             for pid, qty in qty_by_product.items():
                 prod = await s.get(MallProduct, pid)
                 if prod is not None:
+                    # 决策 #4：total_sales 累计，net_sales 净销量（退货时扣）
                     prod.total_sales = (prod.total_sales or 0) + qty
+                    prod.net_sales = (prod.net_sales or 0) + qty
 
             # 有已收才生成提成；post_commission_for_order 自身按差额幂等，无需额外 guard
             if (order.received_amount or 0) > 0:

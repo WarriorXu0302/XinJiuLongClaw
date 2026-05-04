@@ -83,13 +83,13 @@ async def list_products(
     if category_id is not None:
         stmt = stmt.where(MallProduct.category_id == category_id)
 
-    # sort 控制排序：hot=销量倒序，lasted=创建时间倒序，discount=暂按销量倒序（M5 有折扣字段再细分）
+    # sort 控制排序：hot=净销量倒序（扣退货）/ lasted=创建时间倒序 / discount=净销量倒序（M5 有折扣字段再细分）
     if sort == "hot":
-        stmt = stmt.order_by(desc(MallProduct.total_sales), desc(MallProduct.id))
+        stmt = stmt.order_by(desc(MallProduct.net_sales), desc(MallProduct.id))
     elif sort == "lasted":
         stmt = stmt.order_by(desc(MallProduct.created_at), desc(MallProduct.id))
     elif sort == "discount":
-        stmt = stmt.order_by(desc(MallProduct.total_sales), desc(MallProduct.id))
+        stmt = stmt.order_by(desc(MallProduct.net_sales), desc(MallProduct.id))
     else:
         stmt = stmt.order_by(desc(MallProduct.id))
 

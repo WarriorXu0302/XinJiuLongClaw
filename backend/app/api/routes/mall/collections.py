@@ -129,6 +129,7 @@ async def list_collections(
             "max_price": None if price_hidden else (float(p.max_price) if p.max_price else None),
             "status": p.status,
             "total_sales": p.total_sales or 0,
+            "net_sales": p.net_sales or 0,
             "created_at": r.created_at,
         })
     return {"records": records, "total": total}

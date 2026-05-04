@@ -46,6 +46,12 @@ SCRIPTS = [
      "桥 B4.4：退货批准后条码 OUTBOUND→IN_STOCK + 订单隔离"),
     ("e2e_cross_month_commission_clawback",
      "决策 #1：跨月退货追回 + 工资不足挂账（m6c1）"),
+    ("e2e_store_walk_in",
+     "决策 #3：门店散客收银 + 散客退货（m6c2）"),
+    ("e2e_mall_product_net_sales",
+     "决策 #4：商品销量双数据 total_sales + net_sales（m6c3）"),
+    ("e2e_kpi_snapshot",
+     "决策 #2：月榜快照 vs 实时双显（m6c4）"),
 ]
 
 

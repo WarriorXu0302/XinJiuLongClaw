@@ -12,35 +12,73 @@
   <view class="page">
     <!-- 客户选择 -->
     <view class="section">
-      <view class="section__title">
-        客户（必填）
-      </view>
-      <view v-if="selectedCustomer" class="customer-card">
-        <view>
-          <text class="customer-card__name">{{ selectedCustomer.name }}</text>
-          <text class="customer-card__phone">{{ selectedCustomer.phone || '—' }}</text>
-        </view>
-        <text class="btn-text" @tap="selectedCustomer = null">重选</text>
-      </view>
-      <view v-else>
-        <input
-          v-model="customerKeyword"
-          class="search-input"
-          placeholder="输入客户手机号/姓名搜索"
-          @confirm="searchCustomer"
-        />
-        <view v-if="customerResults.length" class="customer-list">
+      <view class="section__title customer-header">
+        <text>客户</text>
+        <view class="mode-toggle">
           <view
-            v-for="c in customerResults"
-            :key="c.id"
-            class="customer-item"
-            @tap="pickCustomer(c)"
+            :class="['mode-chip', customerMode === 'member' && 'mode-chip--active']"
+            @tap="switchMode('member')"
           >
-            <text>{{ c.name }}</text>
-            <text class="customer-item__phone">{{ c.phone || '' }}</text>
+            会员
+          </view>
+          <view
+            :class="['mode-chip', customerMode === 'walkin' && 'mode-chip--active']"
+            @tap="switchMode('walkin')"
+          >
+            散客
           </view>
         </view>
       </view>
+
+      <!-- 会员模式 -->
+      <block v-if="customerMode === 'member'">
+        <view v-if="selectedCustomer" class="customer-card">
+          <view>
+            <text class="customer-card__name">{{ selectedCustomer.name }}</text>
+            <text class="customer-card__phone">{{ selectedCustomer.phone || '—' }}</text>
+          </view>
+          <text class="btn-text" @tap="selectedCustomer = null">重选</text>
+        </view>
+        <view v-else>
+          <input
+            v-model="customerKeyword"
+            class="search-input"
+            placeholder="输入客户手机号/姓名搜索"
+            @confirm="searchCustomer"
+          />
+          <view v-if="customerResults.length" class="customer-list">
+            <view
+              v-for="c in customerResults"
+              :key="c.id"
+              class="customer-item"
+              @tap="pickCustomer(c)"
+            >
+              <text>{{ c.name }}</text>
+              <text class="customer-item__phone">{{ c.phone || '' }}</text>
+            </view>
+          </view>
+        </view>
+      </block>
+
+      <!-- 散客模式 -->
+      <block v-else>
+        <view class="walkin-hint">
+          未注册客户，可选填姓名/手机号用于回访，留空也可下单。
+        </view>
+        <input
+          v-model="walkInName"
+          class="search-input"
+          placeholder="姓名（选填）"
+          maxlength="30"
+        />
+        <input
+          v-model="walkInPhone"
+          class="search-input search-input--mt"
+          placeholder="手机号（选填）"
+          type="number"
+          maxlength="11"
+        />
+      </block>
     </view>
 
     <!-- 扫码区 -->
@@ -54,7 +92,7 @@
           v-model="scanInput"
           class="search-input"
           placeholder="扫码枪扫描 / 手输入条码后回车"
-          :disabled="!selectedCustomer"
+          :disabled="customerMode === 'member' && !selectedCustomer"
           @confirm="onScan"
         />
         <!-- #ifdef MP-WEIXIN || APP-PLUS -->
@@ -125,10 +163,26 @@
 const customerKeyword = ref('')
 const customerResults = ref([])
 const selectedCustomer = ref(null)
+// 决策 #3 散客支持：member | walkin
+const customerMode = ref('member')
+const walkInName = ref('')
+const walkInPhone = ref('')
 const scanInput = ref('')
 const items = ref([])
 const payment = ref('cash')
 const submitting = ref(false)
+
+const switchMode = (mode) => {
+  customerMode.value = mode
+  if (mode === 'member') {
+    walkInName.value = ''
+    walkInPhone.value = ''
+  } else {
+    selectedCustomer.value = null
+    customerKeyword.value = ''
+    customerResults.value = []
+  }
+}
 
 const methods = [
   { value: 'cash', label: '现金' },
@@ -141,11 +195,15 @@ const totalSaleAmount = computed(() =>
   items.value.reduce((s, it) => s + (Number(it.sale_price) || 0), 0).toFixed(2)
 )
 
-const canSubmit = computed(() =>
-  selectedCustomer.value &&
-  items.value.length > 0 &&
-  items.value.every(it => it.sale_price && Number(it.sale_price) > 0)
-)
+const canSubmit = computed(() => {
+  // 会员模式必须选客户；散客模式无需
+  const customerOk = customerMode.value === 'walkin' || !!selectedCustomer.value
+  return (
+    customerOk &&
+    items.value.length > 0 &&
+    items.value.every(it => it.sale_price && Number(it.sale_price) > 0)
+  )
+})
 
 const searchCustomer = async () => {
   if (!customerKeyword.value || customerKeyword.value.length < 2) return
@@ -234,17 +292,23 @@ const submit = async () => {
 
   submitting.value = true
   try {
+    const payload = {
+      line_items: items.value.map(it => ({
+        barcode: it.barcode,
+        sale_price: Number(it.sale_price)
+      })),
+      payment_method: payment.value
+    }
+    if (customerMode.value === 'member') {
+      payload.customer_id = selectedCustomer.value.id
+    } else {
+      if (walkInName.value) payload.customer_walk_in_name = walkInName.value.trim()
+      if (walkInPhone.value) payload.customer_walk_in_phone = walkInPhone.value.trim()
+    }
     const res = await http.request({
       url: '/api/mall/workspace/store-sales',
       method: 'POST',
-      data: {
-        customer_id: selectedCustomer.value.id,
-        line_items: items.value.map(it => ({
-          barcode: it.barcode,
-          sale_price: Number(it.sale_price)
-        })),
-        payment_method: payment.value
-      }
+      data: payload
     })
     const r = res.data
     uni.showModal({
@@ -258,6 +322,9 @@ const submit = async () => {
       showCancel: false,
       success: () => {
         selectedCustomer.value = null
+        walkInName.value = ''
+        walkInPhone.value = ''
+        customerMode.value = 'member'
         items.value = []
         payment.value = 'cash'
       }
@@ -287,6 +354,31 @@ const submit = async () => {
   font-weight: 600;
   margin-bottom: 16rpx;
 }
+.customer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.mode-toggle { display: flex; gap: 8rpx; }
+.mode-chip {
+  padding: 8rpx 24rpx;
+  background: #f5f5f5;
+  border-radius: 24rpx;
+  font-size: 24rpx;
+  color: #8c8c8c;
+  font-weight: 400;
+}
+.mode-chip--active {
+  background: #0e0e0e;
+  color: #c9a961;
+  font-weight: 600;
+}
+.walkin-hint {
+  font-size: 24rpx;
+  color: #8c8c8c;
+  padding: 12rpx 0 16rpx;
+}
+.search-input--mt { margin-top: 12rpx; }
 .customer-card {
   display: flex;
   justify-content: space-between;

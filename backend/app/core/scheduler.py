@@ -80,6 +80,15 @@ def register_mall_jobs(scheduler: AsyncIOScheduler) -> None:
         replace_existing=True,
     )
 
+    # 6. 月度 KPI 快照：每月 1 号凌晨 0:05 冻结上月（决策 #2）
+    from app.services.mall import kpi_snapshot_service as kss
+    scheduler.add_job(
+        lambda: _safe_run("build_last_month_kpi_snapshot", kss.job_build_last_month_snapshot),
+        trigger=CronTrigger(day=1, hour=0, minute=5),
+        id="mall_kpi_snapshot_last_month",
+        replace_existing=True,
+    )
+
     logger.info("[scheduler] mall jobs 已注册: %s", [j.id for j in scheduler.get_jobs()])
 
 

@@ -29,6 +29,40 @@
 
 ### Added
 
+- **决策 #2 月榜快照 vs 实时双显**（migration m6c4） — 上月榜冻结不受退货影响
+  - 新表 `mall_monthly_kpi_snapshot`（employee_id, period UNIQUE）冻结 GMV/订单数/提成
+  - `services/mall/kpi_snapshot_service.py::build_snapshot_for_month(y, m)` ON CONFLICT UPSERT 实现幂等
+  - APScheduler 新任务：每月 1 号 00:05 跑 `job_build_last_month_snapshot` 冻结上月
+  - 新端点 `GET /api/mall/admin/dashboard/salesman-ranking?mode=snapshot|realtime&year_month=YYYY-MM`
+  - 新端点 `POST /api/mall/admin/dashboard/salesman-ranking/build-snapshot?year_month=YYYY-MM`（admin/boss 手工回补）
+  - ERP 前端 `Dashboard.tsx` 业务员排行卡片改双模式：实时/快照 Tab 切换 + 月份选择器 + 空快照一键冻结按钮
+  - E2E `scripts/e2e_kpi_snapshot.py` 覆盖：冻结 → 退货 → 实时 vs 快照数据分叉 → UPSERT 幂等
+
+- **决策 #4 商品销量双数据**（migration m6c3） — 区分"曾售卖"vs"净销量"
+  - `mall_products.net_sales` 列新增（初始化 = total_sales）
+  - `order_service.apply_post_confirmation_effects` + `housekeeping_service.close_partial_orders` 同步递增 total_sales + net_sales
+  - `return_service.approve_return`（mall）增加 `net_sales = max(0, net_sales - qty)` 扣减逻辑
+  - 首页榜单排序（`/api/mall/products?sort=hot`、`/api/mall/search/products`）从 total_sales 切到 net_sales
+  - Schema `MallProductListItemVO` / `MallProductDetailVO` 导出 `netSoldNum`
+  - 管理后台 `/api/mall/admin/products` 列表/详情返回 `total_sales + net_sales`；ERP 前端 ProductList 销量列改为"总/净"双显（净小于总时标红）
+  - E2E `scripts/e2e_mall_product_net_sales.py` 验证单调递增/退货扣减/超额保底 0/再下单
+
+- **决策 #3 门店散客支持**（migration m6c2） — C 端无会员的客户也能在门店买酒
+  - `store_sales.customer_id` 改 nullable；新增 `customer_walk_in_name(100)` + `customer_walk_in_phone(20)` 选填快照
+  - `store_sale_returns.customer_id` 同步 nullable（散客原单的退货）
+  - `store_sale_service.create_store_sale` 接受 `customer_id: Optional`，散客路径不校验；walk_in 快照写入 StoreSale
+  - ERP `/api/store-sales` + mall `/api/mall/workspace/store-sales` 收银接口 body 全部接受 `customer_id: Optional + customer_walk_in_name/phone`
+  - 列表/详情 `customer_name` 展示优先走 `walk_in_name`，否则展示"散客"或"散客 ****1234"
+  - 小程序收银页 `store-cashier.vue` 加"会员 / 散客"两个模式 Toggle，散客模式只需选填姓名手机号
+  - E2E `scripts/e2e_store_walk_in.py` 覆盖散客下单 + 纯匿名 + 散客退货
+
+- **决策 #1 跨月退货提成追回**（migration m6c1） — settled Commission 跨月退货走负数调整 + 工资不足挂账
+  - `commissions` 加 `is_adjustment` + `adjustment_source_commission_id`
+  - 新表 `salary_adjustments_pending`：当月工资不够扣时挂账下月扣（先进先扣）
+  - `return_service.approve_return`（mall）+ `store_return_service.approve_return`（store）settled Commission 分支改为建一条负数 `is_adjustment=True, status=pending` Commission（幂等：source_commission 唯一）
+  - `payroll.generate_salary_records`：1）先扣历史未结清挂账；2）当月仍负 → 实发 0 + 新挂账
+  - E2E `scripts/e2e_cross_month_commission_clawback.py` 覆盖完整链路
+
 - **门店退货（桥 B12 延伸）** — 客户来店退货的完整闭环
   - 新表 `store_sale_returns` + `store_sale_return_items`（每瓶一行快照）
   - 状态机：pending → approved/rejected → refunded（批准时一并执行）

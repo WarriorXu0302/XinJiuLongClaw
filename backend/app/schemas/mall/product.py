@@ -95,7 +95,10 @@ class MallProductListItemVO(BaseModel):
     price: Optional[Decimal] = Field(alias="min_price", serialization_alias="price", default=None)
     max_price: Optional[Decimal] = Field(default=None, serialization_alias="maxPrice")
 
+    # 决策 #4：total_sales 为"曾售卖总瓶数（含退货）"，net_sales 为"净销量（扣退货）"
+    # 小程序 C 端仍按 total_sales 展示（保持视觉一致），后台/报表用 net_sales 看真实口径
     total_sales: int = Field(default=0, serialization_alias="soldNum")
+    net_sales: int = Field(default=0, serialization_alias="netSoldNum")
     status: str = "draft"
 
     @field_serializer("price", "max_price", when_used="always")
@@ -121,6 +124,7 @@ class MallProductDetailVO(BaseModel):
     max_price: Optional[Decimal] = Field(default=None, serialization_alias="maxPrice")
 
     total_sales: int = Field(default=0, serialization_alias="soldNum")
+    net_sales: int = Field(default=0, serialization_alias="netSoldNum")
     brand_id: Optional[str] = Field(default=None, serialization_alias="brandId")
     category_id: Optional[int] = Field(default=None, serialization_alias="categoryId")
     status: str = "draft"

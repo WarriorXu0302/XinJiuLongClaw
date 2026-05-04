@@ -28,6 +28,7 @@ from app.models.mall.product import (
     MallProductTag,
     MallProductTagRel,
 )
+from app.models.mall.kpi_snapshot import MallMonthlyKpiSnapshot
 from app.models.mall.user import (
     MallAddress,
     MallInviteCode,
@@ -56,4 +57,6 @@ __all__ = [
     "MallCustomerSkipLog", "MallSkipAlert",
     # returns (M5+)
     "MallReturnRequest",
+    # KPI snapshot (决策 #2)
+    "MallMonthlyKpiSnapshot",
 ]

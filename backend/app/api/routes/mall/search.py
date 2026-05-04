@@ -41,7 +41,8 @@ async def search_products(
         stmt = stmt.where(
             or_(MallProduct.name.ilike(like), MallProduct.brief.ilike(like))
         )
-    stmt = stmt.order_by(desc(MallProduct.total_sales), desc(MallProduct.id))
+    # 决策 #4：排序按净销量（扣退货）
+    stmt = stmt.order_by(desc(MallProduct.net_sales), desc(MallProduct.id))
 
     total_count = int((
         await db.execute(select(func.count()).select_from(stmt.subquery()))

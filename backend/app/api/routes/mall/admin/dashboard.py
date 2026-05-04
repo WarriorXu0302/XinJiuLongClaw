@@ -324,3 +324,151 @@ async def dashboard_summary(
         "product_rank": product_rank,
         "low_stock": low_stock,
     }
+
+
+# =============================================================================
+# 决策 #2：月度业务员排行（快照 vs 实时双模式）
+# =============================================================================
+
+
+@router.get("/salesman-ranking")
+async def salesman_ranking(
+    user: CurrentUser,
+    year_month: str,  # "YYYY-MM"
+    mode: str = "realtime",  # snapshot | realtime
+    limit: int = 10,
+    db: AsyncSession = Depends(get_db),
+):
+    """业务员月度排行榜。
+
+    mode=realtime：实时聚合 mall_orders（completed/partial_closed 纳入，refunded 排除）。
+                   下月客户退货会导致数字变动，适合"当前真实口径"。
+    mode=snapshot：查 mall_monthly_kpi_snapshot 冻结数据，月初 1 号定格不受后续退货影响。
+                   适合"发奖金后核对"的场景。
+
+    排行按 gmv desc。
+    """
+    require_role(user, "admin", "boss", "finance")
+
+    try:
+        y_str, m_str = year_month.split("-")
+        y, m = int(y_str), int(m_str)
+    except Exception:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="year_month 格式应为 YYYY-MM")
+
+    month_start = datetime(y, m, 1, tzinfo=timezone.utc)
+    if m == 12:
+        month_end = datetime(y + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        month_end = datetime(y, m + 1, 1, tzinfo=timezone.utc)
+
+    if mode == "snapshot":
+        from app.models.mall.kpi_snapshot import MallMonthlyKpiSnapshot
+        from app.models.user import Employee
+        snap_rows = (await db.execute(
+            select(MallMonthlyKpiSnapshot)
+            .where(MallMonthlyKpiSnapshot.period == year_month)
+            .order_by(desc(MallMonthlyKpiSnapshot.gmv))
+            .limit(limit)
+        )).scalars().all()
+        emp_ids = [r.employee_id for r in snap_rows]
+        emps = (await db.execute(
+            select(Employee).where(Employee.id.in_(emp_ids))
+        )).scalars().all() if emp_ids else []
+        emp_map = {e.id: e for e in emps}
+
+        # 同时取 MallUser (nickname) 方便前端展示 —— linked_employee_id 回查
+        sms = (await db.execute(
+            select(MallUser).where(MallUser.linked_employee_id.in_(emp_ids))
+        )).scalars().all() if emp_ids else []
+        sm_by_emp = {s.linked_employee_id: s for s in sms}
+
+        return {
+            "mode": "snapshot",
+            "period": year_month,
+            "records": [
+                {
+                    "employee_id": r.employee_id,
+                    "employee_name": emp_map[r.employee_id].name if r.employee_id in emp_map else None,
+                    "nickname": sm_by_emp[r.employee_id].nickname if r.employee_id in sm_by_emp else None,
+                    "gmv": str(r.gmv),
+                    "order_count": r.order_count,
+                    "commission_amount": str(r.commission_amount),
+                    "snapshot_at": r.snapshot_at,
+                }
+                for r in snap_rows
+            ],
+            "is_frozen": True,
+            "snapshot_count": len(snap_rows),
+        }
+
+    # realtime 模式
+    rank_rows = (await db.execute(
+        select(
+            MallOrder.assigned_salesman_id,
+            sa_func.count(MallOrder.id).label("order_count"),
+            sa_func.coalesce(sa_func.sum(MallOrder.received_amount), 0).label("gmv"),
+        )
+        .where(MallOrder.assigned_salesman_id.isnot(None))
+        .where(or_(
+            and_(
+                MallOrder.status == MallOrderStatus.COMPLETED.value,
+                MallOrder.completed_at >= month_start,
+                MallOrder.completed_at < month_end,
+            ),
+            and_(
+                MallOrder.status == MallOrderStatus.PARTIAL_CLOSED.value,
+                MallOrder.delivered_at >= month_start,
+                MallOrder.delivered_at < month_end,
+            ),
+        ))
+        .group_by(MallOrder.assigned_salesman_id)
+        .order_by(desc("gmv"))
+        .limit(limit)
+    )).all()
+
+    sm_ids = [r[0] for r in rank_rows]
+    sms = (await db.execute(
+        select(MallUser).where(MallUser.id.in_(sm_ids))
+    )).scalars().all() if sm_ids else []
+    sm_map = {s.id: s for s in sms}
+
+    return {
+        "mode": "realtime",
+        "period": year_month,
+        "records": [
+            {
+                "salesman_id": sm_id,
+                "employee_id": sm_map[sm_id].linked_employee_id if sm_id in sm_map else None,
+                "nickname": sm_map[sm_id].nickname if sm_id in sm_map else None,
+                "gmv": str(gmv or 0),
+                "order_count": cnt,
+            }
+            for sm_id, cnt, gmv in rank_rows
+        ],
+        "is_frozen": False,
+    }
+
+
+@router.post("/salesman-ranking/build-snapshot")
+async def build_snapshot_admin(
+    user: CurrentUser,
+    year_month: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """手工回补某月快照（admin/boss）。同月重跑会 UPSERT。"""
+    require_role(user, "admin", "boss")
+    try:
+        y_str, m_str = year_month.split("-")
+        y, m = int(y_str), int(m_str)
+    except Exception:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="year_month 格式应为 YYYY-MM")
+
+    from app.services.mall import kpi_snapshot_service as kss
+    result = await kss.build_snapshot_for_month(
+        db, y, m,
+        notes=f"手工回补 by {user.get('name') or user.get('id')}",
+    )
+    return result

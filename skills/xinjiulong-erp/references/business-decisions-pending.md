@@ -73,31 +73,47 @@ WHERE Commission.employee_id = ?
 
 **E2E**: `scripts/e2e_cross_month_commission_clawback.py` 覆盖完整链路
 
-### 场景 B：业务员 KPI / 排行榜对已退货订单的追溯
+### 场景 B：业务员 KPI / 排行榜对已退货订单的追溯 ✅ 已决策（快照 + 实时双模式）
 
-**问题**：
-- 上月某业务员 GMV 排第一（100 万）
-- 下月 20 万订单被批准退货
-- **上月的 GMV 排行页**：现在用时间窗口查，refunded 订单在下月批准时已经 status 变了 → 查时被 filter 排除 → 实际上排行榜里的 GMV **会悄悄变**
+**老板决定**：方案 1 + 2 合并 —— 月初冻结快照（发奖金定格），前端同时提供实时查询让运营看趋势。
 
-**这是 bug 还是 feature？**
-- 如果老板用"月度排行"给业务员发奖金 → **已经发出去的奖金**对应的 GMV 数据会变化，造成核对困扰
-- 如果老板只看"当月截止日的快照" → 需要另存一份快照表 `mall_monthly_kpi_snapshot`
+**实现（migration m6c4）**：
+- 新表 `mall_monthly_kpi_snapshot`（employee_id + period UNIQUE）
+- APScheduler 月初 1 号 00:05 自动跑 `kpi_snapshot_service.job_build_last_month_snapshot` 冻结上月
+- 端点 `GET /api/mall/admin/dashboard/salesman-ranking?mode=snapshot|realtime&year_month=YYYY-MM`
+  - `realtime`：按当前 DB 数据实时聚合（refunded 排除，每次查会变）
+  - `snapshot`：查快照表（冻结一次不动，老板发奖金后看这里）
+- 端点 `POST /api/mall/admin/dashboard/salesman-ranking/build-snapshot?year_month=YYYY-MM`（admin/boss 手工回补）
+- 幂等：重复跑同月会 UPSERT 而非建新行
 
-**可选方案**：
-1. **快照固化**：月初 1 号定时任务把上月 KPI 写快照表，排行榜查快照不查实时
-2. **双栏展示**：排行榜同时显示"当月初统计"+"当前实时"，让老板看得到差异
-3. **不管**：接受下月看到的上月数据会轻微波动
+**E2E**：`scripts/e2e_kpi_snapshot.py` 覆盖冻结 → 退货 → 实时 vs 快照双模式差异 → UPSERT 幂等
 
-### 场景 C：商品销量 `MallProduct.total_sales` 是否回退
+### 场景 D：门店散客（无会员账号）收银 ✅ 已决策（方案：支持）
 
-**现状**：
-- create_order 时 product.total_sales += quantity？**否，confirm_payment 里 +，partial_close 里 +**
-- approve_return 时：**不 -**
+**老板决定**：C 端没注册会员的客户也要能在门店买酒。提成、利润、条码管理不受影响。
 
-**老板可能问**："A 商品销量 1000 瓶，其中 50 瓶退货了，我首页榜单为啥还显 1000？"
+**实现（migration m6c2）**：
+- `store_sales.customer_id` 改 nullable；加 `customer_walk_in_name(100)` + `customer_walk_in_phone(20)` 两列（选填快照，营销用）
+- `store_sale_returns.customer_id` 同步 nullable（散客退货原单 customer_id 就是 NULL）
+- 服务/API 层允许 customer_id=None；小程序收银页加 **会员/散客** 两个模式 Toggle
+- Commission、Inventory、条码、利润台账不依赖 customer_id，散客场景全部走通
+- 散客姓名/手机号**不强制**，可完全匿名（`散客 ****1234` 或直接显示"散客"）
 
-**当前语义**：total_sales = "曾经被售卖过的瓶数"，带退货。老板如果要"净销量"得另加字段或改聚合。
+**E2E**：`scripts/e2e_store_walk_in.py` 覆盖 散客下单 + 纯匿名 + 散客退货
+
+### 场景 C：商品销量 `MallProduct.total_sales` 是否回退 ✅ 已决策（双字段）
+
+**老板决定**：total 和 net 都要有 —— 首页榜单看 net，历史报表看 total。
+
+**实现（migration m6c3）**：
+- `mall_products` 新增 `net_sales` 列（历史数据初始化 = total_sales）
+- confirm_payment / partial_close 时 total_sales + net_sales 都 +
+- approve_return 时只扣 net_sales（`max(0, net_sales - qty)`，不回退 total_sales）
+- 首页榜单 `/api/mall/products?sort=hot` + `/api/mall/search/products` 按 `net_sales desc` 排序
+- 管理后台 ProductList 销量列"总/净"双显（净 < 总时标红提示有退货）
+- schema 返回 `soldNum`（原）+ `netSoldNum`（新，前端可选）
+
+**E2E**：`scripts/e2e_mall_product_net_sales.py` 覆盖单调递增/扣减/保底 0/再下单
 
 ---
 

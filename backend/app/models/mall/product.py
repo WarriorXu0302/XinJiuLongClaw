@@ -145,7 +145,10 @@ class MallProduct(Base):
     min_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
     max_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
 
+    # total_sales：曾售卖过的瓶数（含退货），confirm_payment/partial_close 时递增
     total_sales: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # net_sales：净销量（扣除退货），approve_return 时递减；首页榜单优先看这个
+    net_sales: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=MallProductStatus.DRAFT.value
     )

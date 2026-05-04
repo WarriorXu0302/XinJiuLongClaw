@@ -192,7 +192,7 @@ function AttendanceMap() {
 
       <Row gutter={12} style={{ marginBottom: 12 }}>
         <Col span={16}>
-          <Card size="small" title="定位点分布" bodyStyle={{ padding: 0 }}>
+          <Card size="small" title="定位点分布" styles={{ body: { padding: 0 } }}>
             <MapContainer center={center} zoom={markers.length > 0 ? 13 : 5}
               style={{ height: 500, borderRadius: 4 }}>
               <TileLayer

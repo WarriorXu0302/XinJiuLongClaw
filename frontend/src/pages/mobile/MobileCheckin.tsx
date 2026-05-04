@@ -80,7 +80,7 @@ function CameraModal({ open, onCaptured, onCancel }: { open: boolean; onCaptured
 
   return (
     <Modal open={open} onCancel={onCancel} footer={null} width="95%"
-      style={{ top: 20 }} bodyStyle={{ padding: 12 }}>
+      style={{ top: 20 }} styles={{ body: { padding: 12 } }}>
       {preview ? (
         <Space orientation="vertical" style={{ width: '100%' }}>
           <img src={preview} alt="" style={{ width: '100%' }} />
@@ -194,7 +194,7 @@ function MobileCheckin() {
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', padding: 12, paddingBottom: 60, background: '#f0f2f5', minHeight: '100vh' }}>
       {/* 顶栏 */}
-      <Card size="small" bodyStyle={{ padding: '8px 12px' }} style={{ marginBottom: 8 }}>
+      <Card size="small" styles={{ body: { padding: '8px 12px' } }} style={{ marginBottom: 8 }}>
         <Space style={{ width: '100%', justifyContent: 'space-between' }}>
           <Space><UserOutlined /><Text strong>{username}</Text></Space>
           <Space>

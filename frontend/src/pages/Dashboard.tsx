@@ -123,7 +123,7 @@ function Dashboard() {
             <Row gutter={8}>
               {(brandKPIs ?? []).map(b => (
                 <Col span={12} key={b.brand_id} style={{ marginBottom: 8 }}>
-                  <Card size="small" title={<Tag color="blue">{b.brand_name}</Tag>} bodyStyle={{ padding: 12 }}>
+                  <Card size="small" title={<Tag color="blue">{b.brand_name}</Tag>} styles={{ body: { padding: 12 } }}>
                     <Row gutter={8}>
                       <Col span={12}><Statistic title="今日订单" value={b.today_order_count} styles={{ content: { fontSize: 16 } }} /></Col>
                       <Col span={12}><Statistic title="待审政策" value={b.pending_policy_count} styles={{ content: { fontSize: 16, color: '#faad14' } }} /></Col>

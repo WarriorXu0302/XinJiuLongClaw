@@ -38,6 +38,16 @@
   - ERP 前端 `Dashboard.tsx` 业务员排行卡片改双模式：实时/快照 Tab 切换 + 月份选择器 + 空快照一键冻结按钮
   - E2E `scripts/e2e_kpi_snapshot.py` 覆盖：冻结 → 退货 → 实时 vs 快照数据分叉 → UPSERT 幂等
 
+- **G11/G12/G14/G15/G16/G17：业务员管理 + 退货并发 + 隐私加固（m6c6）**
+  - G11：`/api/mall/workspace/store-sales/customers/search` 限制关键字 ≥5 字符 + 手机号脱敏 + 本店消费客户优先排序（原 2 字符会把全库手机号漏出去）
+  - G12：`return_service.approve_return` + `store_return_service.approve_return` 加 `SELECT FOR UPDATE` 锁 `MallReturnRequest/StoreSaleReturn` + 源订单；migration m6c6 给 `commissions.adjustment_source_commission_id` 加 partial UNIQUE index（`WHERE is_adjustment=true`）DB 层兜底防双扣
+  - G14：`update_salesman` 切 `assigned_store_id` 前检查店员 24h 内在途销售单 + 待审退货单，有则 409 拦；通过 `force_switch=true` 强切
+  - G15：新 APScheduler job `job_notify_aged_pending_vouchers`（每小时 :15）扫 `PENDING_CONFIRMATION` 超 24h/48h → 推 admin/boss/finance；title 前缀 `[PAYMENT_AGING_24h]` 做幂等去重
+  - G16：`/api/mall/salesman/my-customers` 列表手机号脱敏为 `138****1234`；新 `/my-customers/{id}/phone` 揭示完整号 + 写 `mall_customer.reveal_phone` 审计；miniprogram `salesman-my-customers.vue` 点拨号时才查号
+  - G17：`disable_salesman` 释放 assigned 订单时同步通知客户"订单配送员变更"（与 `admin_reassign` 对齐）
+  - E2E `scripts/e2e_return_approve_concurrency.py` + `scripts/e2e_salesman_mgmt_hardening.py`
+  - 20/20 E2E 全绿
+
 - **G4/G6：跨月退货追回透明化 + 业务员 commission 流水**
   - G4：`/api/payroll/salary-records/{id}/detail` 返回 3 个新字段
     * `clawback_details[]`：本月工资扫入的 is_adjustment 负数 Commission（含原订单号/原提成金额/原类型）

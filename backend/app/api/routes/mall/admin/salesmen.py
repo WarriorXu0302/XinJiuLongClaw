@@ -301,6 +301,8 @@ class _UpdateSalesmanBody(BaseModel):
     assigned_brand_id: Optional[str] = None  # 传空字符串或 null 清除
     assigned_store_id: Optional[str] = None  # 门店店员归属切换；同时同步到 Employee 表
     is_accepting_orders: Optional[bool] = None
+    # G14：切门店遇到 24h 内有销售单需二次确认
+    force_switch: Optional[bool] = False
 
 
 @router.put("/{salesman_id}")
@@ -344,6 +346,46 @@ async def update_salesman(
                 )
             if not wh.is_active:
                 raise HTTPException(status_code=400, detail=f"门店 [{wh.name}] 已停用")
+
+        # G14：切店员门店前检查在途销售/退货，防止归属错乱
+        # 例：A 店店员王五刚开 3 单没批退货，不能直接改到 B 店（会导致 apply_return 403 卡死）
+        old_store = sm.assigned_store_id
+        if old_store and old_store != new_store and sm.linked_employee_id:
+            from app.models.store_sale import StoreSale, StoreSaleReturn
+            # 活跃（pending）退货单阻塞
+            active_returns = (await db.execute(
+                select(StoreSaleReturn)
+                .where(StoreSaleReturn.initiator_employee_id == sm.linked_employee_id)
+                .where(StoreSaleReturn.status == "pending")
+            )).scalars().all()
+            if active_returns:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"该店员有 {len(active_returns)} 笔待审退货（{active_returns[0].return_no}…）"
+                        "，请先处理完再切换门店"
+                    ),
+                )
+            # 24h 内刚开的 completed 单：提示但不阻塞，需要二次确认
+            from datetime import timedelta
+            recent_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+            recent_sales = (await db.execute(
+                select(StoreSale)
+                .where(StoreSale.cashier_employee_id == sm.linked_employee_id)
+                .where(StoreSale.store_id == old_store)
+                .where(StoreSale.created_at >= recent_cutoff)
+                .where(StoreSale.status == "completed")
+            )).scalars().all()
+            if recent_sales and not getattr(body, "force_switch", False):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"该店员 24h 内在原店开了 {len(recent_sales)} 笔单"
+                        f"（{recent_sales[0].sale_no}…）。切店后这些单的退货需由原店店员处理。"
+                        "确认要切请传 force_switch=true"
+                    ),
+                )
+
         # 同步到 employees 表（双边一致）
         if sm.linked_employee_id:
             from app.models.user import Employee
@@ -351,6 +393,8 @@ async def update_salesman(
             if emp is not None:
                 emp.assigned_store_id = new_store
 
+    # force_switch 是控制字段，不是 MallUser 属性
+    updates.pop("force_switch", None)
     for k, v in updates.items():
         setattr(sm, k, v)
     sm.updated_at = datetime.now(timezone.utc)
@@ -543,6 +587,17 @@ async def disable_salesman(
             operator_id=user["sub"],
             reason=f"业务员被禁用自动释放：{body.reason or ''}",
         ))
+        # G17：通知客户订单重新派单（和 admin_reassign 对齐）
+        if o.user_id:
+            from app.services.notification_service import notify_mall_user
+            await notify_mall_user(
+                db,
+                mall_user_id=o.user_id,
+                title="订单配送员变更",
+                content=f"您的订单 {o.order_no} 的配送员已变更，我们正在重新为您指派，请稍候",
+                entity_type="MallOrder",
+                entity_id=o.id,
+            )
 
     # 2. 已出库/送达/待确认的单子不动（会影响用户履约），只汇报数量提示 admin
     in_progress = (await db.execute(

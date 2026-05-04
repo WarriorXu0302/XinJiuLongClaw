@@ -89,6 +89,14 @@ def register_mall_jobs(scheduler: AsyncIOScheduler) -> None:
         replace_existing=True,
     )
 
+    # 7. 凭证超时告警（G15）：每小时扫一次 PENDING_CONFIRMATION > 24h / 48h
+    scheduler.add_job(
+        lambda: _safe_run("notify_aged_pending_vouchers", hk.job_notify_aged_pending_vouchers),
+        trigger=CronTrigger(minute=15),  # 每小时 :15 跑
+        id="mall_notify_aged_pending_vouchers",
+        replace_existing=True,
+    )
+
     logger.info("[scheduler] mall jobs 已注册: %s", [j.id for j in scheduler.get_jobs()])
 
 

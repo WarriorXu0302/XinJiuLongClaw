@@ -261,14 +261,42 @@ async def my_summary(
 # =============================================================================
 
 
+def _mask_phone(phone: str | None) -> str | None:
+    """11 位手机号脱敏：138****1234。其他号码兜底保留末 4。"""
+    if not phone:
+        return None
+    p = phone.strip()
+    if len(p) == 11 and p.isdigit():
+        return f"{p[:3]}****{p[-4:]}"
+    if len(p) > 4:
+        return f"{'*' * (len(p) - 4)}{p[-4:]}"
+    return "***" + p[-1:]
+
+
 @router.get("/customers/search")
 async def search_customer(
-    keyword: str = Query(..., min_length=2),
+    keyword: str = Query(..., min_length=5),  # G11 从 2 提到 5，防止 "138" 一搜全库
     current: CurrentMallUser = None,
     db: AsyncSession = Depends(get_mall_db),
 ):
-    await _require_cashier(current, db)
+    """店员搜索会员（G11 隐私加固）。
+
+    限制：
+    - 关键字 >=5 字符（数字前缀 / 姓名）—— 防"138"漏全库
+    - 手机号返回脱敏（13800001234 → 138****1234）—— 防导出
+    - 限量 20 条；优先返回本店消费过的客户（但不限死，否则新客买不了）
+    """
+    user = await _require_cashier(current, db)
+
     kw = f"%{keyword}%"
+    # 先拉本店消费过的（优先展示）
+    from app.models.store_sale import StoreSale
+    priority_ids = set((await db.execute(
+        select(StoreSale.customer_id)
+        .where(StoreSale.store_id == user.assigned_store_id)
+        .where(StoreSale.customer_id.isnot(None))
+    )).scalars().all())
+
     rows = (await db.execute(
         select(MallUser)
         .where(MallUser.user_type == MallUserType.CONSUMER.value)
@@ -280,12 +308,17 @@ async def search_customer(
         )
         .limit(20)
     )).scalars().all()
+
+    # 排序：本店消费过的放前面
+    rows.sort(key=lambda c: 0 if c.id in priority_ids else 1)
+
     return {
         "records": [
             {
                 "id": c.id,
                 "name": c.real_name or c.nickname or c.username,
-                "phone": c.phone or c.contact_phone,
+                "phone": _mask_phone(c.phone or c.contact_phone),
+                "is_local_customer": c.id in priority_ids,
             }
             for c in rows
         ]

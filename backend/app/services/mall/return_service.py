@@ -110,13 +110,28 @@ async def approve_return(
       2. 订单 status → refunded
       3. 提成回写（pending commission 标 reversed，已 settled 的只记审计不追溯）
     """
-    if req.status != MallReturnStatus.PENDING.value:
+    # 并发保护（G12）：同一 req 并发 approve 会分别建 adjustment Commission，造成双扣。
+    # 先 FOR UPDATE 锁住申请行再做状态检查，确保只有一个事务能进入 approved 分支。
+    locked_req = (await db.execute(
+        select(MallReturnRequest)
+        .where(MallReturnRequest.id == req.id)
+        .with_for_update()
+    )).scalar_one_or_none()
+    if locked_req is None:
+        raise HTTPException(status_code=404, detail="申请已不存在")
+    if locked_req.status != MallReturnStatus.PENDING.value:
         raise HTTPException(
             status_code=409,
-            detail=f"申请状态 {req.status} 不可审批",
+            detail=f"申请状态 {locked_req.status} 不可审批",
         )
+    req = locked_req  # 用锁定后的对象，避免用缓存的脏副本
 
-    order = await db.get(MallOrder, req.order_id)
+    # 订单也一起锁，防止与 admin_cancel / partial_close 等并发路径打架
+    order = (await db.execute(
+        select(MallOrder)
+        .where(MallOrder.id == req.order_id)
+        .with_for_update()
+    )).scalar_one_or_none()
     if order is None:
         raise HTTPException(status_code=404, detail="订单不存在")
 

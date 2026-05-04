@@ -159,7 +159,12 @@ async def approve_return(
     reviewer_employee_id: str,
 ) -> StoreSaleReturn:
     """批准退货 → 条码回池 + 库存回加 + Commission reversed + StoreSale refunded。"""
-    ret = await db.get(StoreSaleReturn, return_id)
+    # G12 并发保护：锁住退货单再做状态检查，防止双击 approve 产生双份 adjustment
+    ret = (await db.execute(
+        select(StoreSaleReturn)
+        .where(StoreSaleReturn.id == return_id)
+        .with_for_update()
+    )).scalar_one_or_none()
     if ret is None:
         raise HTTPException(status_code=404, detail="退货单不存在")
     if ret.status != "pending":
@@ -168,7 +173,12 @@ async def approve_return(
             detail=f"退货状态 {ret.status} 不可批准",
         )
 
-    sale = await db.get(StoreSale, ret.original_sale_id)
+    # 原销售单也锁，防止与其他并发路径（例如稍后补退货、修改）打架
+    sale = (await db.execute(
+        select(StoreSale)
+        .where(StoreSale.id == ret.original_sale_id)
+        .with_for_update()
+    )).scalar_one_or_none()
     if sale is None:
         raise HTTPException(status_code=500, detail="原销售单已丢失")
 

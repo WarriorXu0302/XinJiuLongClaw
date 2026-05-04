@@ -398,3 +398,72 @@ async def job_purge_old_login_logs() -> dict:
 
     logger.info("[hk] purged %d login logs older than %s", deleted, cutoff)
     return {"deleted": deleted}
+
+
+# =============================================================================
+# 5. 凭证长时间未审批告警（G15）
+# =============================================================================
+# 场景：业务员周五 18:00 上传凭证，财务下周一才看，中间 67 小时无告警。
+# 规则：每小时扫一次 mall_payments.status=PENDING_CONFIRMATION
+#   - created_at 超 24h → 推 admin/boss/finance"¥X 凭证已挂 24h"
+#   - 超 48h → 二次提醒"¥X 凭证已挂 48h，请尽快处理"
+# 幂等：同一 payment 只推一次 24h 告警、一次 48h 告警
+#   通过 notification_logs 的 target_ref_id + action 去重
+@_with_job_log
+async def job_notify_aged_pending_vouchers() -> dict:
+    """扫 pending 凭证超时，推 admin/boss/finance。"""
+    from app.models.mall.base import MallPaymentApprovalStatus
+    from app.models.mall.order import MallPayment
+    from app.models.notification_log import NotificationLog
+    from app.services.notification_service import notify_roles
+
+    now = datetime.now(timezone.utc)
+    cutoff_24h = now - timedelta(hours=24)
+    cutoff_48h = now - timedelta(hours=48)
+
+    notified_24h = 0
+    notified_48h = 0
+
+    async with admin_session_factory() as s:
+        # 超 24h 未审的 pending 凭证
+        pendings = (await s.execute(
+            select(MallPayment)
+            .where(MallPayment.status == MallPaymentApprovalStatus.PENDING_CONFIRMATION.value)
+            .where(MallPayment.created_at < cutoff_24h)
+        )).scalars().all()
+
+        for p in pendings:
+            tier = "48h" if p.created_at < cutoff_48h else "24h"
+            # 用 entity_type + entity_id + title 前缀做幂等键
+            tier_marker = f"[PAYMENT_AGING_{tier}]"
+
+            existed = (await s.execute(
+                select(func.count(NotificationLog.id))
+                .where(NotificationLog.related_entity_type == "MallPayment")
+                .where(NotificationLog.related_entity_id == p.id)
+                .where(NotificationLog.title.like(f"{tier_marker}%"))
+            )).scalar() or 0
+            if existed > 0:
+                continue
+
+            hours = int((now - p.created_at).total_seconds() / 3600)
+            await notify_roles(
+                s,
+                role_codes=["admin", "boss", "finance"],
+                title=f"{tier_marker} 凭证超时待审",
+                content=f"订单凭证 ¥{p.amount} 已挂 {hours} 小时未审批，请尽快处理",
+                entity_type="MallPayment",
+                entity_id=p.id,
+            )
+            if tier == "48h":
+                notified_48h += 1
+            else:
+                notified_24h += 1
+
+        await s.commit()
+
+    logger.info(
+        "[hk] aged pending voucher alerts: 24h=%d, 48h=%d",
+        notified_24h, notified_48h,
+    )
+    return {"notified_24h": notified_24h, "notified_48h": notified_48h}

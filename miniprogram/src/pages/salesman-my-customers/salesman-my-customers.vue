@@ -65,7 +65,7 @@
       <view class="card__quick">
         <view
           :class="['quick-btn', !c.phone && 'quick-btn--disabled']"
-          @tap="onCall(c.phone)"
+          @tap="onCall(c)"
         >
           <text class="quick-btn__icon">
             📞
@@ -151,12 +151,26 @@ const load = async () => {
   }
 }
 
-const onCall = (phone) => {
-  if (!phone) {
+const onCall = async (customer) => {
+  if (!customer.phone) {
     uni.showToast({ title: '客户未留电话', icon: 'none' })
     return
   }
-  uni.makePhoneCall({ phoneNumber: phone, fail: () => {} })
+  // G16：点拨号时才去后端取完整号 + 写审计
+  try {
+    const res = await http.request({
+      url: `/api/mall/salesman/my-customers/${customer.id}/phone`,
+      method: 'GET',
+    })
+    const full = res.data?.phone
+    if (!full) {
+      uni.showToast({ title: '无法获取电话', icon: 'none' })
+      return
+    }
+    uni.makePhoneCall({ phoneNumber: full, fail: () => {} })
+  } catch (e) {
+    uni.showToast({ title: e?.detail || '获取电话失败', icon: 'none' })
+  }
 }
 
 // 调用地图：mp-weixin 直接打开地图；h5/其他端弹复制地址

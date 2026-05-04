@@ -2,12 +2,12 @@
 /api/mall/salesman/my-customers
 
 列出 referrer_salesman_id == 当前业务员的 consumer。
-业务员看自己开发的客户：返回完整 phone（含注册时的 contact_phone）+ 默认地址（供一键导航）
-非业务员或被推荐的上级看不到这个端点（_require_salesman 挡掉）
+G16 隐私加固：列表默认返回脱敏手机号（138****1234），需要拨号时调 /{id}/phone 再获取完整号
+并写审计日志，防批量导出。
 """
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,9 +16,22 @@ from app.core.security import CurrentMallUser
 from app.models.mall.base import MallOrderStatus, MallUserStatus
 from app.models.mall.order import MallOrder
 from app.models.mall.user import MallAddress, MallUser
+from app.services.audit_service import log_audit
 from app.services.mall import auth_service
 
 router = APIRouter()
+
+
+def _mask_phone(phone: str | None) -> str | None:
+    """11 位手机号脱敏：138****1234。其他号码兜底保留末 4。"""
+    if not phone:
+        return None
+    p = phone.strip()
+    if len(p) == 11 and p.isdigit():
+        return f"{p[:3]}****{p[-4:]}"
+    if len(p) > 4:
+        return f"{'*' * (len(p) - 4)}{p[-4:]}"
+    return "***" + p[-1:]
 
 
 @router.get("")
@@ -77,15 +90,14 @@ async def my_customers(
     records = []
     for c in customers:
         s = stats_map.get(c.id, {"cnt": 0, "gmv": Decimal("0")})
-        # 业务员看自己开发的客户，电话放完整值方便一键拨号
-        # 优先 contact_phone（注册审批填的）—— phone 是微信拉回的手机号，可能为空
+        # G16：列表中手机号脱敏防批量导出；真要拨号调 /{id}/phone
         phone_full = c.contact_phone or c.phone
         addr = default_addr_map.get(c.id)
         records.append({
             "id": c.id,
             "nickname": c.nickname,
             "real_name": c.real_name,
-            "phone": phone_full,
+            "phone": _mask_phone(phone_full),
             "status": c.status,
             "archived": c.status == MallUserStatus.INACTIVE_ARCHIVED.value,
             "bound_at": c.referrer_bound_at,
@@ -95,7 +107,8 @@ async def my_customers(
             "default_address": (
                 {
                     "receiver": addr.receiver,
-                    "mobile": addr.mobile,
+                    # 地址里的手机号同样脱敏
+                    "mobile": _mask_phone(addr.mobile),
                     "province": addr.province,
                     "city": addr.city,
                     "area": addr.area,
@@ -109,3 +122,44 @@ async def my_customers(
         "total": total,
         "total_gmv": str(total_gmv_server),
     }
+
+
+@router.get("/{customer_id}/phone")
+async def reveal_customer_phone(
+    customer_id: str,
+    current: CurrentMallUser,
+    request: Request,
+    db: AsyncSession = Depends(get_mall_db),
+):
+    """G16：业务员点"拨号"才揭开完整号 + 写审计防滥用。
+
+    只允许查自己推荐的 consumer 的手机号，其他人 403。
+    每次调用写 audit_log（action=mall_customer.reveal_phone），admin 可回查"谁看了谁电话"。
+    """
+    if current.get("user_type") != "salesman":
+        raise HTTPException(status_code=403, detail="仅业务员可访问")
+    user = await auth_service.verify_token_and_load_user(db, current)
+
+    c = await db.get(MallUser, customer_id)
+    if c is None:
+        raise HTTPException(status_code=404, detail="客户不存在")
+    if c.referrer_salesman_id != user.id:
+        raise HTTPException(status_code=403, detail="只能查看自己推荐的客户")
+
+    phone_full = c.contact_phone or c.phone
+
+    await log_audit(
+        db,
+        action="mall_customer.reveal_phone",
+        entity_type="MallUser",
+        entity_id=customer_id,
+        mall_user_id=user.id,
+        actor_type="mall_user",
+        request=request,
+        changes={
+            "customer_id": customer_id,
+            "customer_nickname": c.nickname,
+        },
+    )
+
+    return {"phone": phone_full}

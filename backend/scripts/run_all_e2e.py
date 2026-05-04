@@ -58,6 +58,10 @@ SCRIPTS = [
      "G3/G7/G9：stats group_by=store + 快照批量回补 + 利润聚合"),
     ("e2e_clawback_transparency",
      "G4/G6：跨月退货追回透明化（工资 detail + 业务员 commission 流水）"),
+    ("e2e_return_approve_concurrency",
+     "G12：退货 approve 并发保护 · FOR UPDATE + UNIQUE partial index（m6c6）"),
+    ("e2e_salesman_mgmt_hardening",
+     "G14/G15/G16/G17：切店在途检查 + 凭证告警 + 手机脱敏 + 禁用通知客户"),
 ]
 
 

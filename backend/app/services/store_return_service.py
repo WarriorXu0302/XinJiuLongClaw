@@ -32,6 +32,7 @@ from app.models.store_sale import (
     StoreSaleReturnItem,
 )
 from app.models.user import Commission, Employee
+from app.services.audit_service import log_audit
 
 
 def _gen_return_no() -> str:
@@ -126,6 +127,23 @@ async def apply_return(
         ))
 
     await db.flush()
+
+    await log_audit(
+        db,
+        action="store_return.apply",
+        entity_type="StoreSaleReturn",
+        entity_id=return_id,
+        actor_id=initiator_employee_id,
+        changes={
+            "return_no": ret.return_no,
+            "original_sale_no": sale.sale_no,
+            "store_id": sale.store_id,
+            "refund_amount": str(sale.total_sale_amount),
+            "commission_reversal_amount": str(sale.total_commission),
+            "bottles": sale.total_bottles,
+            "reason": reason,
+        },
+    )
     return ret
 
 
@@ -265,6 +283,24 @@ async def approve_return(
     ret.reviewed_at = now
 
     await db.flush()
+
+    await log_audit(
+        db,
+        action="store_return.approve",
+        entity_type="StoreSaleReturn",
+        entity_id=ret.id,
+        actor_id=reviewer_employee_id,
+        changes={
+            "return_no": ret.return_no,
+            "original_sale_no": sale.sale_no,
+            "store_id": ret.store_id,
+            "refund_amount": str(ret.refund_amount),
+            "commission_reversal_amount": str(ret.commission_reversal_amount),
+            "bottles": ret.total_bottles,
+            "commissions_reversed": reversed_count,
+            "commissions_adjustment_built": adjustment_count,
+        },
+    )
     return ret
 
 
@@ -297,4 +333,17 @@ async def reject_return(
     ret.reviewer_employee_id = reviewer_employee_id
     ret.reviewed_at = datetime.now(timezone.utc)
     await db.flush()
+
+    await log_audit(
+        db,
+        action="store_return.reject",
+        entity_type="StoreSaleReturn",
+        entity_id=ret.id,
+        actor_id=reviewer_employee_id,
+        changes={
+            "return_no": ret.return_no,
+            "original_sale_id": ret.original_sale_id,
+            "rejection_reason": rejection_reason,
+        },
+    )
     return ret

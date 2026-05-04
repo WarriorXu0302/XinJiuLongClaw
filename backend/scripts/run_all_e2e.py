@@ -52,6 +52,8 @@ SCRIPTS = [
      "决策 #4：商品销量双数据 total_sales + net_sales（m6c3）"),
     ("e2e_kpi_snapshot",
      "决策 #2：月榜快照 vs 实时双显（m6c4）"),
+    ("e2e_audit_coverage",
+     "审计三连 G1/G2/G8：门店收银/退货/mall 退货金额变更留痕"),
 ]
 
 

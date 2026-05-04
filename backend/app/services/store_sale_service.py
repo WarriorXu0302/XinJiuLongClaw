@@ -43,6 +43,7 @@ from app.models.store_sale import (
     StoreSaleItem,
 )
 from app.models.user import Commission, Employee
+from app.services.audit_service import log_audit
 
 
 ALLOWED_PAYMENT_METHODS = {"cash", "wechat", "alipay", "card"}
@@ -342,4 +343,27 @@ async def create_store_sale(
         it.commission_id = com.id
 
     await db.flush()
+
+    # 审计：门店零售收银金额/状态/权限三要素都涉及，必须留痕
+    await log_audit(
+        db,
+        action="store_sale.create",
+        entity_type="StoreSale",
+        entity_id=sale.id,
+        actor_id=cashier_employee_id,
+        changes={
+            "sale_no": sale.sale_no,
+            "store_id": store_id,
+            "store_name": store_wh.name,
+            "customer_id": customer_id,
+            "walk_in": not customer_id,
+            "walk_in_name": customer_walk_in_name,
+            "walk_in_phone": customer_walk_in_phone,
+            "bottles": sale.total_bottles,
+            "total_sale_amount": str(sale.total_sale_amount),
+            "total_profit": str(sale.total_profit),
+            "total_commission": str(sale.total_commission),
+            "payment_method": payment_method,
+        },
+    )
     return sale

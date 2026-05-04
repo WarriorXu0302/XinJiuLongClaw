@@ -34,6 +34,7 @@ from app.models.mall.order import (
     MallOrderItem,
     MallReturnRequest,
 )
+from app.services.audit_service import log_audit
 
 
 async def apply_return(
@@ -78,6 +79,21 @@ async def apply_return(
     )
     db.add(req)
     await db.flush()
+
+    await log_audit(
+        db,
+        action="mall_return.apply",
+        entity_type="MallReturnRequest",
+        entity_id=req.id,
+        mall_user_id=user_id,
+        actor_type="mall_user",
+        changes={
+            "order_no": order.order_no,
+            "order_status": order.status,
+            "received_amount": str(order.received_amount or 0),
+            "reason": (reason or "")[:200],
+        },
+    )
     return req
 
 
@@ -217,6 +233,21 @@ async def approve_return(
     req.refund_amount = refund_amount if refund_amount is not None else (order.received_amount or Decimal("0"))
 
     await db.flush()
+
+    await log_audit(
+        db,
+        action="mall_return.approve",
+        entity_type="MallReturnRequest",
+        entity_id=req.id,
+        actor_id=reviewer_employee_id,
+        changes={
+            "order_no": order.order_no,
+            "refund_amount": str(req.refund_amount),
+            "commissions_reversed": reversed_count,
+            "commissions_adjustment_built": adjustment_count,
+            "review_note": (review_note or "")[:200],
+        },
+    )
     return req
 
 
@@ -238,6 +269,18 @@ async def reject_return(
     req.reviewed_at = datetime.now(timezone.utc)
     req.review_note = review_note
     await db.flush()
+
+    await log_audit(
+        db,
+        action="mall_return.reject",
+        entity_type="MallReturnRequest",
+        entity_id=req.id,
+        actor_id=reviewer_employee_id,
+        changes={
+            "order_id": req.order_id,
+            "review_note": (review_note or "")[:200],
+        },
+    )
     return req
 
 
@@ -255,6 +298,7 @@ async def mark_refunded(
             status_code=409,
             detail=f"申请状态 {req.status} 不可标记已退款（仅 approved 可进入 refunded）",
         )
+    old_refund_amount = req.refund_amount
     req.status = MallReturnStatus.REFUNDED.value
     req.refunded_at = datetime.now(timezone.utc)
     req.refund_method = refund_method
@@ -263,4 +307,25 @@ async def mark_refunded(
     if refund_amount is not None:
         req.refund_amount = refund_amount
     await db.flush()
+
+    # 需要 reviewer_employee_id 做 actor，但这里没传进来；mark_refunded 通常由 finance 触发，
+    # 路由层会在端点里附加 log_audit；service 层这条作"数据变化"兜底留痕
+    changes = {
+        "order_id": req.order_id,
+        "refund_method": refund_method,
+        "refund_amount": str(req.refund_amount),
+    }
+    if refund_amount is not None and refund_amount != old_refund_amount:
+        # G10：金额变更单独留痕
+        changes["refund_amount_adjusted"] = {
+            "from": str(old_refund_amount),
+            "to": str(refund_amount),
+        }
+    await log_audit(
+        db,
+        action="mall_return.mark_refunded",
+        entity_type="MallReturnRequest",
+        entity_id=req.id,
+        changes=changes,
+    )
     return req

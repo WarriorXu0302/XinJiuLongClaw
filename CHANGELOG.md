@@ -38,6 +38,15 @@
   - ERP 前端 `Dashboard.tsx` 业务员排行卡片改双模式：实时/快照 Tab 切换 + 月份选择器 + 空快照一键冻结按钮
   - E2E `scripts/e2e_kpi_snapshot.py` 覆盖：冻结 → 退货 → 实时 vs 快照数据分叉 → UPSERT 幂等
 
+- **审计三连 G1/G2/G8**（migration m6c5 FK 硬化） — 涉及金额/状态的写操作全部留痕
+  - G8：`store_sale_service.create_store_sale` 加 log_audit（actor=cashier_employee_id）
+    管理端 `/api/store-sales` 路由区分为 `store_sale.create_by_admin`（代下）
+  - G1：`store_return_service` apply/approve/reject 三个分支全部加 log_audit（reason/金额/瓶数/refunded commissions/adjustment 数）
+  - G2：`mall/return_service` apply/approve/reject/mark_refunded 四处加 log_audit
+  - G10（顺手）：mark_refunded 金额与 approve 时不一致会单独记 `refund_amount_adjusted` 字段
+  - migration m6c5：`audit_logs.actor_id/mall_user_id` FK 改为 `ON DELETE SET NULL`，员工/mall_user 被清理后审计记录仍保留不丢失
+  - E2E `scripts/e2e_audit_coverage.py` 验证收银 + 三种退货状态变更的 audit_log 记录完整
+
 - **决策 #4 商品销量双数据**（migration m6c3） — 区分"曾售卖"vs"净销量"
   - `mall_products.net_sales` 列新增（初始化 = total_sales）
   - `order_service.apply_post_confirmation_effects` + `housekeeping_service.close_partial_orders` 同步递增 total_sales + net_sales

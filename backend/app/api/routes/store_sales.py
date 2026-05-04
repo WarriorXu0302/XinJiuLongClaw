@@ -113,6 +113,8 @@ async def create_sale(
 ):
     """管理端创建（不常用；小程序端走 mall workspace）。"""
     require_role(user, "boss", "warehouse")
+    # service 层已 log_audit（actor_id=cashier_employee_id）；
+    # 管理端入口额外记一条"管理端代下"审计区分调用路径
     sale = await store_sale_service.create_store_sale(
         db,
         cashier_employee_id=body.cashier_employee_id,
@@ -126,18 +128,13 @@ async def create_sale(
         notes=body.notes,
     )
     await log_audit(
-        db, action="store_sale.create",
+        db, action="store_sale.create_by_admin",
         entity_type="StoreSale", entity_id=sale.id,
         user=user, request=request,
         changes={
             "sale_no": sale.sale_no,
-            "store_id": body.store_id,
-            "cashier": body.cashier_employee_id,
-            "bottles": sale.total_bottles,
-            "amount": str(sale.total_sale_amount),
-            "profit": str(sale.total_profit),
-            "commission": str(sale.total_commission),
-            "payment_method": body.payment_method,
+            "cashier_employee_id": body.cashier_employee_id,
+            "note": "管理端代下（非店员小程序提交）",
         },
     )
     return _sale_to_dict(sale)

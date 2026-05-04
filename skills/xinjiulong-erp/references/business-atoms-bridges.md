@@ -75,13 +75,15 @@
 | B3.2 | Mall 订单 completed 生成 Commission | mall→commissions | `confirm-payment` 触发 | Commission(mall_order_id=X, order_id=null, employee_id=salesman.linked_employee_id) | 🟢 |
 | B3.3 | B2B 订单 completed 入 ProfitLedger | ERP | `apply_post_confirmation_effects` | ProfitLedger(score='product_sales', brand_id=X) | 🟢 |
 | B3.4 | Mall 订单 completed 入 ProfitLedger | mall | `profit_service` 实时聚合（无实表） | 查询时按 brand 过滤 mall_orders.status in (completed, partial_closed) | 🟢 |
-| B3.5 | Mall partial_closed 坏账 → ProfitLedger | mall | `profit_service` | 科目=mall_bad_debt，金额=pay - received | 🟡（coded 未 E2E）|
+| B3.5 | Mall partial_closed 坏账 → ProfitLedger | mall | `profit_service` | 科目=mall_bad_debt，金额=pay - received | 🟢（`e2e_mall_profit_aggregation` 覆盖）|
 | B3.6 | Mall 退货 → ProfitLedger 剔除 | mall | `profit_service` 自动 | status=refunded 被过滤 in_([completed, partial_closed])）| 🟢 |
 
 ### E2E 测试状态
 
 - ✅ B3.1/3.2 已测
-- ❌ **B3.5 坏账利润 + B3.4 mall 利润聚合在真实数据上**从未验证 — 见 mall 流 5 说明
+- ✅ **B3.4 mall 利润聚合 + B3.5 坏账**真实数据回归 `e2e_mall_profit_aggregation.py` 覆盖
+  多订单（completed + partial_closed + refunded 混合）/ profit 公式自洽 / refunded 订单
+  从 valid_statuses filter 中被排除 / by_brand 分账校验
 - ❌ Commission **employee_id 取自 linked_employee_id 而非 salesman.id** — 保证 ERP 工资单能读到。若 linked_employee_id 为 null（理论上不该发生但边缘）**会写 Commission 失败**。有没有兜底？待验证。
 
 ### 🔴 已知 gap
@@ -102,11 +104,13 @@
 | B4.1 | ERP 订单 ship 扣 inventory | ERP | `POST /orders/{id}/ship` | Inventory -qty + StockFlow | 🟢 |
 | B4.2 | Mall 订单下单扣 mall_inventory | mall | `create_order` | mall_inventory -qty + MallInventoryFlow(OUT) | 🟢 |
 | B4.3 | Mall 订单 cancel 退 mall_inventory | mall | `cancel_order / admin_cancel` | +qty + IN flow | 🟢 |
-| B4.4 | Mall 退货 approve 退 mall_inventory + 条码 | mall | `approve_return` | +qty + IN flow + barcode OUTBOUND→in_stock | 🟡（条码回退刚加） |
+| B4.4 | Mall 退货 approve 退 mall_inventory + 条码 | mall | `approve_return` | +qty + IN flow + barcode OUTBOUND→in_stock + outbound_order_id=NULL | 🟢（`e2e_mall_return_barcode_revert` 覆盖）|
 | B4.5 | ~~ERP 调拨到 mall 仓不做~~ ✅ **已实现**：仓间调拨单（桥 11）覆盖 ERP↔ERP / ERP↔mall / mall↔mall 四种路径 | — | `WarehouseTransfer` | 🟢 |
 
 ### E2E 测试状态
-- ❌ **B4.4 刚修的条码回退未验证**（outbound_order_id 的数据是否都有值？）
+- ✅ B4.4 条码回退真实数据回归 `e2e_mall_return_barcode_revert.py` 覆盖：
+  造两笔订单 × 2 瓶 OUTBOUND 条码，批准订单 1 退货 → 订单 1 条码 IN_STOCK +
+  outbound_order_id=NULL，订单 2 条码不受影响（按 outbound_order_id 精确过滤）
 
 ---
 

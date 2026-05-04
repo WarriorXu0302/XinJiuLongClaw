@@ -40,6 +40,10 @@ SCRIPTS = [
      "桥 B12 延伸：门店退货 5 场景 + 6 处一致性"),
     ("e2e_store_commission_in_payroll",
      "P0 修复验证：门店提成进月度工资单扫描（m6b3）"),
+    ("e2e_mall_profit_aggregation",
+     "桥 B3.4 + B3.5：mall 利润聚合多订单/多状态/refunded 排除"),
+    ("e2e_mall_return_barcode_revert",
+     "桥 B4.4：退货批准后条码 OUTBOUND→IN_STOCK + 订单隔离"),
 ]
 
 

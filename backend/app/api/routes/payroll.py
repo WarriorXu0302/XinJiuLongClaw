@@ -769,18 +769,25 @@ async def pay_salary(rec_id: str, body: PaySalaryRequest, user: CurrentUser, db:
     rec.paid_by = user.get('employee_id')
     rec.payment_voucher_urls = body.voucher_urls
 
-    # 把本工资单挂的所有 mall commission 条目标记为 settled
-    # 按 commission_id 精确结算：避免 settle 了同 order 的其它未挂进本工资单的 top-up 条目
-    # （B2B 订单的 commission 已在原有 finance 确认流程中处理；mall 是额外分支）
-    from sqlalchemy import update as _sql_update
+    # 把本工资单挂的所有商城/门店 commission 条目标记为 settled
+    # 按 commission_id 精确结算，覆盖 mall_order_id / store_sale_id 两种来源
+    # （B2B 订单的 commission 已在原有 finance 确认流程中处理；mall/store 在此分支）
+    from sqlalchemy import or_, update as _sql_update
     linked_rows = (await db.execute(
-        select(SalaryOrderLink.commission_id, SalaryOrderLink.mall_order_id)
+        select(
+            SalaryOrderLink.commission_id,
+            SalaryOrderLink.mall_order_id,
+            SalaryOrderLink.store_sale_id,
+        )
         .where(SalaryOrderLink.salary_record_id == rec.id)
-        .where(SalaryOrderLink.mall_order_id.is_not(None))
+        .where(or_(
+            SalaryOrderLink.mall_order_id.is_not(None),
+            SalaryOrderLink.store_sale_id.is_not(None),
+        ))
         .where(SalaryOrderLink.is_manager_share.is_(False))
     )).all()
-    linked_commission_ids = [cid for cid, _ in linked_rows if cid]
-    mall_order_ids_legacy = [mid for cid, mid in linked_rows if not cid]
+    linked_commission_ids = [cid for cid, _mid, _sid in linked_rows if cid]
+    mall_order_ids_legacy = [mid for cid, mid, _sid in linked_rows if not cid and mid]
     if linked_commission_ids:
         await db.execute(
             _sql_update(Commission)
@@ -797,7 +804,8 @@ async def pay_salary(rec_id: str, body: PaySalaryRequest, user: CurrentUser, db:
             .where(Commission.status == "pending")
             .values(status="settled", settled_at=now)
         )
-    mall_order_ids = [mid for _, mid in linked_rows if mid]  # 通知时计数用
+    mall_order_ids = [mid for _cid, mid, _sid in linked_rows if mid]  # 通知时计数用
+    store_sale_ids = [sid for _cid, _mid, sid in linked_rows if sid]
 
     # 推送工资到账通知给员工本人
     from app.models.user import User
@@ -820,17 +828,24 @@ async def pay_salary(rec_id: str, body: PaySalaryRequest, user: CurrentUser, db:
         select(MallUser).where(MallUser.linked_employee_id == rec.employee_id)
     )).scalar_one_or_none()
     if mall_sm:
+        extra = []
+        if mall_order_ids:
+            extra.append(f"{len(mall_order_ids)} 单商城提成")
+        if store_sale_ids:
+            extra.append(f"{len(store_sale_ids)} 笔门店零售提成")
+        extra_str = ("，其中包含 " + "、".join(extra)) if extra else ""
         await notify_mall_user(
             db, mall_user_id=mall_sm.id,
             title=f"{rec.period} 工资已发放",
-            content=f"本月实发工资 ¥{rec.actual_pay}，其中包含 {len(mall_order_ids)} 单商城提成。",
+            content=f"本月实发工资 ¥{rec.actual_pay}{extra_str}。",
             entity_type="SalaryRecord", entity_id=rec.id,
         )
 
     await db.flush()
     await log_audit(db, action="pay_salary", entity_type="SalaryRecord", entity_id=rec.id,
                     changes={"employee": emp_name, "period": rec.period, "amount": float(rec.actual_pay),
-                             "mall_order_count": len(mall_order_ids)},
+                             "mall_order_count": len(mall_order_ids),
+                             "store_sale_count": len(store_sale_ids)},
                     user=user)
     return {"detail": f"{emp_name} {rec.period} 工资 ¥{rec.actual_pay} 已发放"}
 

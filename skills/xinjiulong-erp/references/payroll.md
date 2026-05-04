@@ -161,6 +161,61 @@ POST /api/hr/commissions/{id}/settle
 
 **关键约束（Bug #3 修复）**：`SalaryOrderLink` 有 `(order_id, is_manager_share)` 唯一约束。并发生成工资单时第二个请求会 IntegrityError——Agent 遇到这个错误时**不要自动重试**，告诉用户"该订单提成已被其他工资单领取"。
 
+### 提成来源三合一（B2B / mall / store）
+
+`Commission` 可以挂三种订单，Agent 查明细时注意字段三选一非空：
+- `Commission.order_id` → ERP B2B 订单
+- `Commission.mall_order_id` → 小程序订单
+- `Commission.store_sale_id` → 门店零售（桥 B12）
+
+`SalaryOrderLink` 同样三选一（`ck_salary_order_link_exclusive_ref` CHECK 约束）。  
+**工资单扫描 filter**（`generate_salary_records`）：
+```sql
+WHERE employee_id = ?
+  AND (mall_order_id IS NOT NULL OR store_sale_id IS NOT NULL OR order_id IS NOT NULL)
+  AND status = 'pending'
+```
+`reversed` 永远不会进工资单。`is_adjustment=True` 的负数行**是 pending 状态**，所以会被扫入抵扣。
+
+## Agent 场景 6.1：跨月退货追回 + 挂账（决策 #1，m6c1）
+
+### 机制
+
+当退货 approve 时发现原 commission 已 `settled`（上月工资已发），系统：
+1. **不动**原 commission（审计历史保留）
+2. **新建** `Commission(is_adjustment=True, commission_amount=-原金额, status=pending)`
+3. 下月 `generate_salary_records` 自动把这条负数扫入工资单 → 实扣
+
+**工资仍不够扣的挂账**（`salary_adjustments_pending` 表）：
+- 当月 `total_pay < 0` → `actual_pay=0` + 新建 `SalaryAdjustmentPending(pending_amount=-total_pay, source_salary_record_id=rec.id)`
+- 下月 `generate_salary_records` 先扫挂账（先进先扣），扣完标 `settled_in_salary_id=新 rec.id`
+
+### Agent 回答话术
+
+**员工问："上月工资条写的 ¥5000 怎么实发只到 ¥4900？"**
+1. 调 `GET /api/payroll/salary-records/{rec_id}/detail`
+2. 看 `clawback_details[]` 数组：每条有 `origin_order_no / origin_amount / amount`（负数）
+3. 翻译："你 3 月 X 号的订单 MO2026XXX 客户退货了，原 ¥100 提成上月已发，本月扣回"
+
+**员工问："本月工资 ¥0 还挂账了？"**
+- 看 `clawback_new_pending[]`：`pending_amount` + `reason`
+- 翻译："本月退货冲销 ¥X 但工资不够扣，系统挂账到下月，下月发薪时自动扣"
+
+**员工问："今年我被扣回多少？"**
+- mall 业务员调 `/api/mall/workspace/my-commissions/stats?year=2026`
+- 翻译："追回 commission 合计 ¥X，共 N 笔"
+
+### 老板回答话术
+
+**"为什么业务员 X 上月工资条比我预期的少？"**
+- 确认是否有跨月退货：查 clawback_details
+- 如果有待扣挂账：看 SalaryAdjustmentPending 表，admin/boss 可调 `/api/payroll/salary-records/{id}/detail`
+
+### 幂等保证
+
+- 同一 Commission 只能产生一条 adjustment（DB UNIQUE `uq_commission_adjustment_source` m6c6）
+- `SalaryAdjustmentPending.settled_in_salary_id` 确保挂账只被扣一次
+
 ## Agent 场景 7：KPI 考核项
 
 ```

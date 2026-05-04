@@ -298,6 +298,102 @@
 
 ---
 
+## 十二点五、2026 Q2 新增决策 + 加固（Agent 一定要知道）
+
+### 坑 Q2-1：跨月退货不能直接"冲减上月已发工资"
+
+**事发**：业务员 3 月工资 ¥6000 已发，4 月某单退货 ¥300 提成要追回。老板问 "为啥 4 月发 ¥5700？" —— 实际是 3 月退货 ¥300 冲到 4 月扣。
+**正确做法**（决策 #1 · m6c1）：
+- 系统**不动**已 settled 的 commission（审计历史保留）
+- 新建 `Commission(is_adjustment=True, amount=-300, status=pending)`
+- 下月工资单自动扫入
+- Agent 回答时先查 `clawback_details[]`，告诉业务员"是 3 月 MO-xxx 单客户退货冲减"，不要说"系统扣你工资"
+
+### 坑 Q2-2：工资不够扣走"挂账"而不是"欠公司"
+
+**事发**：员工当月只来 3 天班 + 刚好退货 ¥500 → `total_pay = -¥200`。若写 -¥200 到工资条，员工以为要倒贴公司。
+**正确做法**（决策 #1 · Step B）：
+- `actual_pay = 0`，挂一条 `SalaryAdjustmentPending(pending_amount=200)`
+- 下月工资**先扣历史挂账**（`ORDER BY created_at ASC` 先进先扣）
+- Agent 回答："本月没有倒贴，只是把 ¥200 挂到下月继续扣"
+
+### 坑 Q2-3：月底"业务员排行榜"不能只看实时
+
+**事发**：老板 5 月 5 日发了 4 月奖金给 Top3，5 月 10 日客户退货导致某 Top3 的 4 月 GMV 实时排行掉到第 5，老板问 "我发错奖金了吗？"
+**正确做法**（决策 #2 · m6c4）：
+- 每月 1 号 00:05 定时 `job_build_last_month_snapshot` 冻结快照
+- `mall_monthly_kpi_snapshot(employee_id, period UNIQUE)` 表存 gmv/order_count/commission
+- API `GET /api/mall/admin/dashboard/salesman-ranking?mode=snapshot|realtime&year_month=YYYY-MM`
+- Agent 回答排名时**主动说明**："快照视图是 5 月 1 日冻结的（¥XX，Top1）；实时视图剔除了退货，Top1 已经换了"
+
+### 坑 Q2-4：门店散客收银 customer_id 可以为空
+
+**事发**（决策 #3 · m6c2）：门店零售的客户不都是小程序会员，允许"散客"直接买。
+- `store_sales.customer_id` **nullable**；`customer_walk_in_name/phone` 做文本快照（营销用）
+- `store_sale_returns.customer_id` 同步 nullable（散客原单也能退）
+- Agent 收银时不能强制让店员"必须选一个会员"，看到散客入参直接提交
+
+### 坑 Q2-5：商品销量显示要区分 total vs net
+
+**事发**（决策 #4 · m6c3）：老板问"A 商品 4 月销量 1000 瓶，怎么榜单显 980？"
+- `MallProduct.total_sales` = 曾售卖瓶数（含退货，不回退）
+- `MallProduct.net_sales` = 净销量（退货时扣，`max(0, net - qty)`）
+- 首页/搜索/榜单排序都切换到 `net_sales`
+- 管理后台 ProductList 列显示 "总/净"，净 < 总时标红
+- Agent 回答销量时用 `net_sales`（除非老板明确问"曾经卖过多少"）
+
+### 坑 Q2-6：退货 approve 双击 = 双扣提成（G12 已修）
+
+**事发**：财务按"批准"按钮后网卡，3 秒重按，两次请求并发。应用层 pending check 不够，会建两条 adjustment Commission 使业务员下月被双扣。
+**正确做法**（m6c6 修复）：
+- `return_service.approve_return` 开头 `SELECT FOR UPDATE` 锁 return request + order
+- DB 层给 `commissions.adjustment_source_commission_id` 加 partial UNIQUE（`WHERE is_adjustment=true`）兜底
+- Agent 看到 "UniqueViolation adjustment source" 报错**不要重试**，告知"系统已建过追回，不能重复"
+
+### 坑 Q2-7：业务员切门店不能直接改（G14）
+
+**事发**：业务员王五 A 店当天开了 ¥8000 销售单，晚上被 admin 调到 B 店 → 次日 A 店客户来退货，王五在 B 店提不起 return（`403 非本店店员`）。
+**正确做法**：
+- `update_salesman` 切 `assigned_store_id` 前自动检查：
+  - 有待审退货 → 409 阻塞（必须处理完再切）
+  - 24h 内 completed 销售单 → 409 + 要求 `force_switch=true`
+- Agent 调 update-salesman 时如果带 store 切换，先 GET 业务员在途状态告诉用户 "王五 A 店还有 3 笔今天开的单，切到 B 店后他无法处理退货，确认继续吗？"
+
+### 坑 Q2-8：业务员看客户手机号要脱敏 + reveal 审计（G16）
+
+**事发**：离职业务员临走前拉完所有客户手机号。
+**正确做法**：
+- `/api/mall/salesman/my-customers` 列表返回脱敏号（`138****1234`）
+- `/api/mall/salesman/my-customers/{id}/phone` 揭示完整号 + 写 `mall_customer.reveal_phone` 审计
+- miniprogram 点"拨号"按钮才调 reveal 端点
+- Agent 代业务员"发短信 / 查电话"类请求时必须走 reveal 流程，不能批量捞
+
+### 坑 Q2-9：凭证上传超时不是一定有人看（G15）
+
+**事发**：业务员周五 18:00 上传凭证，下周一才有人处理，中间 67 小时无告警。
+**正确做法**：
+- APScheduler 每小时 :15 扫 `mall_payments.status=PENDING_CONFIRMATION`
+- 超 24h → 推 admin/boss/finance；超 48h 二次提醒
+- Agent 被问"凭证多久没人看了"时查 `created_at` 并告诉业务员"已挂 X 小时"
+
+### 坑 Q2-10：门店收银搜客户关键字 < 5 字符会被拒（G11）
+
+**事发**（修复前）：店员输 "138" 能拉全库手机号。
+**正确做法**：
+- 关键字 `min_length=5`（数字前缀/姓名）
+- 返回脱敏手机号 + `is_local_customer` 标
+- 本店消费过的客户排前
+- Agent 帮店员建客户卡片时如果只给 3 位，提示"至少输 5 位 / 改用新建客户端点"
+
+### 坑 Q2-11：禁用业务员要通知客户（G17）
+
+**事发**：业务员违规被 admin 禁用 → 系统释放了 5 单，但客户昨天还看到"已接单"通知，今天变回"待接单"，打客服电话质问。
+**正确做法**：
+- `disable_salesman` 释放每条 assigned 订单时自动 `notify_mall_user` 客户"订单配送员变更"
+- Agent 执行禁用操作前**先 GET 业务员 assigned 订单数**告诉 admin："王五有 5 单在配送中，禁用后这些客户会收到重新派单通知，确认继续？"
+
+---
+
 ## 十三、Agent 交互类（AI 特有的坑）
 
 ### 坑 33：Agent 猜用户意图直接调接口

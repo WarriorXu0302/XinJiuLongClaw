@@ -241,3 +241,86 @@ Commission.commission_amount = comm_base × commission_rate × kpi_coefficient
 - 用户说"这单该付多少" → 给 `customer_paid_amount`
 - 用户说"这单欠多少" → `customer_paid_amount - SUM(confirmed Receipt.amount)`
 - 用户说"这单已收多少" → `SUM(confirmed Receipt.amount)`（绝对不含 pending）
+
+---
+
+## 2026 Q2 新增字段
+
+### Commission 追回字段（决策 #1，m6c1）
+
+| 字段 | 语义 |
+|---|---|
+| `commissions.is_adjustment` | 布尔；True = 跨月退货追回的负数 commission 行 |
+| `commissions.adjustment_source_commission_id` | 指向原 settled commission；partial UNIQUE `WHERE is_adjustment=true`（m6c6） |
+| `commissions.store_sale_id` | 新增；门店零售的 commission 来源三选一（order_id / mall_order_id / store_sale_id） |
+
+### SalaryAdjustmentPending（决策 #1，m6c1）
+
+| 字段 | 语义 |
+|---|---|
+| `employee_id` | 欠扣员工 |
+| `pending_amount` | 欠扣金额（正数；CHECK > 0） |
+| `source_salary_record_id` | 产生挂账的源工资单（当月工资不足） |
+| `settled_in_salary_id` | 扣清挂账的目标工资单（NULL=未结清） |
+| `settled_at` | 扣清时间 |
+| `reason` | 挂账原因（如 "2026-05 当月工资不足扣减" 或 "跨月退货追回"） |
+
+**Agent 读取入口**：`GET /api/payroll/salary-records/{id}/detail` 的 `clawback_new_pending[]`
+
+### MallMonthlyKpiSnapshot（决策 #2，m6c4）
+
+| 字段 | 语义 |
+|---|---|
+| `employee_id` | 业务员对应 employees.id |
+| `period` | `YYYY-MM` |
+| `gmv / order_count / commission_amount` | 冻结值 |
+| `snapshot_at` | 冻结时间（冻结后不再改） |
+| UNIQUE(employee_id, period) | 每员工每月最多一条 |
+
+**Agent 读法**：调 `GET /api/mall/admin/dashboard/salesman-ranking?mode=snapshot` 透明封装
+
+### StoreSale walk-in 字段（决策 #3，m6c2）
+
+| 字段 | 语义 |
+|---|---|
+| `store_sales.customer_id` | 改 **nullable**：散客场景为 NULL |
+| `store_sales.customer_walk_in_name` | String(100)，散客姓名（选填） |
+| `store_sales.customer_walk_in_phone` | String(20)，散客手机号（选填） |
+| `store_sale_returns.customer_id` | 同步 nullable（散客原单退货） |
+
+**展示口径**：
+- `customer_id` 非空 → 查 MallUser 取 nickname/real_name
+- `customer_id` NULL + `walk_in_name` 非空 → "散客·张三"
+- `customer_id` NULL + 只有 `walk_in_phone` → "散客·尾号1234"
+- 都 NULL → "散客"
+
+### MallProduct.net_sales（决策 #4，m6c3）
+
+| 字段 | 语义 |
+|---|---|
+| `mall_products.total_sales` | 累计售卖瓶数（不回退，审计口径） |
+| `mall_products.net_sales` | 净销量（退货时扣，保底 0，榜单口径） |
+
+**写入点**：
+- confirm_payment / partial_close：total_sales += qty；net_sales += qty
+- approve_return：net_sales = max(0, net_sales - qty)；total_sales 不动
+
+### audit_logs FK（G1/G2/G8，m6c5 硬化）
+
+| 字段 | 语义 |
+|---|---|
+| `audit_logs.actor_id` | 原员工 id；FK `ON DELETE SET NULL`（员工离职后审计记录保留不丢失） |
+| `audit_logs.mall_user_id` | 原 mall_user id；同上 SET NULL |
+| `audit_logs.actor_type` | `employee` / `mall_user` |
+
+### 审计 action 值清单（常用）
+
+| action | 触发点 |
+|---|---|
+| `store_sale.create` | 店员小程序收银 |
+| `store_sale.create_by_admin` | 管理端代下 |
+| `store_return.apply/approve/reject` | 门店退货三状态 |
+| `mall_return.apply/approve/reject/mark_refunded` | mall 退货四状态 |
+| `mall_customer.reveal_phone` | 业务员点拨号查客户手机号（G16） |
+| `mall_salesman.disable/enable/rebind-employee` | 业务员管理 |
+| `retail_commission_rate.create/update/delete` | 提成率维护 |

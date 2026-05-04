@@ -445,3 +445,146 @@ GET    /api/audit-logs                                     审计日志列表（
 GET    /api/audit-logs/actions                             所有 action 类型
 GET    /api/audit-logs/entity-types                        所有 entity 类型
 ```
+
+## 门店零售（桥 B12）
+
+```
+POST   /api/store-sales                                    管理端代下收银单（boss/warehouse）
+GET    /api/store-sales                                    销售流水列表（boss/finance/warehouse/hr）
+GET    /api/store-sales/stats                              统计聚合（支持 group_by=store 每店一行 + 合计）
+GET    /api/store-sales/export                             CSV 导出（带 UTF-8 BOM，支持 Excel 中文）
+GET    /api/store-sales/{sale_id}                          销售单详情（含 items）
+
+# 提成率
+GET    /api/retail-commission-rates                        提成率列表（按员工/商品）
+POST   /api/retail-commission-rates                        新建提成率（唯一约束 employee+product）
+PUT    /api/retail-commission-rates/{rate_id}              更新提成率
+DELETE /api/retail-commission-rates/{rate_id}              删除
+
+# 门店退货
+POST   /api/store-returns                                  admin 列表/详情/审批
+POST   /api/store-returns/pending-approval                 审批中心聚合
+```
+
+## 小程序 C 端
+
+```
+POST   /api/mall/auth/login-password                       账密登录
+POST   /api/mall/auth/register                             注册（必传 invite_code）
+POST   /api/mall/auth/wechat-login                         微信登录
+POST   /api/mall/auth/refresh                              刷新 token
+GET    /api/mall/products                                  商品列表（sort=hot|lasted|discount，hot 按 net_sales）
+GET    /api/mall/products/{id}                             商品详情（返回 soldNum + netSoldNum 双字段）
+GET    /api/mall/search/products                           商品搜索（按 net_sales 排序）
+POST   /api/mall/orders                                    C 端下单
+GET    /api/mall/orders                                    我的订单列表
+```
+
+## 小程序业务员（mall/salesman/*）
+
+```
+# 工作台基础
+GET    /api/mall/salesman/orders/pool                      抢单池（独占期 / 开放期两阶段）
+POST   /api/mall/salesman/orders/{id}/claim                抢单（FOR UPDATE + 推荐人优先校验）
+POST   /api/mall/salesman/orders/{id}/release              释放订单（触发 skip_log）
+POST   /api/mall/salesman/orders/{id}/ship                 出库（mall 仓必扫条码）
+POST   /api/mall/salesman/orders/{id}/deliver              送达（需上传 delivery_photos）
+POST   /api/mall/salesman/orders/{id}/upload-payment-voucher  上传凭证（sha256 防篡改）
+
+# 我的客户（G16 隐私加固）
+GET    /api/mall/salesman/my-customers                     列表（手机号脱敏返回）
+GET    /api/mall/salesman/my-customers/{id}/phone          揭示完整手机号（写 reveal_phone 审计）
+
+POST   /api/mall/salesman/invite-codes                     生成邀请码（8 位，2h 过期，20/日上限）
+GET    /api/mall/salesman/skip-alerts?self=1               我的跳单告警
+GET    /api/mall/salesman/stats                            我的本月业绩
+```
+
+## 小程序工作台复用（mall/workspace/*）
+
+```
+# ERP 业务模块薄转发
+POST   /api/mall/workspace/attendance/checkin              打卡
+GET    /api/mall/workspace/attendance/monthly-summary      本月考勤汇总
+GET/POST /api/mall/workspace/leave-requests                请假
+GET/POST /api/mall/workspace/expense-claims                报销
+GET/POST /api/mall/workspace/inspection-cases              稽查
+GET    /api/mall/workspace/sales-targets/my-dashboard      KPI 看板
+GET    /api/mall/workspace/notifications                   通知中心
+
+# 门店店员端（cashier）
+GET    /api/mall/workspace/store-sales/verify-barcode      扫码预校验
+POST   /api/mall/workspace/store-sales                     提交收银（支持散客 customer_id=null）
+GET    /api/mall/workspace/store-sales/my/sales            我的销售流水
+GET    /api/mall/workspace/store-sales/my/summary          本月业绩汇总
+GET    /api/mall/workspace/store-sales/customers/search    客户搜索（min_length=5，脱敏，本店优先）
+
+# 门店退货（cashier 发起）
+POST   /api/mall/workspace/store-returns                   店员申请退货
+GET    /api/mall/workspace/store-returns                   我发起的退货列表
+
+# G6：业务员自查 commission 流水
+GET    /api/mall/workspace/my-commissions                  流水列表（status=all|pending|settled|reversed|adjustment）
+GET    /api/mall/workspace/my-commissions/stats            按 status 汇总（本月/指定年月）
+```
+
+## 小程序管理后台（mall/admin/*）
+
+```
+# 用户 + 业务员
+GET    /api/mall/admin/users                               C 端用户列表（支持 status 过滤）
+POST   /api/mall/admin/users/{id}/reactivate               启用归档用户（必传 reason）
+POST   /api/mall/admin/users/{id}/disable                  禁用用户
+PUT    /api/mall/admin/users/{id}/referrer                 换绑推荐人（admin/boss，记审计）
+
+POST   /api/mall/admin/salesmen                            手工创建业务员
+POST   /api/mall/admin/salesmen/import                     批量导入业务员
+PUT    /api/mall/admin/salesmen/{id}                       更新业务员（切 store 会检查在途，需 force_switch=true 强切）
+POST   /api/mall/admin/salesmen/{id}/disable               禁用业务员（自动释放 assigned 订单 + 通知客户）
+PUT    /api/mall/admin/salesmen/{id}/rebind-employee       换绑 ERP 员工
+
+# 订单
+POST   /api/mall/admin/orders/{id}/reassign                管理员改派
+POST   /api/mall/admin/orders/{id}/confirm-payment         财务确认收款（触发利润+提成）
+POST   /api/mall/admin/orders/{id}/cancel                  取消订单
+
+# 凭证
+GET    /api/mall/admin/payments/pending                    待确认凭证列表（财务审批中心）
+POST   /api/mall/admin/payments/{id}/reject                驳回凭证（必传 reason）
+
+# 退货
+GET    /api/mall/admin/returns                             退货申请列表
+POST   /api/mall/admin/returns/{id}/approve                批准（FOR UPDATE 锁，自动建 adjustment commission）
+POST   /api/mall/admin/returns/{id}/reject                 驳回
+POST   /api/mall/admin/returns/{id}/mark-refunded          标记已退款（资金结算）
+
+# 跳单告警
+GET    /api/mall/admin/skip-alerts                         全局跳单告警
+POST   /api/mall/admin/skip-alerts/{id}/resolve            处理告警
+
+# 看板 + 排行（决策 #2）
+GET    /api/mall/admin/dashboard/summary                   看板汇总（返 today/month 利润 + 毛利率 + 坏账）
+GET    /api/mall/admin/dashboard/salesman-ranking          业务员排行（mode=snapshot|realtime + year_month）
+POST   /api/mall/admin/dashboard/salesman-ranking/build-snapshot        手工冻结某月（admin/boss）
+POST   /api/mall/admin/dashboard/salesman-ranking/build-snapshot-range  批量回补历史月份
+
+# 定时任务
+POST   /api/mall/admin/housekeeping/archive-inactive       手动触发归档
+GET    /api/mall/admin/housekeeping/logs                   任务日志
+
+# 登录审计
+GET    /api/mall/admin/login-logs                          全局登录日志
+GET    /api/mall/admin/users/{id}/login-logs               某用户登录历史
+GET    /api/mall/admin/login-logs/stats                    频率统计
+```
+
+## 工资单追回详情（决策 #1）
+
+```
+GET    /api/payroll/salary-records/{id}/detail             工资明细含 clawback_details / clawback_settled_history / clawback_new_pending
+```
+
+返回字段：
+- `clawback_details[]`：本期扫入的 is_adjustment 负数 Commission（含 origin_order_no / origin_amount / origin_ref_type）
+- `clawback_settled_history[]`：本月结清的历史挂账
+- `clawback_new_pending[]`：本月工资不足挂到下月

@@ -847,6 +847,114 @@ Turn 4:
 
 ---
 
+## 场景 31：业务员问"我本月工资为啥少钱"（决策 #1 追回）
+
+**用户话术**：
+- "我工资条 5000，怎么到账只有 4700？"
+- "上月已经发的钱这月又扣回去了？"
+
+**Agent 步骤**：
+
+1. **拿 employee_id**（从 JWT）
+2. **定位最近一期 SalaryRecord**：
+   - `GET /api/payroll/salary-records?employee_id=X&period=当前月`
+   - 或从 JWT 的 role 推断（salesman 只能查自己）
+3. **查明细** `GET /api/payroll/salary-records/{id}/detail`
+4. **看 `clawback_details[]` 非空 →** 逐条翻译：
+   ```
+   原订单 {origin_order_no}（{origin_ref_type}）
+   上月已发 ¥{origin_amount} 提成
+   客户退货，本月扣回 ¥{abs(amount)}
+   ```
+5. **看 `clawback_settled_history[]` 非空 →** 说明本月扣了历史挂账：
+   ```
+   历史挂账 ¥{pending_amount}（{reason}）本月已扣清
+   ```
+6. **看 `clawback_new_pending[]` 非空 →** 本月工资不足挂账：
+   ```
+   本月 ¥{pending_amount} 没扣完，下月工资发放时自动先扣
+   ```
+
+**不要说**："系统扣你工资"。应说："是 X 月 MO-xxx 单客户退货冲减，参见你的退货流水"
+
+---
+
+## 场景 32：业务员查自己 commission 流水（G6）
+
+**用户话术**：
+- "我本月接了多少单提成？"
+- "哪些订单提成被冲掉了？"
+
+**Agent 步骤**：
+
+1. `GET /api/mall/workspace/my-commissions/stats?year=2026&month=5`
+   - 返回 `by_status.pending / settled / reversed` 金额 + 数量
+   - 返回 `adjustment` 追回数量 + 金额
+2. 用户追问"哪几单冲掉了" →
+   - `GET /api/mall/workspace/my-commissions?status=reversed&year=2026&month=5`
+3. 用户追问"追回具体哪单" →
+   - `GET /api/mall/workspace/my-commissions?status=adjustment&year=2026&month=5`
+   - 每条带 `origin_commission_amount` + `origin_status` 方便理解
+4. 绝对不要代用户点"申诉"（第一版没开放申诉端点）
+
+---
+
+## 场景 33：老板问月度业务员排行（决策 #2 快照/实时双模式）
+
+**用户话术**：
+- "5 月 Top3 业务员是谁"
+- "上月业绩排名出来了吗"
+
+**Agent 步骤**：
+
+1. **先问用户**："您要看哪个口径？"
+   - **快照**：月初冻结，发完奖金后数据不变
+   - **实时**：剔除退货，能看到"真实贡献"
+2. 默认推快照（发奖金场景更稳）
+3. `GET /api/mall/admin/dashboard/salesman-ranking?mode=snapshot&year_month=2026-05&limit=10`
+4. 如果返回 `records=[]` 且 `snapshot_count=0` → 告诉用户"该月快照尚未生成，5 月 1 号 00:05 会自动冻结；需要现在冻结可调 build-snapshot"
+5. **始终注明数据口径**，让老板明确"这是 5/1 冻结的历史快照"还是"实时剔退货"
+
+---
+
+## 场景 34：门店收银（散客 vs 会员，决策 #3）
+
+**用户话术**（店员）：
+- "那个客户没注册，给我扫了单"
+- "他说他是会员，手机尾号 1234"
+
+**Agent 步骤**：
+
+1. **识别模式**：
+   - "没注册" → 散客模式
+   - "会员" → 按手机号/姓名搜（`min_length=5`）
+2. **会员模式**：
+   - `GET /api/mall/workspace/store-sales/customers/search?keyword=张三1234`
+   - 返回 phone 已脱敏（`138****1234`）+ `is_local_customer` 标
+   - 若无命中 → 问用户"改散客模式？还是先帮客户注册？"
+3. **散客模式**：
+   - 直接走 `POST /api/mall/workspace/store-sales`，body 里 `customer_id=null`
+   - 如果客户愿意留手机号：加 `customer_walk_in_name` + `customer_walk_in_phone`
+4. 提交时走扫码 `verify-barcode` → 填 `line_items` → `POST /store-sales`
+
+---
+
+## 场景 35：Agent 执行退货 approve 遇到并发错误（G12）
+
+**场景**：
+- 财务点"批准"按钮，后台返 500 或 UNIQUE violation
+- `UniqueViolation on uq_commission_adjustment_source`
+
+**Agent 步骤**：
+
+1. **绝对不要重试**（可能是前端双击已成功建过 adjustment）
+2. 查 `GET /api/mall/admin/returns/{id}` 看 status：
+   - `approved / refunded` → 告诉用户"已审批完成，不需重复操作"
+   - `pending` → 汇报错误让用户再试一次（但概率很低）
+3. 如果用户坚持"我刚按的没生效" → 提示他先刷新列表
+
+---
+
 ## 通用原则（Agent 每次都必须遵守）
 
 1. **写入前必须用卡片按钮确认**（不依赖打字"确认"）

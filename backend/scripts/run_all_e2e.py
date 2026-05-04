@@ -54,6 +54,8 @@ SCRIPTS = [
      "决策 #2：月榜快照 vs 实时双显（m6c4）"),
     ("e2e_audit_coverage",
      "审计三连 G1/G2/G8：门店收银/退货/mall 退货金额变更留痕"),
+    ("e2e_dashboard_profit_export",
+     "G3/G7/G9：stats group_by=store + 快照批量回补 + 利润聚合"),
 ]
 
 

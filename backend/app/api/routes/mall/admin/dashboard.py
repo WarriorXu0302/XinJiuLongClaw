@@ -5,6 +5,7 @@
 """
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends
@@ -157,6 +158,23 @@ async def dashboard_summary(
         .where(MallUser.created_at >= month_start)
     )).scalar() or 0)
 
+    # ── G9：本月利润/毛利率（聚合 profit_service）─────────
+    from app.services.mall.profit_service import aggregate_mall_profit
+    m_profit_data = await aggregate_mall_profit(
+        db, date_from=month_start,
+    )
+    # 今日利润（按今日窗口单独算，口径一致）
+    t_profit_data = await aggregate_mall_profit(
+        db, date_from=t_start, date_to=t_end,
+    )
+
+    def _gross_margin(rev: Decimal, cost: Decimal, bad_debt: Decimal) -> Optional[str]:
+        """毛利率 = (revenue - cost - bad_debt) / revenue。0 收入返 None。"""
+        if rev <= 0:
+            return None
+        gm = (rev - cost - bad_debt) / rev * 100
+        return f"{gm:.1f}"
+
     # ── 30 天趋势 ─────────────────────────────────────────
     trend_start = now_sh.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=29)
     trend_start_utc = trend_start.astimezone(timezone.utc)
@@ -294,12 +312,24 @@ async def dashboard_summary(
         for inv, sku, prod in low_rows
     ]
 
+    t_rev = Decimal(t_profit_data["total_revenue"])
+    t_cost = Decimal(t_profit_data["total_cost"])
+    t_bd = Decimal(t_profit_data["total_bad_debt"])
+    m_rev = Decimal(m_profit_data["total_revenue"])
+    m_cost = Decimal(m_profit_data["total_cost"])
+    m_bd = Decimal(m_profit_data["total_bad_debt"])
+
     return {
         "today": {
             "orders": today_orders,
             "received": str(today_received),
             "new_users": today_new_users,
             "cancelled": today_cancelled,
+            # G9 profit cards
+            "revenue": t_profit_data["total_revenue"],
+            "profit": t_profit_data["total_profit"],
+            "commission": t_profit_data["total_commission"],
+            "gross_margin_pct": _gross_margin(t_rev, t_cost, t_bd),
         },
         "yesterday": {
             "orders": y_orders,
@@ -318,6 +348,12 @@ async def dashboard_summary(
             "orders": m_orders,
             "received": str(m_received),
             "new_users": m_new_users,
+            # G9 profit cards
+            "revenue": m_profit_data["total_revenue"],
+            "profit": m_profit_data["total_profit"],
+            "commission": m_profit_data["total_commission"],
+            "bad_debt": m_profit_data["total_bad_debt"],
+            "gross_margin_pct": _gross_margin(m_rev, m_cost, m_bd),
         },
         "trend": trend,
         "salesman_rank": salesman_rank,
@@ -472,3 +508,52 @@ async def build_snapshot_admin(
         notes=f"手工回补 by {user.get('name') or user.get('id')}",
     )
     return result
+
+
+@router.post("/salesman-ranking/build-snapshot-range")
+async def build_snapshot_range_admin(
+    user: CurrentUser,
+    from_month: str,  # "YYYY-MM"
+    to_month: str,  # inclusive
+    db: AsyncSession = Depends(get_db),
+):
+    """批量回补某段月份快照（admin/boss）。仅系统上线初期补历史数据用。
+
+    示例：from_month=2025-06, to_month=2026-04 → 逐月 UPSERT 共 11 条 period 的快照。
+    """
+    require_role(user, "admin", "boss")
+    try:
+        fy_s, fm_s = from_month.split("-")
+        ty_s, tm_s = to_month.split("-")
+        fy, fm = int(fy_s), int(fm_s)
+        ty, tm = int(ty_s), int(tm_s)
+    except Exception:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="month 格式应为 YYYY-MM")
+
+    if (fy, fm) > (ty, tm):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="from_month 必须早于 to_month")
+
+    from app.services.mall import kpi_snapshot_service as kss
+    results = []
+    y, m = fy, fm
+    while (y, m) <= (ty, tm):
+        r = await kss.build_snapshot_for_month(
+            db, y, m,
+            notes=f"批量回补 by {user.get('name') or user.get('id')}",
+        )
+        results.append(r)
+        if m == 12:
+            y, m = y + 1, 1
+        else:
+            m += 1
+    await db.flush()
+    return {
+        "ok": True,
+        "from_month": from_month,
+        "to_month": to_month,
+        "months_processed": len(results),
+        "total_upserted": sum(r["upserted"] for r in results),
+        "details": results,
+    }

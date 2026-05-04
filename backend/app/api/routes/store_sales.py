@@ -223,10 +223,86 @@ async def stats(
     store_id: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    group_by: Optional[str] = None,  # G3：传 "store" 返每店一行
     db: AsyncSession = Depends(get_db),
 ):
-    """按店/时间窗口聚合总销售额/成本/利润/提成/瓶数。"""
+    """按店/时间窗口聚合总销售额/成本/利润/提成/瓶数。
+
+    group_by="store" 时返 {by_store: [...], total: {...}}，每店一行 + 合计。
+    """
     require_role(user, "boss", "finance", "warehouse", "hr")
+
+    base_filters = []
+    if store_id:
+        base_filters.append(StoreSale.store_id == store_id)
+    if start_date:
+        base_filters.append(StoreSale.created_at >= f"{start_date} 00:00:00+00")
+    if end_date:
+        base_filters.append(StoreSale.created_at < f"{end_date} 23:59:59+00")
+
+    if group_by == "store":
+        group_stmt = select(
+            StoreSale.store_id,
+            func.coalesce(func.sum(StoreSale.total_sale_amount), 0),
+            func.coalesce(func.sum(StoreSale.total_cost), 0),
+            func.coalesce(func.sum(StoreSale.total_profit), 0),
+            func.coalesce(func.sum(StoreSale.total_commission), 0),
+            func.coalesce(func.sum(StoreSale.total_bottles), 0),
+            func.count(StoreSale.id),
+        ).group_by(StoreSale.store_id)
+        for f in base_filters:
+            group_stmt = group_stmt.where(f)
+        rows = (await db.execute(group_stmt)).all()
+        store_ids = [r[0] for r in rows]
+        stores = {
+            w.id: w.name for w in (await db.execute(
+                select(Warehouse).where(Warehouse.id.in_(store_ids))
+            )).scalars()
+        } if store_ids else {}
+        by_store = []
+        total = {
+            "total_sale_amount": Decimal("0"),
+            "total_cost": Decimal("0"),
+            "total_profit": Decimal("0"),
+            "total_commission": Decimal("0"),
+            "total_bottles": 0,
+            "sale_count": 0,
+        }
+        for r in rows:
+            sid, rev, cost, profit, com, bottles, count = r
+            margin = None
+            if rev and Decimal(str(rev)) > 0:
+                margin = f"{(Decimal(str(profit)) / Decimal(str(rev)) * 100):.1f}"
+            by_store.append({
+                "store_id": sid,
+                "store_name": stores.get(sid, sid[:8]),
+                "total_sale_amount": str(rev),
+                "total_cost": str(cost),
+                "total_profit": str(profit),
+                "total_commission": str(com),
+                "total_bottles": int(bottles or 0),
+                "sale_count": int(count or 0),
+                "gross_margin_pct": margin,
+            })
+            total["total_sale_amount"] += Decimal(str(rev))
+            total["total_cost"] += Decimal(str(cost))
+            total["total_profit"] += Decimal(str(profit))
+            total["total_commission"] += Decimal(str(com))
+            total["total_bottles"] += int(bottles or 0)
+            total["sale_count"] += int(count or 0)
+        by_store.sort(key=lambda x: Decimal(x["total_sale_amount"]), reverse=True)
+        total_margin = None
+        if total["total_sale_amount"] > 0:
+            total_margin = f"{(total['total_profit'] / total['total_sale_amount'] * 100):.1f}"
+        return {
+            "by_store": by_store,
+            "total": {
+                **{k: (str(v) if isinstance(v, Decimal) else v) for k, v in total.items()},
+                "gross_margin_pct": total_margin,
+            },
+        }
+
+    # 默认：单行总聚合（向后兼容）
     stmt = select(
         func.coalesce(func.sum(StoreSale.total_sale_amount), 0),
         func.coalesce(func.sum(StoreSale.total_cost), 0),
@@ -235,12 +311,8 @@ async def stats(
         func.coalesce(func.sum(StoreSale.total_bottles), 0),
         func.count(StoreSale.id),
     )
-    if store_id:
-        stmt = stmt.where(StoreSale.store_id == store_id)
-    if start_date:
-        stmt = stmt.where(StoreSale.created_at >= f"{start_date} 00:00:00+00")
-    if end_date:
-        stmt = stmt.where(StoreSale.created_at < f"{end_date} 23:59:59+00")
+    for f in base_filters:
+        stmt = stmt.where(f)
     row = (await db.execute(stmt)).one()
     return {
         "total_sale_amount": str(row[0]),
@@ -250,6 +322,102 @@ async def stats(
         "total_bottles": int(row[4] or 0),
         "sale_count": int(row[5] or 0),
     }
+
+
+@router.get("/export")
+async def export_sales(
+    user: CurrentUser,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    store_id: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """G3：导出门店销售流水 CSV（boss/finance）。
+
+    返回 text/csv 附带 Content-Disposition。
+    字段：日期 / 单号 / 门店 / 店员 / 客户 / 瓶数 / 销售额 / 成本 / 利润 / 提成 / 付款方式 / 状态
+    """
+    require_role(user, "boss", "finance")
+    stmt = select(StoreSale).order_by(desc(StoreSale.created_at))
+    if store_id:
+        stmt = stmt.where(StoreSale.store_id == store_id)
+    if start_date:
+        stmt = stmt.where(StoreSale.created_at >= f"{start_date} 00:00:00+00")
+    if end_date:
+        stmt = stmt.where(StoreSale.created_at < f"{end_date} 23:59:59+00")
+
+    rows = (await db.execute(stmt)).scalars().all()
+
+    # 注入 store / cashier / customer 名字
+    store_ids = list({r.store_id for r in rows})
+    emp_ids = list({r.cashier_employee_id for r in rows})
+    cust_ids = list({r.customer_id for r in rows if r.customer_id})
+    stores = {w.id: w.name for w in (await db.execute(
+        select(Warehouse).where(Warehouse.id.in_(store_ids))
+    )).scalars()} if store_ids else {}
+    emps = {e.id: e.name for e in (await db.execute(
+        select(Employee).where(Employee.id.in_(emp_ids))
+    )).scalars()} if emp_ids else {}
+    custs = {
+        c.id: (c.real_name or c.nickname or c.username or c.id[:8])
+        for c in (await db.execute(
+            select(MallUser).where(MallUser.id.in_(cust_ids))
+        )).scalars()
+    } if cust_ids else {}
+
+    # 组装 CSV
+    import csv
+    import io
+    from fastapi.responses import StreamingResponse
+
+    buf = io.StringIO()
+    # UTF-8 BOM 让 Excel 识别中文
+    buf.write("﻿")
+    writer = csv.writer(buf)
+    writer.writerow([
+        "日期", "单号", "门店", "店员", "客户", "瓶数",
+        "销售额", "成本", "利润", "提成", "毛利率%",
+        "付款方式", "状态",
+    ])
+
+    def _fmt_customer(r: StoreSale) -> str:
+        if r.customer_id:
+            return custs.get(r.customer_id, r.customer_id[:8])
+        if r.customer_walk_in_name:
+            return f"散客·{r.customer_walk_in_name}"
+        if r.customer_walk_in_phone:
+            return f"散客·{r.customer_walk_in_phone[-4:]}"
+        return "散客"
+
+    for r in rows:
+        margin = ""
+        if r.total_sale_amount and Decimal(str(r.total_sale_amount)) > 0:
+            m = Decimal(str(r.total_profit)) / Decimal(str(r.total_sale_amount)) * 100
+            margin = f"{m:.1f}"
+        writer.writerow([
+            r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "",
+            r.sale_no,
+            stores.get(r.store_id, r.store_id[:8]),
+            emps.get(r.cashier_employee_id, r.cashier_employee_id[:8]),
+            _fmt_customer(r),
+            r.total_bottles,
+            str(r.total_sale_amount),
+            str(r.total_cost),
+            str(r.total_profit),
+            str(r.total_commission),
+            margin,
+            r.payment_method,
+            r.status,
+        ])
+
+    buf.seek(0)
+    period = f"{start_date or 'all'}_{end_date or 'all'}"
+    filename = f"store_sales_{period}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/{sale_id}")

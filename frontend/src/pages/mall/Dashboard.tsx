@@ -21,7 +21,12 @@ import api from '../../api/client';
 const { Title, Text } = Typography;
 
 interface Summary {
-  today: { orders: number; received: string; new_users: number; cancelled: number };
+  today: {
+    orders: number; received: string; new_users: number; cancelled: number;
+    // G9
+    revenue?: string; profit?: string; commission?: string;
+    gross_margin_pct?: string | null;
+  };
   yesterday: { orders: number; received: string };
   pending: {
     pending_assignment: number;
@@ -32,7 +37,12 @@ interface Summary {
     pending_returns?: number;
     approved_returns_awaiting_refund?: number;
   };
-  month: { orders: number; received: string; new_users: number };
+  month: {
+    orders: number; received: string; new_users: number;
+    // G9
+    revenue?: string; profit?: string; commission?: string;
+    bad_debt?: string; gross_margin_pct?: string | null;
+  };
   trend: { day: string; orders: number; received: string }[];
   salesman_rank: { id: string; nickname?: string; phone?: string; order_count: number; gmv: string }[];
   product_rank: { id: number; name?: string; main_image?: string; quantity: number; amount: string }[];
@@ -145,6 +155,23 @@ function SalesmanRankingCard() {
     onError: (e: any) => message.error(e?.response?.data?.detail || '冻结失败'),
   });
 
+  // G7：批量回补历史月份
+  const [rangeFrom, setRangeFrom] = useState(dayjs().subtract(11, 'month'));
+  const [rangeTo, setRangeTo] = useState(dayjs().subtract(1, 'month'));
+  const buildRangeMut = useMutation({
+    mutationFn: () => api.post('/mall/admin/dashboard/salesman-ranking/build-snapshot-range', null, {
+      params: {
+        from_month: rangeFrom.format('YYYY-MM'),
+        to_month: rangeTo.format('YYYY-MM'),
+      },
+    }).then(r => r.data),
+    onSuccess: (res) => {
+      message.success(`批量回补 ${res.months_processed} 个月，共 UPSERT ${res.total_upserted} 行`);
+      queryClient.invalidateQueries({ queryKey: ['salesman-ranking'] });
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail || '批量回补失败'),
+  });
+
   const records = data?.records || [];
   const isSnapshot = mode === 'snapshot';
   const isEmptySnapshot = isSnapshot && records.length === 0;
@@ -191,6 +218,31 @@ function SalesmanRankingCard() {
               </Button>
             </Space>
           )}
+          {/* G7：批量回补 */}
+          <div style={{ marginTop: 8 }}>
+            <Space size="small">
+              <Text type="secondary" style={{ fontSize: 12 }}>批量回补：</Text>
+              <DatePicker.MonthPicker
+                value={rangeFrom}
+                onChange={(d) => d && setRangeFrom(d)}
+                allowClear={false}
+                size="small"
+                style={{ width: 110 }}
+              />
+              <span style={{ color: '#999' }}>→</span>
+              <DatePicker.MonthPicker
+                value={rangeTo}
+                onChange={(d) => d && setRangeTo(d)}
+                allowClear={false}
+                size="small"
+                style={{ width: 110 }}
+              />
+              <Button size="small" type="link" loading={buildRangeMut.isPending}
+                onClick={() => buildRangeMut.mutate()}>
+                一键回补
+              </Button>
+            </Space>
+          </div>
         </div>
       )}
       {!isSnapshot && (
@@ -359,6 +411,51 @@ export default function MallDashboard() {
           </a>
         </Space>
       </Card>
+
+      {/* G9 利润卡片（本月） */}
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={6}>
+          <Card size="small">
+            <Statistic
+              title="本月收入（实收）"
+              prefix="¥"
+              value={Number(data.month.revenue || 0).toFixed(2)}
+              valueStyle={{ color: '#1677ff' }}
+            />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small">
+            <Statistic
+              title="本月净利润"
+              prefix="¥"
+              value={Number(data.month.profit || 0).toFixed(2)}
+              valueStyle={{
+                color: Number(data.month.profit || 0) > 0 ? '#52c41a' : '#ff4d4f',
+              }}
+            />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small">
+            <Statistic
+              title="本月毛利率"
+              value={data.month.gross_margin_pct ?? '—'}
+              suffix={data.month.gross_margin_pct ? '%' : ''}
+              valueStyle={{ color: '#C9A961' }}
+            />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small">
+            <Statistic
+              title="本月提成 / 坏账"
+              value={`¥${Number(data.month.commission || 0).toLocaleString()} / ¥${Number(data.month.bad_debt || 0).toLocaleString()}`}
+              valueStyle={{ color: '#8c8c8c', fontSize: 18 }}
+            />
+          </Card>
+        </Col>
+      </Row>
 
       {/* 本月累计 + 趋势 */}
       <Row gutter={16} style={{ marginBottom: 16 }}>

@@ -3,8 +3,10 @@
  */
 import { useState } from 'react';
 import {
-  Card, Col, DatePicker, Descriptions, Drawer, Row, Select, Space, Statistic, Table, Tag, Typography,
+  Button, Card, Col, DatePicker, Descriptions, Drawer, Row, Segmented, Select, Space,
+  Statistic, Table, Tag, Typography, message,
 } from 'antd';
+import { DownloadOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs, { Dayjs } from 'dayjs';
@@ -51,6 +53,7 @@ export default function StoreSaleList() {
     dayjs().startOf('month'), dayjs().endOf('day'),
   ]);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [statsView, setStatsView] = useState<'total' | 'by_store'>('total');
 
   const params: any = { limit: 200 };
   if (storeId) params.store_id = storeId;
@@ -73,6 +76,34 @@ export default function StoreSaleList() {
     queryKey: ['store-sales-stats', params],
     queryFn: () => api.get('/store-sales/stats', { params }).then(r => r.data),
   });
+  const { data: statsByStore } = useQuery<any>({
+    queryKey: ['store-sales-stats-by-store', params],
+    queryFn: () => api.get('/store-sales/stats', {
+      params: { ...params, group_by: 'store' },
+    }).then(r => r.data),
+    enabled: statsView === 'by_store',
+  });
+
+  const handleExport = async () => {
+    try {
+      const res = await api.get('/store-sales/export', {
+        params,
+        responseType: 'blob',
+      });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      const period = range
+        ? `${range[0].format('YYYY-MM-DD')}_${range[1].format('YYYY-MM-DD')}`
+        : 'all';
+      a.download = `门店销售流水_${period}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      message.success('导出成功');
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || '导出失败');
+    }
+  };
   const rows = data?.records || [];
 
   const { data: detailData } = useQuery<Sale>({
@@ -117,7 +148,7 @@ export default function StoreSaleList() {
     <div>
       <Title level={4}>门店销售流水</Title>
 
-      <Space style={{ marginBottom: 16 }}>
+      <Space style={{ marginBottom: 16 }} wrap>
         <Select
           placeholder="按门店筛选"
           style={{ width: 220 }}
@@ -130,9 +161,23 @@ export default function StoreSaleList() {
           value={range as any}
           onChange={(v) => setRange(v as any)}
         />
+        <Segmented
+          value={statsView}
+          onChange={(v) => setStatsView(v as any)}
+          options={[
+            { label: '汇总', value: 'total' },
+            { label: '按店分组', value: 'by_store' },
+          ]}
+        />
+        <Button
+          icon={<DownloadOutlined />}
+          onClick={handleExport}
+        >
+          导出 CSV
+        </Button>
       </Space>
 
-      {stats && (
+      {statsView === 'total' && stats && (
         <Row gutter={16} style={{ marginBottom: 16 }}>
           <Col span={4}>
             <Card size="small"><Statistic title="成交单数" value={stats.sale_count} /></Card>
@@ -163,6 +208,45 @@ export default function StoreSaleList() {
             <Card size="small"><Statistic title="店员提成" value={Number(stats.total_commission)} precision={2} prefix="¥" valueStyle={{ color: '#1677ff' }} /></Card>
           </Col>
         </Row>
+      )}
+
+      {statsView === 'by_store' && statsByStore && (
+        <Card size="small" style={{ marginBottom: 16 }}
+          title={`按店分组（合计：销售额 ¥${Number(statsByStore.total?.total_sale_amount || 0).toLocaleString()} / 利润 ¥${Number(statsByStore.total?.total_profit || 0).toLocaleString()} / 毛利率 ${statsByStore.total?.gross_margin_pct ?? '—'}%）`}
+        >
+          <Table
+            size="small"
+            pagination={false}
+            rowKey="store_id"
+            dataSource={statsByStore.by_store || []}
+            columns={[
+              { title: '门店', dataIndex: 'store_name' },
+              { title: '单数', dataIndex: 'sale_count', width: 80, align: 'right' as const },
+              { title: '瓶数', dataIndex: 'total_bottles', width: 80, align: 'right' as const },
+              {
+                title: '销售额', dataIndex: 'total_sale_amount', width: 130, align: 'right' as const,
+                render: (v: string) => `¥${Number(v).toLocaleString()}`,
+              },
+              {
+                title: '成本', dataIndex: 'total_cost', width: 120, align: 'right' as const,
+                render: (v: string) => <span style={{ color: '#8c8c8c' }}>¥{Number(v).toLocaleString()}</span>,
+              },
+              {
+                title: '利润', dataIndex: 'total_profit', width: 120, align: 'right' as const,
+                render: (v: string) =>
+                  <span style={{ color: Number(v) >= 0 ? '#52c41a' : '#ff4d4f' }}>¥{Number(v).toLocaleString()}</span>,
+              },
+              {
+                title: '店员提成', dataIndex: 'total_commission', width: 120, align: 'right' as const,
+                render: (v: string) => <span style={{ color: '#1677ff' }}>¥{Number(v).toLocaleString()}</span>,
+              },
+              {
+                title: '毛利率', dataIndex: 'gross_margin_pct', width: 90, align: 'right' as const,
+                render: (v: string | null) => v ? `${v}%` : '—',
+              },
+            ]}
+          />
+        </Card>
       )}
 
       <Table

@@ -38,6 +38,16 @@
   - ERP 前端 `Dashboard.tsx` 业务员排行卡片改双模式：实时/快照 Tab 切换 + 月份选择器 + 空快照一键冻结按钮
   - E2E `scripts/e2e_kpi_snapshot.py` 覆盖：冻结 → 退货 → 实时 vs 快照数据分叉 → UPSERT 幂等
 
+- **G3/G7/G9：看板利润卡 + 门店报表导出 + 快照批量回补**
+  - G9：`/api/mall/admin/dashboard/summary` 返回 today/month 加 `revenue/profit/commission/gross_margin_pct`（聚合 profit_service）+ month 加 `bad_debt`
+  - G9：ERP Dashboard 新增 4 个卡片（本月收入/净利润/毛利率/提成·坏账）
+  - G3：`/api/store-sales/stats?group_by=store` 支持按店分组（每店一行 + 合计）
+  - G3：`/api/store-sales/export` CSV 导出（带 UTF-8 BOM 支持 Excel 中文），字段：日期/单号/门店/店员/客户/瓶数/销售额/成本/利润/提成/毛利率/付款方式/状态
+  - G3：门店销售页加「汇总 / 按店分组」Segmented + 「导出 CSV」按钮
+  - G7：`/api/mall/admin/dashboard/salesman-ranking/build-snapshot-range?from_month=YYYY-MM&to_month=YYYY-MM` 批量回补端点
+  - G7：Dashboard 排行榜卡片快照模式下加"批量回补"月份范围选择 + 一键按钮
+  - E2E `scripts/e2e_dashboard_profit_export.py` 覆盖 3 项
+
 - **审计三连 G1/G2/G8**（migration m6c5 FK 硬化） — 涉及金额/状态的写操作全部留痕
   - G8：`store_sale_service.create_store_sale` 加 log_audit（actor=cashier_employee_id）
     管理端 `/api/store-sales` 路由区分为 `store_sale.create_by_admin`（代下）

@@ -1893,18 +1893,42 @@ async def salary_detail(rec_id: str, user: CurrentUser, db: AsyncSession = Depen
     order_details = []
     manager_share_details = []
     for link in order_links:
-        o = await db.get(_Ord, link.order_id)
-        cust = await db.get(_Cu, o.customer_id) if o and o.customer_id else None
+        # SalaryOrderLink 三选一：order_id（B2B）/ mall_order_id / store_sale_id
+        o = None
+        cust = None
+        order_no = None
+        ref_type = "unknown"
+        salesman_name = '-'
+        if link.order_id:
+            o = await db.get(_Ord, link.order_id)
+            if o:
+                order_no = o.order_no
+                salesman_name = o.salesman.name if o.salesman else '-'
+                cust = await db.get(_Cu, o.customer_id) if o.customer_id else None
+            else:
+                order_no = link.order_id[:8]
+            ref_type = "b2b_order"
+        elif link.mall_order_id:
+            from app.models.mall.order import MallOrder
+            mo = await db.get(MallOrder, link.mall_order_id)
+            order_no = mo.order_no if mo else link.mall_order_id[:8]
+            ref_type = "mall_order"
+        elif link.store_sale_id:
+            from app.models.store_sale import StoreSale
+            ss = await db.get(StoreSale, link.store_sale_id)
+            order_no = ss.sale_no if ss else link.store_sale_id[:8]
+            ref_type = "store_sale"
         brand = await db.get(Brand, link.brand_id) if link.brand_id else None
         d = {
-            "order_no": o.order_no if o else link.order_id[:8],
+            "order_no": order_no or '-',
+            "ref_type": ref_type,
             "customer_name": cust.name if cust else '-',
             "brand_name": brand.name if brand else '-',
             "receipt_amount": float(link.receipt_amount),
             "commission_rate": float(link.commission_rate_used),
             "kpi_coefficient": float(link.kpi_coefficient),
             "commission_amount": float(link.commission_amount),
-            "salesman_name": o.salesman.name if o and o.salesman else '-',
+            "salesman_name": salesman_name,
         }
         if link.is_manager_share:
             manager_share_details.append(d)

@@ -110,7 +110,7 @@ function ManufacturerSubsidyList() {
       render: (v?: string) => v ? new Date(v).toLocaleString('zh-CN') : '-' },
     { title: '厂家到账', key: 'arr', width: 180,
       render: (_, r) => r.arrival_at ? (
-        <Space direction="vertical" size={0}>
+        <Space orientation="vertical" size={0}>
           <Text style={{ fontSize: 12 }}>{new Date(r.arrival_at).toLocaleString('zh-CN')}</Text>
           {r.arrival_billcode && <Text type="secondary" style={{ fontSize: 11 }}>单据 {r.arrival_billcode}</Text>}
         </Space>

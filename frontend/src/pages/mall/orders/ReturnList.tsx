@@ -200,7 +200,7 @@ export default function ReturnList() {
         size={760}
       >
         {detail && (
-          <Space direction="vertical" size="large" style={{ width: '100%' }}>
+          <Space orientation="vertical" size="large" style={{ width: '100%' }}>
             <Descriptions bordered size="small" column={2}>
               <Descriptions.Item label="订单号">{detail.order_no}</Descriptions.Item>
               <Descriptions.Item label="状态">

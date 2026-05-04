@@ -82,7 +82,7 @@ function CameraModal({ open, onCaptured, onCancel }: { open: boolean; onCaptured
     <Modal open={open} onCancel={onCancel} footer={null} width="95%"
       style={{ top: 20 }} bodyStyle={{ padding: 12 }}>
       {preview ? (
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Space orientation="vertical" style={{ width: '100%' }}>
           <img src={preview} alt="" style={{ width: '100%' }} />
           <Space style={{ width: '100%' }}>
             <Button size="large" block onClick={() => setPreview('')}>重拍</Button>
@@ -90,7 +90,7 @@ function CameraModal({ open, onCaptured, onCancel }: { open: boolean; onCaptured
           </Space>
         </Space>
       ) : (
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Space orientation="vertical" style={{ width: '100%' }}>
           <video ref={videoRef} autoPlay playsInline style={{ width: '100%', background: '#000', minHeight: 300 }} />
           <Button size="large" type="primary" block icon={<CameraOutlined />} loading={loading} onClick={snap}>拍照</Button>
         </Space>
@@ -245,7 +245,7 @@ function MobileCheckin() {
             style={{ marginBottom: 8 }}
           />
         ) : null}
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Space orientation="vertical" style={{ width: '100%' }}>
           {!ongoing && (
             <Button type="primary" size="large" block icon={<LoginOutlined />}
               style={{ height: 56, fontSize: 16 }}

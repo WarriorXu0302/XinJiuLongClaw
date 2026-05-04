@@ -57,7 +57,7 @@ function MobileNotifications() {
             onClick={() => {
               if (n.status === 'unread') markReadMut.mutate(n.id);
             }}>
-            <Space direction="vertical" size={2} style={{ width: '100%' }}>
+            <Space orientation="vertical" size={2} style={{ width: '100%' }}>
               <Space style={{ width: '100%', justifyContent: 'space-between' }}>
                 <Text strong={n.status === 'unread'}>{n.title}</Text>
                 {n.status === 'unread' && <Badge status="processing" />}

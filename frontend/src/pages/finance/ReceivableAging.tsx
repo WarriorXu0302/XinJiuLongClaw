@@ -65,7 +65,7 @@ function ReceivableAging() {
         {data.buckets.map(b => (
           <Col span={6} key={b.label}>
             <Card size="small">
-              <Space direction="vertical" style={{ width: '100%' }}>
+              <Space orientation="vertical" style={{ width: '100%' }}>
                 <Space style={{ width: '100%', justifyContent: 'space-between' }}>
                   <Tag color={BUCKET_COLOR[b.label]}>{b.label} 天</Tag>
                   <Text type="secondary" style={{ fontSize: 12 }}>{b.count} 笔</Text>

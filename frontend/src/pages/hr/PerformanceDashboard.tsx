@@ -151,7 +151,7 @@ function PerformanceDashboard() {
       render: (v: number) => v > 0 ? <Text style={{ color: '#52c41a' }}>¥{v.toLocaleString()}</Text> : '-' },
     { title: '实发工资', dataIndex: 'salary_actual_pay', width: 110, align: 'right' as const,
       render: (v: number, r) => v > 0 ? (
-        <Space direction="vertical" size={0}>
+        <Space orientation="vertical" size={0}>
           <Text strong style={{ color: '#ff4d4f' }}>¥{v.toLocaleString()}</Text>
           {r.salary_status === 'paid' ? <Tag color="green">已发</Tag>
             : r.salary_status === 'confirmed' ? <Tag color="blue">已确认</Tag>

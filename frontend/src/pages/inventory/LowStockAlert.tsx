@@ -44,7 +44,7 @@ function LowStockAlert() {
     { title: '批次', dataIndex: 'batch_no', width: 140 },
     { title: '余量', dataIndex: 'cases', width: 120,
       render: (v: number, r) => (
-        <Space direction="vertical" size={0}>
+        <Space orientation="vertical" size={0}>
           <Text strong style={{ color: v <= 1 ? '#ff4d4f' : '#fa8c16' }}>{v.toFixed(1)} 箱</Text>
           <Text type="secondary" style={{ fontSize: 11 }}>{r.bottles} 瓶</Text>
         </Space>

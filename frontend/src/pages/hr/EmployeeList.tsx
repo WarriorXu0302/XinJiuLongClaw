@@ -255,7 +255,7 @@ function EmployeeList() {
         const u = userByEmp[r.id];
         if (!u) return <Button size="small" icon={<UserAddOutlined />} onClick={() => setAccountEmp(r)}>创建账号</Button>;
         return (
-          <Space direction="vertical" size={0}>
+          <Space orientation="vertical" size={0}>
             <Text code style={{ fontSize: 12 }}>{u.username}</Text>
             <Space size={2} wrap>
               {u.roles.map(role => <Tag key={role} color="purple" style={{ fontSize: 10, margin: 0 }}>{ROLE_LABEL[role] ?? role}</Tag>)}

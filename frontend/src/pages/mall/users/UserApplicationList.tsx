@@ -162,7 +162,7 @@ export default function UserApplicationList() {
       >
         {detail && (
           <div>
-            <Space direction="vertical" size="large" style={{ width: '100%' }}>
+            <Space orientation="vertical" size="large" style={{ width: '100%' }}>
               <div>
                 <strong>状态：</strong>
                 <Tag color={STATUS[detail.application_status]?.color}>

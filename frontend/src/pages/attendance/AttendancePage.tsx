@@ -92,7 +92,7 @@ function CameraSnap({ onCaptured }: { onCaptured: (url: string) => void }) {
 
   if (!started) return <Button icon={<CameraOutlined />} onClick={() => setStarted(true)}>启动摄像头</Button>;
   return (
-    <Space direction="vertical" style={{ width: '100%' }}>
+    <Space orientation="vertical" style={{ width: '100%' }}>
       <video ref={videoRef} autoPlay playsInline style={{ width: '100%', maxHeight: 300, background: '#000' }} />
       <Button type="primary" block icon={<CameraOutlined />} loading={loading} onClick={snap}>拍照</Button>
     </Space>
@@ -135,7 +135,7 @@ function WorkCheckinPanel() {
       <Row gutter={16}>
         <Col span={12}>
           <Card>
-            <Space direction="vertical" style={{ width: '100%' }}>
+            <Space orientation="vertical" style={{ width: '100%' }}>
               <Title level={5}><LoginOutlined /> 上班打卡</Title>
               {myTodayIn ? (
                 <Alert type={myTodayIn.status === 'normal' ? 'success' : 'warning'}
@@ -151,7 +151,7 @@ function WorkCheckinPanel() {
         </Col>
         <Col span={12}>
           <Card>
-            <Space direction="vertical" style={{ width: '100%' }}>
+            <Space orientation="vertical" style={{ width: '100%' }}>
               <Title level={5}><LogoutOutlined /> 下班打卡</Title>
               {myTodayOut ? (
                 <Alert type="success" title={`已打卡 · ${new Date(myTodayOut.checkin_time).toLocaleTimeString('zh-CN')}`} />

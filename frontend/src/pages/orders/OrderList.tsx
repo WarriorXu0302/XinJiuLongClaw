@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Alert, Button, Card, Col, Collapse, Descriptions, Divider, Form, Image, Input, InputNumber, message, Modal, Row, Select, Space, Statistic, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Col, Descriptions, Divider, Form, Image, Input, InputNumber, message, Modal, Row, Select, Space, Table, Tag, Typography } from 'antd';
 import { DownloadOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import { exportExcel } from '../../utils/exportExcel';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -52,12 +52,12 @@ function OrderList() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<Order | null>(null);
   const [detailRecord, setDetailRecord] = useState<any>(null);
-  const [selectedBrand, setSelectedBrand] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [paymentFilter, setPaymentFilter] = useState<string | undefined>();
   const [keyword, setKeyword] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [_selectedBrand, setSelectedBrand] = useState<string | null>(null);
 
   const { data: listResp, isLoading } = useQuery<{ items: Order[]; total: number }>({
     queryKey: ['orders', brandId, statusFilter, paymentFilter, keyword, page, pageSize],
@@ -73,11 +73,6 @@ function OrderList() {
   const data = listResp?.items ?? [];
   const total = listResp?.total ?? 0;
 
-  const { data: brands = [] } = useQuery<{id: string; name: string}[]>({
-    queryKey: ['brands-select'],
-    queryFn: () => api.get('/products/brands').then(r => extractItems(r.data)),
-  });
-
   const { data: customers = [] } = useQuery<{id: string; name: string}[]>({
     queryKey: ['customers-select', brandId],
     queryFn: () => api.get('/customers', { params }).then(r => extractItems(r.data)),
@@ -92,8 +87,6 @@ function OrderList() {
     queryKey: ['products-select', brandId],
     queryFn: () => api.get('/products', { params }).then(r => extractItems(r.data)),
   });
-
-  const brandProducts = selectedBrand ? products.filter(p => p.brand_id === selectedBrand) : products;
 
   // ── Policy pricing ──────────────────────────────────────────────
   const [matchedPolicies, setMatchedPolicies] = useState<any[]>([]);
@@ -688,7 +681,7 @@ function OrderList() {
                 <Descriptions.Item label="结算模式">{settlementLabel[o.settlement_mode] ?? o.settlement_mode ?? '-'}</Descriptions.Item>
               </Descriptions>
 
-              <Divider orientation="left" style={{ margin: '8px 0' }}>商品明细</Divider>
+              <Divider titlePlacement="start" style={{ margin: '8px 0' }}>商品明细</Divider>
               <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
                 <thead><tr style={{ background: '#fafafa', textAlign: 'left' }}>
                   <th style={{ padding: '6px 8px' }}>商品</th>
@@ -708,7 +701,7 @@ function OrderList() {
                 </tbody>
               </table>
 
-              <Divider orientation="left" style={{ margin: '12px 0 8px' }}>价格与政策</Divider>
+              <Divider titlePlacement="start" style={{ margin: '12px 0 8px' }}>价格与政策</Divider>
               <Descriptions column={3} size="small" bordered>
                 <Descriptions.Item label="订单货款"><Typography.Text strong>¥{Number(o.total_amount).toLocaleString()}</Typography.Text></Descriptions.Item>
                 <Descriptions.Item label="到手单价">{o.deal_unit_price ? `¥${Number(o.deal_unit_price).toLocaleString()}` : '-'}</Descriptions.Item>
@@ -720,7 +713,7 @@ function OrderList() {
                 <Descriptions.Item label="政策应收">{o.policy_receivable ? <Typography.Text type="danger">¥{Number(o.policy_receivable).toLocaleString()}</Typography.Text> : '¥0'}</Descriptions.Item>
               </Descriptions>
 
-              <Divider orientation="left" style={{ margin: '12px 0 8px' }}>时间线</Divider>
+              <Divider titlePlacement="start" style={{ margin: '12px 0 8px' }}>时间线</Divider>
               <Descriptions column={2} size="small">
                 <Descriptions.Item label="创建">{o.created_at ? new Date(o.created_at).toLocaleString('zh-CN') : '-'}</Descriptions.Item>
                 <Descriptions.Item label="出库">{o.shipped_at ? new Date(o.shipped_at).toLocaleString('zh-CN') : '-'}</Descriptions.Item>
@@ -730,7 +723,7 @@ function OrderList() {
 
               {o.rejection_reason && (
                 <>
-                  <Divider orientation="left" style={{ margin: '12px 0 8px' }}>驳回原因</Divider>
+                  <Divider titlePlacement="start" style={{ margin: '12px 0 8px' }}>驳回原因</Divider>
                   <Typography.Text type="danger">{o.rejection_reason}</Typography.Text>
                 </>
               )}
@@ -738,7 +731,7 @@ function OrderList() {
               {/* 送货照片 */}
               {o.delivery_photos?.length > 0 && (
                 <>
-                  <Divider orientation="left" style={{ margin: '12px 0 8px' }}>送货照片</Divider>
+                  <Divider titlePlacement="start" style={{ margin: '12px 0 8px' }}>送货照片</Divider>
                   <Image.PreviewGroup>
                     <Space wrap>
                       {o.delivery_photos.map((url: string, i: number) => (
@@ -752,7 +745,7 @@ function OrderList() {
               {/* 收款凭证 */}
               {o.payment_voucher_urls?.length > 0 && (
                 <>
-                  <Divider orientation="left" style={{ margin: '12px 0 8px' }}>收款凭证</Divider>
+                  <Divider titlePlacement="start" style={{ margin: '12px 0 8px' }}>收款凭证</Divider>
                   <Image.PreviewGroup>
                     <Space wrap>
                       {o.payment_voucher_urls.map((url: string, i: number) => (
@@ -774,7 +767,7 @@ function OrderList() {
 
               {o.notes && (
                 <>
-                  <Divider orientation="left" style={{ margin: '12px 0 8px' }}>备注</Divider>
+                  <Divider titlePlacement="start" style={{ margin: '12px 0 8px' }}>备注</Divider>
                   <Typography.Text>{o.notes}</Typography.Text>
                 </>
               )}

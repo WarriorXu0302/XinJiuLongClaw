@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Table, Tag, Typography, Button, Descriptions, Modal, Form, Input, InputNumber, Select, Switch, Space, Divider, DatePicker, Row, Col, Card, Statistic, message } from 'antd';
+import { Table, Tag, Typography, Button, Descriptions, Modal, Form, Input, InputNumber, Select, Switch, Space, Divider, DatePicker, Row, Col, message } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
@@ -101,10 +101,10 @@ function PolicyTemplateList() {
       internal_valuation: record.internal_valuation ? JSON.stringify(record.internal_valuation, null, 2) : '',
       valid_from: record.valid_from ? dayjs(record.valid_from) : null,
       valid_to: record.valid_to ? dayjs(record.valid_to) : null,
-      benefits: record.benefits?.length > 0 ? record.benefits.map(b => ({
+      benefits: record.benefits?.length > 0 ? record.benefits.map((b: any) => ({
         benefit_type: b.benefit_type, name: b.name, quantity: b.quantity,
         standard_unit_value: b.standard_unit_value ?? 0, unit_value: b.unit_value,
-        quantity_unit: (b as any).quantity_unit || '次', product_id: b.product_id, is_material: b.is_material, fulfill_mode: (b as any).fulfill_mode || (b.is_material ? 'material' : 'claim'),
+        quantity_unit: b.quantity_unit || '次', product_id: b.product_id, is_material: b.is_material, fulfill_mode: b.fulfill_mode || (b.is_material ? 'material' : 'claim'),
       })) : [],
     });
     setModalOpen(true);
@@ -137,7 +137,7 @@ function PolicyTemplateList() {
     { title: '匹配条件', key: 'match', width: 120, render: (_: unknown, r: TemplateItem) => r.template_type === 'channel' ? `${r.min_cases ?? '-'} 箱` : <><Tag color="gold">{r.member_tier}</Tag>{r.min_points ?? 0}~{r.max_points ?? '∞'}分</> },
     { title: '价格', key: 'prices', width: 130, render: (_: unknown, r: TemplateItem) => r.required_unit_price ? <Text type="secondary">{r.required_unit_price}→{(r as any).customer_unit_price ?? '?'}</Text> : '-' },
     { title: '折算总价值', dataIndex: 'total_policy_value', width: 100, align: 'right', render: (v: number) => v > 0 ? <Text strong style={{ color: '#1890ff' }}>¥{Number(v).toLocaleString()}</Text> : '-' },
-    { title: '政策明细', key: 'benefits', width: 320, ellipsis: true, render: (_: unknown, r: TemplateItem) => r.benefits?.length > 0 ? r.benefits.map(b => `${b.name}×${b.quantity}${(b as any).quantity_unit || '次'}(¥${b.standard_total ?? 0}/¥${b.total_value})`).join('、') : '-' },
+    { title: '政策明细', key: 'benefits', width: 320, ellipsis: true, render: (_: unknown, r: TemplateItem) => r.benefits?.length > 0 ? r.benefits.map((b: any) => `${b.name}×${b.quantity}${b.quantity_unit || '次'}(¥${b.standard_total ?? 0}/¥${b.total_value})`).join('、') : '-' },
     { title: '有效期', key: 'validity', width: 160, render: (_: unknown, r: TemplateItem) => <span style={isExpired(r) ? { color: '#ff4d4f' } : undefined}>{r.valid_from ?? '—'} ~ {r.valid_to ?? '长期'}{isExpired(r) ? ' (过期)' : ''}</span> },
     { title: '状态', dataIndex: 'is_active', width: 60, render: (v: boolean) => <Tag color={v ? 'green' : 'default'}>{v ? '启用' : '停用'}</Tag> },
     { title: '操作', key: 'actions', width: 100, render: (_: unknown, record: TemplateItem) => (
@@ -332,7 +332,7 @@ function PolicyTemplateList() {
             </Descriptions>
             {viewRecord.benefits?.length > 0 && (
               <>
-                <Divider orientation="left" style={{ margin: '8px 0' }}>政策明细</Divider>
+                <Divider titlePlacement="start" style={{ margin: '8px 0' }}>政策明细</Divider>
                 <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
                   <thead><tr style={{ background: '#fafafa' }}>
                     <th style={{ padding: '5px 8px', textAlign: 'left' }}>类型</th>
@@ -342,11 +342,11 @@ function PolicyTemplateList() {
                     <th style={{ padding: '5px 8px', textAlign: 'right' }}>折算</th>
                     <th style={{ padding: '5px 8px' }}>兑付方式</th>
                   </tr></thead>
-                  <tbody>{viewRecord.benefits.map((b, i) => (
+                  <tbody>{viewRecord.benefits.map((b: any, i: number) => (
                     <tr key={i} style={{ borderBottom: '1px solid #f0f0f0' }}>
                       <td style={{ padding: '5px 8px' }}><Tag>{BENEFIT_TYPES.find(t => t.value === b.benefit_type)?.label ?? b.benefit_type}</Tag></td>
                       <td style={{ padding: '5px 8px' }}>{b.name}{b.product_name ? <Text type="secondary" style={{ fontSize: 11 }}> ({b.product_name})</Text> : ''}</td>
-                      <td style={{ padding: '5px 8px', textAlign: 'center' }}>{b.quantity}{(b as any).quantity_unit || '次'}</td>
+                      <td style={{ padding: '5px 8px', textAlign: 'center' }}>{b.quantity}{b.quantity_unit || '次'}</td>
                       <td style={{ padding: '5px 8px', textAlign: 'right' }}>¥{(b.standard_total ?? 0).toLocaleString()}</td>
                       <td style={{ padding: '5px 8px', textAlign: 'right' }}>¥{b.total_value.toLocaleString()}</td>
                       <td style={{ padding: '5px 8px' }}>{(b as any).fulfill_mode === 'direct' ? <Tag color="green">福利</Tag> : (b as any).fulfill_mode === 'material' ? <Tag color="cyan">出库</Tag> : <Tag color="blue">对账</Tag>}</td>

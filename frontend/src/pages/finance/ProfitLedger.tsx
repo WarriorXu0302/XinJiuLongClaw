@@ -5,6 +5,8 @@ import { exportExcel } from '../../utils/exportExcel';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
+import quarterOfYear from 'dayjs/plugin/quarterOfYear';
+dayjs.extend(quarterOfYear);
 import api from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';
 

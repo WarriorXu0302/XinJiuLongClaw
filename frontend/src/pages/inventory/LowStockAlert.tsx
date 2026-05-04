@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Alert, Button, Card, InputNumber, message, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, InputNumber, message, Space, Table, Tag, Typography } from 'antd';
 import { BellOutlined, WarningOutlined } from '@ant-design/icons';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';

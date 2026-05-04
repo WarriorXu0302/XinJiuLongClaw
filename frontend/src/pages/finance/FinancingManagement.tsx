@@ -1,9 +1,8 @@
 import { useState } from 'react';
-import { Button, Card, Col, DatePicker, Descriptions, Divider, Form, Input, InputNumber, message, Modal, Progress, Row, Select, Space, Statistic, Table, Tag, Typography } from 'antd';
-import { BankOutlined, DollarOutlined, PlusOutlined, RollbackOutlined } from '@ant-design/icons';
+import { Button, Card, Col, DatePicker, Descriptions, Divider, Form, Input, InputNumber, message, Modal, Progress, Row, Space, Statistic, Table, Tag, Typography } from 'antd';
+import { BankOutlined, CalendarOutlined, DollarOutlined, FieldTimeOutlined, PlusOutlined, RollbackOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import dayjs from 'dayjs';
 import api, { extractItems } from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';
 
@@ -22,7 +21,6 @@ interface Repayment {
   payment_account_id: string; f_class_amount: number; f_class_account_id?: string;
   voucher_url?: string; notes?: string; created_at: string;
 }
-interface Account { id: string; name: string; account_type: string; level: string; brand_id?: string; brand_name?: string; balance: number; }
 
 const STATUS_COLOR: Record<string, string> = { active: 'orange', partially_repaid: 'blue', fully_repaid: 'green', defaulted: 'red', returned: 'volcano' };
 const STATUS_LABEL: Record<string, string> = { active: '进行中', partially_repaid: '部分还款', fully_repaid: '已还清', defaulted: '已违约', returned: '已退仓' };
@@ -43,18 +41,11 @@ function FinancingManagement() {
   const orders = rawOrders?.items ?? [];
   const ordersTotal = rawOrders?.total ?? 0;
 
-  const { data: accounts = [] } = useQuery<Account[]>({
-    queryKey: ['accounts-select', brandId],
-    queryFn: () => api.get('/accounts', { params }).then(r => extractItems(r.data)),
-  });
-
   const { data: repayments = [] } = useQuery<Repayment[]>({
     queryKey: ['financing-repayments', detailOrder?.id],
     queryFn: () => api.get(`/financing-orders/${detailOrder!.id}/repayments`).then(r => extractItems(r.data)),
     enabled: !!detailOrder,
   });
-
-  const cashAccounts = accounts.filter(a => a.level === 'project' && a.account_type === 'cash');
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['financing-orders'] });
@@ -294,7 +285,7 @@ function FinancingManagement() {
               )}
 
               {/* 还款记录 */}
-              <Divider orientation="left" style={{ margin: '12px 0' }}>还款记录 ({repayments.length} 笔)</Divider>
+              <Divider titlePlacement="start" style={{ margin: '12px 0' }}>还款记录 ({repayments.length} 笔)</Divider>
               {repayments.length === 0
                 ? <div style={{ textAlign: 'center', padding: 24, color: '#999' }}>暂无还款记录</div>
                 : <Table<Repayment> columns={repayColumns} dataSource={repayments} rowKey="id" size="small" pagination={false} />

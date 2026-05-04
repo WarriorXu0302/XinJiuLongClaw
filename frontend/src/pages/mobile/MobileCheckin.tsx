@@ -5,7 +5,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Card, Form, Input, List, message, Modal, Select, Space, Tag, Typography } from 'antd';
-import { BellOutlined, CameraOutlined, EnvironmentOutlined, LoginOutlined, LogoutOutlined, UserOutlined, LogoutOutlined as SignOutIcon } from '@ant-design/icons';
+import { BellOutlined, CameraOutlined, LoginOutlined, LogoutOutlined, UserOutlined, LogoutOutlined as SignOutIcon } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Table, Tag, Typography, Button, Modal, Form, Input, InputNumber, Select, Space, message } from 'antd';
+import { Table, Typography, Button, Modal, Form, Input, InputNumber, Select, Space, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import api, { extractItems } from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';

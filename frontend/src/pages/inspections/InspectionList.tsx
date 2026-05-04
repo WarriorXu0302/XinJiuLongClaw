@@ -46,7 +46,6 @@ function InspectionList() {
   const [dirFilter, setDirFilter] = useState<string | null>(null);
   // 执行弹窗
   const [execRecord, setExecRecord] = useState<Case | null>(null);
-  const [payAccountId, setPayAccountId] = useState('');
   const [payVouchers, setPayVouchers] = useState<string[]>([]);
   const [scanBarcode, setScanBarcode] = useState('');
   const [scannedCodes, setScannedCodes] = useState<string[]>([]);
@@ -85,12 +84,6 @@ function InspectionList() {
   });
   const mainWh = warehouses.find((w: any) => w.warehouse_type === 'main');
   const backupWh = warehouses.find((w: any) => w.warehouse_type === 'backup');
-
-  const { data: allAccounts = [] } = useQuery<any[]>({
-    queryKey: ['accounts-all'],
-    queryFn: () => api.get('/accounts').then(r => extractItems(r.data)),
-  });
-  const masterAcc = allAccounts.find((a: any) => a.level === 'master');
 
   const watchDirection = Form.useWatch('direction', form) ?? 'outflow';
   const watchType = Form.useWatch('case_type', form) ?? '';

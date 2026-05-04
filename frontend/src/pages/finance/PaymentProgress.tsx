@@ -27,7 +27,6 @@ function PaymentProgress() {
   // 物流弹窗
   const [logisticsOpen, setLogisticsOpen] = useState(false);
   const [logisticsRecord, setLogisticsRecord] = useState<any>(null);
-  const [logisticsForm] = Form.useForm();
   const [logisticsUrls, setLogisticsUrls] = useState<string[]>([]);
 
   const invalidateAll = () => {

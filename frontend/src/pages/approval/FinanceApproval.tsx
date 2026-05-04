@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Descriptions, Empty, Form, Image, Input, message, Modal, Select, Space, Tabs, Table, Tag, Typography, Upload } from 'antd';
-import { CheckCircleOutlined, CloseCircleOutlined, DollarOutlined, UploadOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, CloseCircleOutlined, UploadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import api, { extractItems } from '../../api/client';
@@ -16,8 +16,6 @@ interface Account { id: string; name: string; account_type: string; balance: num
 function FinanceApproval() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const [payExpenseId, setPayExpenseId] = useState<string | null>(null);
-  const [payForm] = Form.useForm();
   const [payPR, setPayPR] = useState<any | null>(null);  // 当前要兑付的 PaymentRequest
   const [prPayAccount, setPrPayAccount] = useState<string | undefined>();
   const [prVoucherUrls, setPrVoucherUrls] = useState<string[]>([]);
@@ -84,12 +82,12 @@ function FinanceApproval() {
     onError: (e: any) => message.error(e?.response?.data?.detail ?? '驳回失败'),
   });
 
-  const { data: expenses = [], isLoading: expLoading } = useQuery<Expense[]>({
+  const { data: expenses = [] } = useQuery<Expense[]>({
     queryKey: ['expenses-approval', brandId],
     queryFn: () => api.get('/expenses', { params: { ...params, limit: 100 } }).then(r => extractItems(r.data)),
     refetchInterval: 5000,
   });
-  const { data: paymentRequests = [], isLoading: prLoading } = useQuery<PaymentRequest[]>({
+  const { data: paymentRequests = [] } = useQuery<PaymentRequest[]>({
     queryKey: ['payment-requests-approval', brandId],
     queryFn: () => api.get('/payment-requests', { params }).then(r => extractItems(r.data)),
     refetchInterval: 5000,
@@ -309,7 +307,6 @@ function FinanceApproval() {
   });
 
   const pendingExpenses = expenses.filter(e => e.status === 'pending');
-  const approvedExpenses = expenses.filter(e => e.status === 'approved');
   const pendingPRs = paymentRequests.filter(p => p.status === 'pending');
   const approvedPRs = paymentRequests.filter(p => p.status === 'approved');
 
@@ -317,12 +314,6 @@ function FinanceApproval() {
 
   const approveExpMut = useMutation({ mutationFn: (id: string) => api.post(`/expenses/${id}/approve`), onSuccess: () => { message.success('审批通过'); invalidate(); }, onError: (e: any) => message.error(e?.response?.data?.detail ?? '失败') });
   const rejectExpMut = useMutation({ mutationFn: (id: string) => api.post(`/expenses/${id}/reject`), onSuccess: () => { message.success('已驳回'); invalidate(); }, onError: (e: any) => message.error(e?.response?.data?.detail ?? '失败') });
-  const payExpMut = useMutation({
-    mutationFn: ({ id, payment_account_id }: { id: string; payment_account_id: string }) =>
-      api.post(`/expenses/${id}/pay`, { payment_account_id }),
-    onSuccess: () => { message.success('付款成功'); setPayExpenseId(null); payForm.resetFields(); invalidate(); },
-    onError: (e: any) => message.error(e?.response?.data?.detail ?? '付款失败'),
-  });
   const approvePRMut = useMutation({ mutationFn: (id: string) => api.put(`/payment-requests/${id}`, { status: 'approved' }), onSuccess: () => { message.success('审批通过'); invalidate(); }, onError: (e: any) => message.error(e?.response?.data?.detail ?? '失败') });
   const confirmPayMut = useMutation({
     mutationFn: ({ id, payment_account_id, payment_voucher_urls, signed_photo_urls }: any) =>
@@ -336,8 +327,6 @@ function FinanceApproval() {
     },
     onError: (e: any) => message.error(e?.response?.data?.detail ?? '失败'),
   });
-
-  const projectAccounts = accounts.filter((a: any) => a.level === 'project');
 
   // 报销列 — 待审批（只审批，付款在报销管理页）
   const pendingExpCols: ColumnsType<Expense> = [

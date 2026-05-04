@@ -3,7 +3,7 @@ import { Card, Col, Empty, Image, Progress, Row, Space, Statistic, Table, Tag, T
 import { BankOutlined, CheckCircleOutlined, DollarOutlined, ShoppingCartOutlined, TrophyOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { Line } from '@ant-design/plots';
-import api, { extractItems } from '../api/client';
+import api from '../api/client';
 
 interface TrendPoint {
   period: string; sales: number; receipt: number;

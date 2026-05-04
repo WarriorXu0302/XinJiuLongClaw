@@ -47,7 +47,7 @@ function ExpenseList() {
   const [payRecord, setPayRecord] = useState<ExpenseItem | null>(null);
   const [payAccountId, setPayAccountId] = useState('');
   const [payVoucherUrls, setPayVoucherUrls] = useState<string[]>([]);
-  const [payReceiptUrls, setPayReceiptUrls] = useState<string[]>([]);
+  const [_payReceiptUrls, setPayReceiptUrls] = useState<string[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 

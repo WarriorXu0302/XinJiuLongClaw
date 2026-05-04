@@ -51,7 +51,7 @@ function PolicyApproval() {
   const [rejectReason, setRejectReason] = useState('');
   const [detailRecord, setDetailRecord] = useState<PolicyRequest | null>(null);
 
-  const { brandId, params: brandParams } = useBrandFilter();
+  const { brandId } = useBrandFilter();
 
   const { data: pendingInternal = [], isLoading: loadingInternal } = useQuery<PolicyRequest[]>({
     queryKey: ['policy-requests-approval-internal', brandId],
@@ -183,7 +183,7 @@ function PolicyApproval() {
               {/* 订单信息 */}
               {o && (
                 <>
-                  <Divider orientation="left" style={{ margin: '12px 0 8px' }}>订单信息</Divider>
+                  <Divider titlePlacement="start" style={{ margin: '12px 0 8px' }}>订单信息</Divider>
                   <Descriptions column={3} size="small" bordered style={{ marginBottom: 8 }}>
                     <Descriptions.Item label="订单号"><Text copyable>{o.order_no}</Text></Descriptions.Item>
                     <Descriptions.Item label="订单货款"><Text strong>¥{Number(o.total_amount).toLocaleString()}</Text></Descriptions.Item>
@@ -217,7 +217,7 @@ function PolicyApproval() {
               {/* 政策明细 */}
               {detailRecord.request_items && detailRecord.request_items.length > 0 && (
                 <>
-                  <Divider orientation="left" style={{ margin: '12px 0 8px' }}>政策明细（折算价值 ¥{detailRecord.total_policy_value?.toLocaleString() ?? 0}）</Divider>
+                  <Divider titlePlacement="start" style={{ margin: '12px 0 8px' }}>政策明细（折算价值 ¥{detailRecord.total_policy_value?.toLocaleString() ?? 0}）</Divider>
                   <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr 50px 90px 90px', gap: '4px 8px', fontSize: 13, padding: '0 4px' }}>
                     <Text type="secondary" style={{ fontSize: 11, fontWeight: 600 }}>类型</Text>
                     <Text type="secondary" style={{ fontSize: 11, fontWeight: 600 }}>名称</Text>
@@ -243,8 +243,8 @@ function PolicyApproval() {
                 const dealAmt = Number(o.deal_amount ?? 0);
                 const policyGap = Number(detailRecord.total_gap ?? o.policy_gap ?? 0);
                 const policyValue = Number(detailRecord.total_policy_value ?? o.policy_value ?? 0);
-                const custPaid = Number(o.customer_paid_amount ?? totalAmt);
-                const policyReceivable = Number(o.policy_receivable ?? 0);
+                const custPaid = Number((o as any).customer_paid_amount ?? totalAmt);
+                const policyReceivable = Number((o as any).policy_receivable ?? 0);
                 // 预估利润 = 政策价值 - 政策差额（红利部分就是利润空间）
                 const policySurplus = surplus ?? 0;
                 return (

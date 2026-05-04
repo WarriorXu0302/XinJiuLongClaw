@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import api, { extractItems } from '../../api/client';
 import { useBrandFilter } from '../../stores/useBrandFilter';
-import type { PolicyRequest, RequestItem } from './policyTypes';
+import type { PolicyRequest } from './policyTypes';
 import { BENEFIT_LABEL } from './policyTypes';
 
 const { Text } = Typography;

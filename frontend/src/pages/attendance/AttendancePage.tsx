@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Card, Col, DatePicker, Form, Input, message, Modal, Row, Select, Space, Table, Tabs, Tag, Typography, Upload } from 'antd';
-import { CameraOutlined, CheckCircleOutlined, EnvironmentOutlined, LoginOutlined, LogoutOutlined, UploadOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Col, DatePicker, Form, Input, message, Modal, Row, Select, Space, Table, Tabs, Tag, Typography } from 'antd';
+import { CameraOutlined, LoginOutlined, LogoutOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import dayjs, { type Dayjs } from 'dayjs';
+import dayjs from 'dayjs';
 import api, { extractItems } from '../../api/client';
 
 const { Title, Text } = Typography;
@@ -22,7 +22,6 @@ interface Leave {
   id: string; request_no: string; employee_name: string; leave_type: string;
   start_date: string; end_date: string; total_days: number; reason: string; status: string;
 }
-interface Employee { id: string; name: string }
 interface Customer { id: string; name: string }
 
 const LEAVE_LABEL: Record<string, string> = {
@@ -348,16 +347,6 @@ function LeavePanel() {
       qc.invalidateQueries({ queryKey: ['my-leaves'] });
     },
     onError: (e: any) => message.error(e?.response?.data?.detail ?? '提交失败'),
-  });
-
-  const approveMut = useMutation({
-    mutationFn: ({ id, approved, reason }: any) => api.post(`/attendance/leave-requests/${id}/approve`, {
-      approved, reject_reason: reason,
-    }),
-    onSuccess: () => {
-      message.success('已处理');
-      qc.invalidateQueries({ queryKey: ['my-leaves'] });
-    },
   });
 
   const columns: ColumnsType<Leave> = [

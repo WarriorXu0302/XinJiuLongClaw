@@ -18,16 +18,16 @@ interface TrendPoint {
 function EmployeeTrendChart({ employeeId }: { employeeId: string }) {
   const { data, isLoading } = useQuery<{ trend: TrendPoint[] }>({
     queryKey: ['emp-trend', employeeId],
-    queryFn: () => api.get('/performance/employee-trend', { params: { employee_id: employeeId, months: 6 } }).then(r => extractItems(r.data)),
+    queryFn: () => api.get('/performance/employee-trend', { params: { employee_id: employeeId, months: 6 } }).then(r => r.data),
   });
   if (isLoading || !data) return <Text type="secondary">加载中...</Text>;
-  const salesChart = data.trend.flatMap(t => ([
+  const salesChart = data.trend.flatMap((t: TrendPoint) => ([
     { period: t.period, type: '实际销售', value: t.sales },
     { period: t.period, type: '销售目标', value: t.sales_target },
     { period: t.period, type: '实际回款', value: t.receipt },
     { period: t.period, type: '回款目标', value: t.receipt_target },
   ]));
-  const payChart = data.trend.flatMap(t => ([
+  const payChart = data.trend.flatMap((t: TrendPoint) => ([
     { period: t.period, type: '提成', value: t.commission },
     { period: t.period, type: '管理提成', value: t.manager_share },
     { period: t.period, type: '达标奖金', value: t.bonus },
@@ -82,7 +82,7 @@ function PerformanceDashboard() {
   const qc = useQueryClient();
   const [period, setPeriod] = useState(ym());
 
-  const { data = [], isLoading, refetch } = useQuery<Row[]>({
+  const { data = [], isLoading } = useQuery<Row[]>({
     queryKey: ['performance-monthly', period],
     queryFn: () => api.get(`/performance/employee-monthly`, { params: { period } }).then(r => extractItems(r.data)),
   });

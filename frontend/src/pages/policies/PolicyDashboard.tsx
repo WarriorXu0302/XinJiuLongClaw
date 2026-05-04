@@ -51,7 +51,6 @@ function PolicyDashboard() {
   const PAYER_LABEL: Record<string, string> = { customer: '客户垫付', employee: '业务垫付', company: '公司垫付', unknown: '未指定' };
 
   // Overdue items: fulfilled but not yet applied for > 30 days
-  const now = Date.now();
   const overdueItems = allItems.filter(i => {
     if (i.fulfill_status !== 'fulfilled') return false;
     return true; // all fulfilled but not yet settled are "overdue candidates"

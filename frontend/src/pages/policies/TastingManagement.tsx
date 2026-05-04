@@ -16,12 +16,7 @@ function TastingManagement() {
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm();
   const [period, setPeriod] = useState(new Date().toISOString().slice(0, 7));
-  const { brandId, params } = useBrandFilter();
-
-  const { data: brands = [] } = useQuery<{ id: string; name: string }[]>({
-    queryKey: ['brands-select'],
-    queryFn: () => api.get('/products/brands').then(r => extractItems(r.data)),
-  });
+  const { brandId } = useBrandFilter();
 
   const { data: destructions = [] } = useQuery<Destruction[]>({
     queryKey: ['bottle-destructions', period, brandId],
@@ -32,13 +27,18 @@ function TastingManagement() {
     },
   });
 
-  const { data: reconciliation = [], isLoading: reconLoading } = useQuery<Reconciliation[]>({
+  const { data: reconciliation = [] } = useQuery<Reconciliation[]>({
     queryKey: ['bottle-reconciliation', period, brandId],
     queryFn: () => {
       const p: Record<string, string> = { period };
       if (brandId) p.brand_id = brandId;
       return api.get('/bottle-reconciliation', { params: p }).then(r => extractItems(r.data));
     },
+  });
+
+  const { data: brands = [] } = useQuery<any[]>({
+    queryKey: ['brands-select'],
+    queryFn: () => api.get('/brands').then(r => extractItems(r.data)),
   });
 
   const createMutation = useMutation({

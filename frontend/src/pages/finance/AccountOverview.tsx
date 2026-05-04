@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Button, Card, Col, Descriptions, Divider, Form, Input, InputNumber, message, Modal, Row, Select, Space, Statistic, Table, Tag, Tabs, Typography } from 'antd';
+import { Button, Card, Col, Descriptions, Divider, Form, Input, InputNumber, message, Modal, Row, Select, Space, Statistic, Table, Tag, Typography } from 'antd';
 import { BankOutlined, DownloadOutlined, PlusOutlined, SwapOutlined } from '@ant-design/icons';
 import { exportExcel } from '../../utils/exportExcel';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -30,7 +30,7 @@ function AccountOverview() {
   const [isFinancingMode, setIsFinancingMode] = useState(false);
   const [interestPreview, setInterestPreview] = useState<{ interest: number; days: number; total: number } | null>(null);
 
-  const { data: summary, isLoading } = useQuery<Summary>({
+  const { data: summary } = useQuery<Summary>({
     queryKey: ['account-summary', selectedBrandId],
     queryFn: () => api.get('/accounts/summary').then(r => r.data),
     refetchInterval: 10000,

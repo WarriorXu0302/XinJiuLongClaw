@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Card, Col, DatePicker, Divider, Form, Input, InputNumber, message, Modal, Radio, Row, Select, Space, Statistic, Table, Tag, Typography, Upload } from 'antd';
-import { PlusOutlined, UploadOutlined } from '@ant-design/icons';
+import { Button, Card, Col, DatePicker, Divider, Form, Input, InputNumber, message, Modal, Radio, Row, Select, Space, Statistic, Table, Tag, Typography } from 'antd';
+import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import api, { extractItems } from '../../api/client';
@@ -82,16 +82,6 @@ function PurchaseOrderList() {
   const targetWarehouseType = Form.useWatch('target_warehouse_type', form) || 'erp_warehouse';
   const isMallTarget = targetWarehouseType === 'mall_warehouse';
 
-  const approveMut = useMutation({
-    mutationFn: (id: string) => api.post(`/purchase-orders/${id}/approve`),
-    onSuccess: () => { message.success('采购单已审批通过'); queryClient.invalidateQueries({ queryKey: ['purchase-orders'] }); queryClient.invalidateQueries({ queryKey: ['accounts-select'] }); },
-    onError: (e: any) => message.error(e?.response?.data?.detail ?? '审批失败'),
-  });
-  const rejectMut = useMutation({
-    mutationFn: (id: string) => api.post(`/purchase-orders/${id}/reject`),
-    onSuccess: () => { message.success('采购单已驳回'); queryClient.invalidateQueries({ queryKey: ['purchase-orders'] }); },
-    onError: (e: any) => message.error(e?.response?.data?.detail ?? '驳回失败'),
-  });
   // 收货必须走 /purchase/receive 扫码页（白酒业务硬要求：每瓶扫防伪码入库），
   // 不再提供列表页的"一键收货"快捷按钮
 

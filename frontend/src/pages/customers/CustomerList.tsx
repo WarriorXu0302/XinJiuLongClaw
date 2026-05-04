@@ -70,7 +70,7 @@ function CustomerList() {
 
   const { data: employees = [] } = useQuery<{id: string; name: string}[]>({
     queryKey: ['employees-select', brandId],
-    queryFn: () => api.get('/hr/employees', { params }).then(r => extractItems(r.data)),
+    queryFn: () => api.get('/hr/employees', { params: brandParams }).then(r => extractItems(r.data)),
   });
 
   const { data: brands = [] } = useQuery<{id: string; name: string}[]>({

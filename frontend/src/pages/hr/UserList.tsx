@@ -71,13 +71,6 @@ function UserList() {
     onError: (e: any) => message.error(e?.response?.data?.detail ?? '更新失败'),
   });
 
-  const setRolesMut = useMutation({
-    mutationFn: ({ userId, role_codes }: { userId: string; role_codes: string[] }) =>
-      api.put(`/auth/users/${userId}/roles`, { role_codes }),
-    onSuccess: () => { message.success('角色已更新'); queryClient.invalidateQueries({ queryKey: ['users'] }); },
-    onError: (e: any) => message.error(e?.response?.data?.detail ?? '更新角色失败'),
-  });
-
   const resetPwdMut = useMutation({
     mutationFn: ({ userId, new_password }: { userId: string; new_password: string }) =>
       api.post(`/auth/users/${userId}/reset-password`, { new_password }),

@@ -4,7 +4,7 @@
  */
 import { useState } from 'react';
 import {
-  Button, Form, Input, message, Modal, Table, Tag, Typography,
+  Button, Form, Input, message, Modal, Space, Table, Tag, Typography,
 } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -36,7 +36,7 @@ export default function StoreList() {
   const stores = allWhs.filter(w => w.warehouse_type === 'store');
 
   const createMut = useMutation({
-    mutationFn: (v: any) => api.post('/warehouses', { ...v, warehouse_type: 'store' }),
+    mutationFn: (v: any) => api.post('/inventory/warehouses', { ...v, warehouse_type: 'store' }),
     onSuccess: () => {
       message.success('门店已创建');
       setModalOpen(false); form.resetFields();
@@ -47,7 +47,7 @@ export default function StoreList() {
 
   const updateMut = useMutation({
     mutationFn: ({ id, body }: { id: string; body: any }) =>
-      api.put(`/warehouses/${id}`, body),
+      api.put(`/inventory/warehouses/${id}`, body),
     onSuccess: () => {
       message.success('已更新');
       setModalOpen(false); setEditing(null); form.resetFields();
@@ -65,13 +65,18 @@ export default function StoreList() {
       render: (v) => v ? <Tag color="green">启用</Tag> : <Tag>停用</Tag>,
     },
     {
-      title: '操作', key: 'act', width: 80,
+      title: '操作', key: 'act', width: 160,
       render: (_, r) => (
-        <a onClick={() => {
-          setEditing(r);
-          form.setFieldsValue(r);
-          setModalOpen(true);
-        }}>编辑</a>
+        <Space size="small">
+          <a onClick={() => {
+            setEditing(r);
+            form.setFieldsValue(r);
+            setModalOpen(true);
+          }}>编辑</a>
+          <a onClick={() => updateMut.mutate({ id: r.id, body: { is_active: !r.is_active } })}>
+            {r.is_active ? '停用' : '启用'}
+          </a>
+        </Space>
       ),
     },
   ];

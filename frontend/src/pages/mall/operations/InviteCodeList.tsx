@@ -231,14 +231,16 @@ export default function InviteCodeList() {
       <Card size="small" style={{ marginBottom: 16 }}
         title={<>近 {statsDays} 天签发统计</>}
         extra={
-          <InputNumber
-            min={1} max={90}
-            value={statsDays}
-            onChange={(v) => setStatsDays(Number(v) || 7)}
-            addonBefore="近"
-            addonAfter="天"
-            style={{ width: 160 }}
-          />
+          <Space.Compact>
+            <Button disabled>近</Button>
+            <InputNumber
+              min={1} max={90}
+              value={statsDays}
+              onChange={(v) => setStatsDays(Number(v) || 7)}
+              style={{ width: 72 }}
+            />
+            <Button disabled>天</Button>
+          </Space.Compact>
         }
       >
         <Row gutter={16} style={{ marginBottom: 16 }}>

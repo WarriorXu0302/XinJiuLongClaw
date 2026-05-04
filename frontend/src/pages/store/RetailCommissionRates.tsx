@@ -202,7 +202,7 @@ export default function RetailCommissionRates() {
           <Form.Item name="rate_on_profit" label="提成率（%）"
             rules={[{ required: true, type: 'number', min: 0, max: 100 }]}
             extra="例：15 表示按每瓶利润的 15% 给店员">
-            <InputNumber min={0} max={100} precision={2} style={{ width: '100%' }} addonAfter="%" />
+            <InputNumber min={0} max={100} precision={2} style={{ width: '100%' }} suffix="%" />
           </Form.Item>
           <Form.Item name="notes" label="备注">
             <Input.TextArea rows={2} />

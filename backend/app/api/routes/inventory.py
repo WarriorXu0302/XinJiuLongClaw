@@ -32,13 +32,126 @@ router = APIRouter()
 async def list_warehouses(
     user: CurrentUser,
     brand_id: str | None = Query(None),
+    include_inactive: bool = Query(False),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(Warehouse).where(Warehouse.is_active == True)
+    stmt = select(Warehouse)
+    if not include_inactive:
+        stmt = stmt.where(Warehouse.is_active == True)
     if brand_id:
         stmt = stmt.where(Warehouse.brand_id == brand_id)
     rows = (await db.execute(stmt.order_by(Warehouse.code))).scalars().all()
-    return [{"id": w.id, "name": w.name, "code": w.code, "warehouse_type": w.warehouse_type, "brand_id": w.brand_id, "brand_name": w.brand.name if w.brand else None} for w in rows]
+    return [
+        {
+            "id": w.id, "name": w.name, "code": w.code,
+            "warehouse_type": w.warehouse_type,
+            "brand_id": w.brand_id,
+            "brand_name": w.brand.name if w.brand else None,
+            "address": w.address,
+            "manager_id": w.manager_id,
+            "is_active": w.is_active,
+        }
+        for w in rows
+    ]
+
+
+class _WarehouseCreateBody(BaseModel):
+    code: str
+    name: str
+    warehouse_type: str = "main"  # main / backup / tasting / store
+    brand_id: Optional[str] = None
+    address: Optional[str] = None
+    manager_id: Optional[str] = None
+
+
+class _WarehouseUpdateBody(BaseModel):
+    code: Optional[str] = None
+    name: Optional[str] = None
+    address: Optional[str] = None
+    manager_id: Optional[str] = None
+    brand_id: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+@router.post("/warehouses")
+async def create_warehouse(
+    body: _WarehouseCreateBody,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """创建仓库（admin/boss/warehouse）。门店仓 warehouse_type=store。"""
+    require_role(user, "admin", "boss", "warehouse")
+    # code 唯一
+    existing = (await db.execute(
+        select(Warehouse).where(Warehouse.code == body.code)
+    )).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"编码 {body.code} 已存在")
+    w = Warehouse(
+        id=str(uuid.uuid4()),
+        code=body.code,
+        name=body.name,
+        warehouse_type=body.warehouse_type,
+        brand_id=body.brand_id,
+        address=body.address,
+        manager_id=body.manager_id,
+        is_active=True,
+    )
+    db.add(w)
+    await db.flush()
+    return {
+        "id": w.id, "code": w.code, "name": w.name,
+        "warehouse_type": w.warehouse_type, "is_active": w.is_active,
+        "address": w.address, "brand_id": w.brand_id, "manager_id": w.manager_id,
+    }
+
+
+@router.put("/warehouses/{wid}")
+async def update_warehouse(
+    wid: str,
+    body: _WarehouseUpdateBody,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """更新仓库（admin/boss/warehouse）。不允许改 warehouse_type（避免主仓误改）。"""
+    require_role(user, "admin", "boss", "warehouse")
+    w = await db.get(Warehouse, wid)
+    if w is None:
+        raise HTTPException(status_code=404, detail="仓库不存在")
+    data = body.model_dump(exclude_unset=True)
+    if "code" in data and data["code"] != w.code:
+        # code 唯一
+        dup = (await db.execute(
+            select(Warehouse).where(Warehouse.code == data["code"]).where(Warehouse.id != wid)
+        )).scalar_one_or_none()
+        if dup:
+            raise HTTPException(status_code=409, detail=f"编码 {data['code']} 已被占用")
+    for k, v in data.items():
+        setattr(w, k, v)
+    await db.flush()
+    return {
+        "id": w.id, "code": w.code, "name": w.name,
+        "warehouse_type": w.warehouse_type, "is_active": w.is_active,
+        "address": w.address, "brand_id": w.brand_id, "manager_id": w.manager_id,
+    }
+
+
+@router.get("/warehouses/{wid}")
+async def get_warehouse(
+    wid: str,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    w = await db.get(Warehouse, wid)
+    if w is None:
+        raise HTTPException(status_code=404, detail="仓库不存在")
+    return {
+        "id": w.id, "code": w.code, "name": w.name,
+        "warehouse_type": w.warehouse_type, "is_active": w.is_active,
+        "address": w.address, "brand_id": w.brand_id,
+        "brand_name": w.brand.name if w.brand else None,
+        "manager_id": w.manager_id,
+    }
 
 
 # ── Batch query (PRD §6.1: GET /api/inventory/batches) ──────────────

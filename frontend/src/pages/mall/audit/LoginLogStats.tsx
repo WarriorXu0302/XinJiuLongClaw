@@ -9,7 +9,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Card, InputNumber, Radio, Space, Table, Tabs, Tag, Tooltip, Typography,
+  Button, Card, InputNumber, Radio, Space, Table, Tabs, Tag, Tooltip, Typography,
 } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
@@ -260,31 +260,37 @@ export default function LoginLogStats() {
 
       <Card size="small" style={{ marginBottom: 16 }}>
         <Space wrap>
-          <InputNumber
-            min={1} max={90}
-            value={days}
-            onChange={(v) => setDays(Number(v) || 7)}
-            addonBefore="近"
-            addonAfter="天"
-            style={{ width: 160 }}
-          />
-          <InputNumber
-            min={10} max={500}
-            value={topN}
-            onChange={(v) => setTopN(Number(v) || 100)}
-            addonBefore="Top"
-            addonAfter="名"
-            style={{ width: 160 }}
-          />
+          <Space.Compact>
+            <Button disabled>近</Button>
+            <InputNumber
+              min={1} max={90}
+              value={days}
+              onChange={(v) => setDays(Number(v) || 7)}
+              style={{ width: 80 }}
+            />
+            <Button disabled>天</Button>
+          </Space.Compact>
+          <Space.Compact>
+            <Button disabled>Top</Button>
+            <InputNumber
+              min={10} max={500}
+              value={topN}
+              onChange={(v) => setTopN(Number(v) || 100)}
+              style={{ width: 80 }}
+            />
+            <Button disabled>名</Button>
+          </Space.Compact>
           {tab === 'user' && (
             <>
-              <InputNumber
-                min={0}
-                value={minCount}
-                onChange={(v) => setMinCount(Number(v) || 0)}
-                addonBefore="真实登录 ≥"
-                style={{ width: 200 }}
-              />
+              <Space.Compact>
+                <Button disabled>真实登录 ≥</Button>
+                <InputNumber
+                  min={0}
+                  value={minCount}
+                  onChange={(v) => setMinCount(Number(v) || 0)}
+                  style={{ width: 80 }}
+                />
+              </Space.Compact>
               <Radio.Group
                 value={orderBy}
                 onChange={(e) => setOrderBy(e.target.value)}
@@ -297,13 +303,15 @@ export default function LoginLogStats() {
             </>
           )}
           {tab === 'ip' && (
-            <InputNumber
-              min={1}
-              value={minAccounts}
-              onChange={(v) => setMinAccounts(Number(v) || 2)}
-              addonBefore="账号数 ≥"
-              style={{ width: 180 }}
-            />
+            <Space.Compact>
+              <Button disabled>账号数 ≥</Button>
+              <InputNumber
+                min={1}
+                value={minAccounts}
+                onChange={(v) => setMinAccounts(Number(v) || 2)}
+                style={{ width: 80 }}
+              />
+            </Space.Compact>
           )}
         </Space>
       </Card>

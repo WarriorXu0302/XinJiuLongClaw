@@ -232,6 +232,10 @@
       "style": { "navigationBarTitleText": "通知中心" }
     },
     {
+      "path": "pages/salesman-commissions/salesman-commissions",
+      "style": { "navigationBarTitleText": "我的提成" }
+    },
+    {
       "path": "pages/salesman-upload-voucher/salesman-upload-voucher",
       "style": { "navigationBarTitleText": "上传收款凭证" }
     },

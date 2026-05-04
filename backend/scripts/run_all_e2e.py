@@ -56,6 +56,8 @@ SCRIPTS = [
      "审计三连 G1/G2/G8：门店收银/退货/mall 退货金额变更留痕"),
     ("e2e_dashboard_profit_export",
      "G3/G7/G9：stats group_by=store + 快照批量回补 + 利润聚合"),
+    ("e2e_clawback_transparency",
+     "G4/G6：跨月退货追回透明化（工资 detail + 业务员 commission 流水）"),
 ]
 
 

@@ -1966,6 +1966,81 @@ async def salary_detail(rec_id: str, user: CurrentUser, db: AsyncSession = Depen
     )).scalars().all()
     leave_days = sum(float(l.total_days or 0) for l in leaves)
 
+    # G4：跨月退货追回明细 + 挂账详情（业务员自查"为啥少钱"）
+    #   1) 本期工资单扫入的 is_adjustment=True 负数 Commission
+    #   2) 本期应扣而未扣完的挂账（settled_in_salary_id=rec.id，说明这期扣了历史挂账）
+    #   3) 本期新建的挂账（source_salary_record_id=rec.id 且 settled_in_salary_id is NULL）
+    from app.models.payroll import SalaryAdjustmentPending
+    # adjustment Commission 通过 SalaryOrderLink 关联（generate_salary_records 里会写）
+    adjustment_commission_links = (await db.execute(
+        select(SalaryOrderLink, Commission)
+        .join(Commission, Commission.id == SalaryOrderLink.commission_id)
+        .where(SalaryOrderLink.salary_record_id == rec_id)
+        .where(Commission.is_adjustment.is_(True))
+    )).all()
+    clawback_details = []
+    for link, com in adjustment_commission_links:
+        # 回查原 commission + 原订单（mall 或 store）
+        origin = None
+        origin_order_no = None
+        origin_ref_type = None
+        origin_amount = None
+        if com.adjustment_source_commission_id:
+            origin = await db.get(Commission, com.adjustment_source_commission_id)
+            if origin:
+                origin_amount = float(origin.commission_amount)
+                if origin.mall_order_id:
+                    from app.models.mall.order import MallOrder
+                    mo = await db.get(MallOrder, origin.mall_order_id)
+                    origin_order_no = mo.order_no if mo else None
+                    origin_ref_type = "mall_order"
+                elif origin.store_sale_id:
+                    from app.models.store_sale import StoreSale
+                    ss = await db.get(StoreSale, origin.store_sale_id)
+                    origin_order_no = ss.sale_no if ss else None
+                    origin_ref_type = "store_sale"
+                elif origin.order_id:
+                    from app.models.order import Order as _Ord2
+                    oo = await db.get(_Ord2, origin.order_id)
+                    origin_order_no = oo.order_no if oo else None
+                    origin_ref_type = "b2b_order"
+        clawback_details.append({
+            "commission_id": com.id,
+            "amount": float(com.commission_amount),  # 负数
+            "origin_commission_id": com.adjustment_source_commission_id,
+            "origin_order_no": origin_order_no,
+            "origin_ref_type": origin_ref_type,
+            "origin_amount": origin_amount,
+            "origin_settled_at": str(origin.settled_at) if origin and origin.settled_at else None,
+            "notes": com.notes,
+        })
+
+    # 本期扣了历史挂账（本期结清的 pending）
+    settled_here = (await db.execute(
+        select(SalaryAdjustmentPending)
+        .where(SalaryAdjustmentPending.settled_in_salary_id == rec_id)
+    )).scalars().all()
+    clawback_settled_history = [{
+        "id": a.id,
+        "pending_amount": float(a.pending_amount),
+        "from_salary_record_id": a.source_salary_record_id,
+        "reason": a.reason,
+        "settled_at": str(a.settled_at) if a.settled_at else None,
+    } for a in settled_here]
+
+    # 本期新建的挂账（下月还要扣）
+    new_pending = (await db.execute(
+        select(SalaryAdjustmentPending)
+        .where(SalaryAdjustmentPending.source_salary_record_id == rec_id)
+        .where(SalaryAdjustmentPending.settled_in_salary_id.is_(None))
+    )).scalars().all()
+    clawback_new_pending = [{
+        "id": a.id,
+        "pending_amount": float(a.pending_amount),
+        "reason": a.reason,
+        "created_at": str(a.created_at) if a.created_at else None,
+    } for a in new_pending]
+
     emp_name = rec.employee.name if rec.employee else '-'
     emp = rec.employee
     # 取主属品牌薪酬方案（展示模板金额）
@@ -2023,6 +2098,10 @@ async def salary_detail(rec_id: str, user: CurrentUser, db: AsyncSession = Depen
         "manager_share_details": manager_share_details,
         "assessment_details": assessment_details,
         "subsidy_details": subsidy_details,
+        # G4：跨月退货追回透明化
+        "clawback_details": clawback_details,
+        "clawback_settled_history": clawback_settled_history,
+        "clawback_new_pending": clawback_new_pending,
         "notes": rec.notes,
         # 流程信息
         "submitted_at": str(rec.submitted_at) if rec.submitted_at else None,

@@ -38,6 +38,17 @@
   - ERP 前端 `Dashboard.tsx` 业务员排行卡片改双模式：实时/快照 Tab 切换 + 月份选择器 + 空快照一键冻结按钮
   - E2E `scripts/e2e_kpi_snapshot.py` 覆盖：冻结 → 退货 → 实时 vs 快照数据分叉 → UPSERT 幂等
 
+- **G4/G6：跨月退货追回透明化 + 业务员 commission 流水**
+  - G4：`/api/payroll/salary-records/{id}/detail` 返回 3 个新字段
+    * `clawback_details[]`：本月工资扫入的 is_adjustment 负数 Commission（含原订单号/原提成金额/原类型）
+    * `clawback_settled_history[]`：本月结清的历史挂账
+    * `clawback_new_pending[]`：本月工资不足扣减挂账到下月
+  - G4：ERP 前端 `SalaryDetail.tsx` 新增"跨月退货追回扣减"卡片，三段式展示（本期扫入 / 结清历史 / 新建挂账）
+  - G6：新端点 `GET /api/mall/workspace/my-commissions` 业务员自查流水，支持 status=all/pending/settled/reversed/adjustment 过滤 + year/month 筛选
+  - G6：新端点 `GET /api/mall/workspace/my-commissions/stats?year&month` 返 by_status 四格 + adjustment 汇总
+  - G6：miniprogram 新增"我的提成"页（`salesman-commissions.vue`），4 格汇总 + Tab 切换列表 + 追回单独标红显示原 commission
+  - E2E `scripts/e2e_clawback_transparency.py` 覆盖 5 步：收银→settled→退货→追回建 adjustment→salary_detail/commission 查询验证
+
 - **G3/G7/G9：看板利润卡 + 门店报表导出 + 快照批量回补**
   - G9：`/api/mall/admin/dashboard/summary` 返回 today/month 加 `revenue/profit/commission/gross_margin_pct`（聚合 profit_service）+ month 加 `bad_debt`
   - G9：ERP Dashboard 新增 4 个卡片（本月收入/净利润/毛利率/提成·坏账）

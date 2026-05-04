@@ -90,6 +90,7 @@ const entries = [
   { key: 'inspection', icon: '🔍', label: '扫码稽查', path: '/pages/salesman-inspection/salesman-inspection' },
   { key: 'kpi', icon: '📊', label: 'KPI', path: '/pages/salesman-kpi/salesman-kpi' },
   { key: 'notifications', icon: '🔔', label: '通知', path: '/pages/salesman-notifications/salesman-notifications' },
+  { key: 'commissions', icon: '💵', label: '我的提成', path: '/pages/salesman-commissions/salesman-commissions' },
   // 门店收银（仅 assigned_store_id 非空的店员可见）
   { key: 'store_cashier', icon: '🏪', label: '门店收银', path: '/pages/store-cashier/store-cashier', requireStore: true },
   { key: 'store_my_sales', icon: '📈', label: '门店业绩', path: '/pages/store-my-sales/store-my-sales', requireStore: true }

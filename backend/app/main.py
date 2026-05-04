@@ -208,9 +208,10 @@ def create_app() -> FastAPI:
     from app.api.routes.mall.admin import returns as ma_returns
     app.include_router(ma_returns.router, prefix="/api/mall/admin/returns", tags=["Mall-Admin"])
 
-    # M4c: workspace 薄转发（ERP 复用模块 — 通知 / 打卡 / 拜访 / 请假 / 报销 / 稽查 / KPI / 客户）
+    # M4c: workspace 薄转发（ERP 复用模块 — 通知 / 打卡 / 拜访 / 请假 / 报销 / 稽查 / KPI / 客户 / 提成）
     from app.api.routes.mall.workspace import (
         attendance as mw_attendance,
+        commissions as mw_commissions,
         customers as mw_customers,
         expense as mw_expense,
         inspection as mw_inspection,
@@ -263,6 +264,12 @@ def create_app() -> FastAPI:
     app.include_router(
         mw_store_returns.router,
         prefix="/api/mall/workspace/store-returns",
+        tags=["Mall-Workspace"],
+    )
+    # G6：业务员自查 commission 流水
+    app.include_router(
+        mw_commissions.router,
+        prefix="/api/mall/workspace/my-commissions",
         tags=["Mall-Workspace"],
     )
 

@@ -67,6 +67,30 @@ interface SalaryDetailResp {
   manager_share_details: OrderLine[];
   assessment_details: AssessLine[];
   subsidy_details: SubsidyLine[];
+  // G4：跨月退货追回透明化
+  clawback_details?: {
+    commission_id: string;
+    amount: number;  // 负数
+    origin_commission_id?: string;
+    origin_order_no?: string;
+    origin_ref_type?: string;
+    origin_amount?: number;
+    origin_settled_at?: string;
+    notes?: string;
+  }[];
+  clawback_settled_history?: {
+    id: string;
+    pending_amount: number;
+    from_salary_record_id: string;
+    reason?: string;
+    settled_at?: string;
+  }[];
+  clawback_new_pending?: {
+    id: string;
+    pending_amount: number;
+    reason?: string;
+    created_at?: string;
+  }[];
   notes?: string;
   submitted_at?: string;
   approved_at?: string;
@@ -204,6 +228,84 @@ function SalaryDetail() {
                   </Table.Summary.Row>
                 )}
               />
+            </Card>
+          )}
+
+          {/* G4：跨月退货追回明细（透明化扣款原因） */}
+          {((data.clawback_details?.length || 0) > 0
+            || (data.clawback_settled_history?.length || 0) > 0
+            || (data.clawback_new_pending?.length || 0) > 0) && (
+            <Card
+              title={<Text strong style={{ color: '#fa541c' }}>⚠ 跨月退货追回扣减</Text>}
+              size="small"
+              style={{ marginBottom: 16 }}
+            >
+              {(data.clawback_details?.length || 0) > 0 && (
+                <>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    本月扫入的退货追回项（负数 commission，直接从本月工资扣减）：
+                  </Text>
+                  <Table
+                    size="small"
+                    pagination={false}
+                    style={{ marginTop: 8 }}
+                    dataSource={data.clawback_details || []}
+                    rowKey="commission_id"
+                    columns={[
+                      { title: '原订单号', dataIndex: 'origin_order_no', render: (v: string) => v || '-' },
+                      { title: '来源', dataIndex: 'origin_ref_type', width: 90,
+                        render: (v: string) => v === 'mall_order' ? '商城订单'
+                          : v === 'store_sale' ? '门店零售' : v === 'b2b_order' ? 'B2B' : '-' },
+                      { title: '原提成', dataIndex: 'origin_amount', align: 'right' as const, width: 100,
+                        render: (v: number) => v != null ? yuan(v) : '-' },
+                      { title: '本期扣减', dataIndex: 'amount', align: 'right' as const, width: 100,
+                        render: (v: number) => <Text strong style={{ color: '#cf1322' }}>{yuan(v)}</Text> },
+                      { title: '备注', dataIndex: 'notes', ellipsis: true },
+                    ]}
+                  />
+                </>
+              )}
+              {(data.clawback_settled_history?.length || 0) > 0 && (
+                <>
+                  <Divider style={{ margin: '12px 0' }} />
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    本月结清的历史挂账（之前月份没扣完结转过来的）：
+                  </Text>
+                  <Table
+                    size="small"
+                    pagination={false}
+                    style={{ marginTop: 8 }}
+                    dataSource={data.clawback_settled_history || []}
+                    rowKey="id"
+                    columns={[
+                      { title: '挂账原因', dataIndex: 'reason', ellipsis: true },
+                      { title: '本期扣减', dataIndex: 'pending_amount', align: 'right' as const, width: 110,
+                        render: (v: number) => <Text strong style={{ color: '#cf1322' }}>-{yuan(v)}</Text> },
+                      { title: '结清时间', dataIndex: 'settled_at', width: 160, render: fmt },
+                    ]}
+                  />
+                </>
+              )}
+              {(data.clawback_new_pending?.length || 0) > 0 && (
+                <>
+                  <Divider style={{ margin: '12px 0' }} />
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    本月工资不足扣减，挂账到下月（HR 记得跟进）：
+                  </Text>
+                  <Table
+                    size="small"
+                    pagination={false}
+                    style={{ marginTop: 8 }}
+                    dataSource={data.clawback_new_pending || []}
+                    rowKey="id"
+                    columns={[
+                      { title: '挂账原因', dataIndex: 'reason', ellipsis: true },
+                      { title: '挂账金额', dataIndex: 'pending_amount', align: 'right' as const, width: 110,
+                        render: (v: number) => <Text strong style={{ color: '#faad14' }}>¥{v.toFixed(2)}</Text> },
+                    ]}
+                  />
+                </>
+              )}
             </Card>
           )}
 

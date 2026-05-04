@@ -55,30 +55,23 @@ WHERE Commission.employee_id = ?
 
 这两个是唯一让 mall 团队还没敢拍板的问题。回答老板时需要先问清楚他的**业务预期**再给方案。
 
-### 场景 A：本月订单 completed → 下月退货批准
+### 场景 A：本月订单 completed → 下月退货批准 ✅ 已决策（方案 2+B）
 
-**时间线**：
-- 2026-01-15：订单 completed，commission C=¥500 pending
-- 2026-02-01：工资单审批通过 + paid → C.status=settled，业务员**实收到了这笔 ¥500**
-- 2026-02-20：客户申请退货 + admin approve
-- 当前行为：C 保持 settled（代码里明确写"已 settled 不动"）
-- **结果**：业务员保留 ¥500 提成，公司承担全额退款损失
+**老板决定**：跨月退货的提成必须追回；工资不足扣时挂账下月扣。
 
-**老板可能问**：
-- "这笔钱业务员不用吐回来吗？"
-- "我亏了本金 + 退了全款 + 业务员还拿提成，这账算下来咋办？"
+**实现（migration m6c1）**：
+- `commissions` 加 `is_adjustment` + `adjustment_source_commission_id` 两字段
+- approve_return（mall + 门店双端）逻辑改：
+  - pending → reversed（原逻辑）
+  - settled → **建一条负数 Commission**（is_adjustment=True, status=pending, amount=-original, source=original.id）
+  - 幂等：同一 Commission 只能产生一条 adjustment
+- 下月 payroll.generate_salary_records 自然扫入负数 commission（原 filter `status='pending'` 涵盖）
+- 新表 `salary_adjustments_pending` 挂账：
+  - 当月 total_pay 扣完所有 commission（含负数）仍 < 0 → 实发 0 + 挂账 shortage
+  - 下月生成工资单时优先扣历史挂账（按 created_at 先进先扣）
+  - 扣完 settled_in_salary_id 标上，未扣完保留 pending_amount - deduction
 
-**可选方案**：
-1. **不追溯**（当前）：业务员留钱，靠 KPI 年终调整弥补公司损失
-2. **追溯下月工资扣回**：approve_return 时额外写一笔负数 commission (`-¥500`, `mall_order_id=同`, `status='pending'`) 挂到下月工资单
-3. **只追溯跨月内的**：设 30 天窗口，超过则算公司成本；短期仍追
-
-**做 2/3 需要改的**：
-- `commissions.commission_amount` 允许负数（或新 status `reversed_settled`）
-- 工资单展示页支持负项（"退货追溯扣减 -¥500"一行）
-- approve_return 内新增分支
-
-**体量提示**：当前日订单量 ~10 单，月活业务员 ~5 人。跨月退货理论上每月 < 3 笔。
+**E2E**: `scripts/e2e_cross_month_commission_clawback.py` 覆盖完整链路
 
 ### 场景 B：业务员 KPI / 排行榜对已退货订单的追溯
 

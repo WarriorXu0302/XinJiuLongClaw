@@ -315,3 +315,40 @@ class KpiCoefficientRule(Base):
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     brand: Mapped["Brand"] = relationship("Brand", lazy="selectin")
+
+
+class SalaryAdjustmentPending(Base):
+    """员工欠付挂账（决策 #1）。
+
+    用途：当月工资因"跨月退货追回"导致 actual_pay < 0 时，不允许负数发薪（决策 #1 选 B）。
+    做法：当月工资按 0 发，把负数部分（欠公司的钱）记入本表，下月生成工资单时优先扣除。
+
+    场景示例：
+      上月：业务员卖了 1000 元单，发了 50 提成（Commission A, status=settled）
+      本月：客户退货 → approve_return 建负数 Commission B (-50, pending, is_adjustment=True)
+      本月工资单：B 被扫入 = -50；假设本月基础工资 0（没上班），actual_pay 算 -50
+      → 实发 0，本表新增一条 pending_amount=50
+      下月生成工资单：先查本表未结清的，累加到 current_deductions，扣完余额才算实发
+
+    幂等：settled_in_salary_id 非空表示已在某张工资单里扣过，不会重复
+    """
+    __tablename__ = "salary_adjustments_pending"
+    __table_args__ = (
+        CheckConstraint("pending_amount > 0", name="ck_adjustment_pending_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    employee_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("employees.id"), nullable=False, index=True,
+    )
+    # 欠付金额（始终正数；实际扣时转为负数加到工资合计）
+    pending_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    source_salary_record_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("salary_records.id"), nullable=False, index=True,
+    )
+    settled_in_salary_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("salary_records.id"), nullable=True, index=True,
+    )
+    settled_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())

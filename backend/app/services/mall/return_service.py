@@ -153,18 +153,50 @@ async def approve_return(
     # 订单 → refunded
     order.status = MallOrderStatus.REFUNDED.value
 
-    # 提成回写：pending commission 标 reversed
+    # 提成回写（决策 #1）：
+    # - pending → reversed（本月还没发工资，直接抹掉）
+    # - settled → 建负数 Commission(is_adjustment=True, status=pending)
+    #   下月工资单扫入扣回；工资不够扣时走 salary_adjustments_pending 挂账
+    import uuid as _uuid
     from app.models.user import Commission
     commissions = (await db.execute(
-        select(Commission).where(Commission.mall_order_id == order.id)
+        select(Commission)
+        .where(Commission.mall_order_id == order.id)
+        .where(Commission.is_adjustment.is_(False))  # 不处理已经是 adjustment 的
     )).scalars().all()
     reversed_count = 0
+    adjustment_count = 0
+    reason_tag = (req.reason or "")[:80]
     for c in commissions:
         if c.status == "pending":
             c.status = "reversed"
-            c.notes = ((c.notes or "") + f"\n[退货回写] reason={req.reason[:80]}").strip()
+            c.notes = ((c.notes or "") + f"\n[退货回写] reason={reason_tag}").strip()
             reversed_count += 1
-        # 已 settled 的不动（工资已发），只记审计；业务上一般通过下月工资扣回
+        elif c.status == "settled":
+            # 已 settled：工资已发出，建负数追回 commission 挂到下月工资单
+            # 幂等：查是否已有针对此 Commission 的 adjustment（防重复退货 approve）
+            existing_adj = (await db.execute(
+                select(Commission)
+                .where(Commission.adjustment_source_commission_id == c.id)
+            )).scalar_one_or_none()
+            if existing_adj is None:
+                adj = Commission(
+                    id=str(_uuid.uuid4()),
+                    employee_id=c.employee_id,
+                    brand_id=c.brand_id,
+                    mall_order_id=c.mall_order_id,
+                    order_id=None,
+                    store_sale_id=None,
+                    commission_amount=-c.commission_amount,
+                    is_adjustment=True,
+                    adjustment_source_commission_id=c.id,
+                    status="pending",
+                    notes=f"[跨月退货追回] 原 commission {c.id[:8]} ¥{c.commission_amount} · reason={reason_tag}",
+                )
+                db.add(adj)
+                adjustment_count += 1
+                # 原 Commission 不动 status；仅加 notes 审计
+                c.notes = ((c.notes or "") + f"\n[跨月退货已建追回 adj] {reason_tag}").strip()
     # 退货后 order.commission_posted 不改（保持历史痕迹），profit_service 查 refunded 不纳入聚合
 
     req.status = MallReturnStatus.APPROVED.value

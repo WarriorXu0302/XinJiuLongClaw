@@ -1577,6 +1577,67 @@ async def generate_salary_records(
         db.add(rec)
         await db.flush()
 
+        # ═══════════════════════════════════════════════════════════════════
+        # 决策 #1：扣历史挂账（salary_adjustments_pending）+ 处理本月负数工资
+        # ═══════════════════════════════════════════════════════════════════
+        # 1) 先扣历史未结清的挂账（上月工资不够扣留下的）
+        from app.models.payroll import SalaryAdjustmentPending
+        pending_adjs = (await db.execute(
+            select(SalaryAdjustmentPending)
+            .where(SalaryAdjustmentPending.employee_id == emp.id)
+            .where(SalaryAdjustmentPending.settled_in_salary_id.is_(None))
+            .order_by(SalaryAdjustmentPending.created_at)  # 先进先扣
+        )).scalars().all()
+        historical_deduction = Decimal("0")
+        cleared_adj_ids = []
+        partial_adj = None
+        partial_new_remaining = Decimal("0")
+        if pending_adjs:
+            remaining = rec.total_pay  # 当前应发余额
+            for adj in pending_adjs:
+                if remaining <= 0:
+                    break
+                deduct = min(adj.pending_amount, remaining)
+                historical_deduction += deduct
+                remaining -= deduct
+                if deduct >= adj.pending_amount:
+                    # 完全扣清
+                    adj.settled_in_salary_id = rec.id
+                    adj.settled_at = datetime.now(timezone.utc)
+                    cleared_adj_ids.append(adj.id)
+                else:
+                    # 部分扣：老条目结清剩余 + 新建"剩下的还欠"记录（保证 source_salary_record_id 指向老的）
+                    # 简化做法：直接减 pending_amount
+                    partial_adj = adj
+                    partial_new_remaining = adj.pending_amount - deduct
+                    adj.pending_amount = adj.pending_amount - deduct  # 留剩余
+                    # 不填 settled_in_salary_id，下月继续扣
+            if historical_deduction > 0:
+                rec.total_pay -= historical_deduction
+                rec.actual_pay = rec.total_pay
+                rec.notes = ((rec.notes or "") +
+                             f"；扣历史挂账 ¥{historical_deduction}").strip("；")
+
+        # 2) 如果扣完老账后 total_pay 仍 < 0（本月新 adjustment 把工资干成负数）→ 挂账 + 实发 0
+        if rec.total_pay < 0:
+            shortage = -rec.total_pay  # 欠公司这么多
+            # 实发 0
+            rec.actual_pay = Decimal("0")
+            # 新挂账记录
+            new_adj = SalaryAdjustmentPending(
+                employee_id=emp.id,
+                pending_amount=shortage,
+                source_salary_record_id=rec.id,
+                reason=f"{body.period} 当月工资不足扣减（跨月退货追回）",
+            )
+            db.add(new_adj)
+            rec.notes = ((rec.notes or "") +
+                         f"；当月欠付 ¥{shortage} 挂账下月扣").strip("；")
+        elif rec.total_pay == 0:
+            rec.actual_pay = Decimal("0")
+
+        await db.flush()
+
         # 订单明细（三选一：B2B order_id / 商城 mall_order_id / 门店零售 store_sale_id）
         for link in order_links:
             db.add(SalaryOrderLink(

@@ -44,6 +44,8 @@ SCRIPTS = [
      "桥 B3.4 + B3.5：mall 利润聚合多订单/多状态/refunded 排除"),
     ("e2e_mall_return_barcode_revert",
      "桥 B4.4：退货批准后条码 OUTBOUND→IN_STOCK + 订单隔离"),
+    ("e2e_cross_month_commission_clawback",
+     "决策 #1：跨月退货追回 + 工资不足挂账（m6c1）"),
 ]
 
 

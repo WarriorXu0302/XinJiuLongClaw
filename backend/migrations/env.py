@@ -20,6 +20,7 @@ from app.models import (
     InspectionCase, MarketCleanupCase,
     ManufacturerExternalIdentity,
 )
+from app.models.payroll import SalaryAdjustmentPending  # noqa: F401
 from app.models.transfer import WarehouseTransfer, WarehouseTransferItem  # noqa: F401
 from app.models.store_sale import (  # noqa: F401
     RetailCommissionRate,

@@ -244,8 +244,19 @@ class Commission(Base):
     store_sale_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("store_sales.id"), nullable=True
     )
+    # 金额可正可负。负数用于"跨月退货追回"场景（决策 #1）：
+    # 原 Commission 已 settled（工资发过）下月客户退货 → 建一条负数 commission
+    # → 下月工资单扫描时扣回。Commission.is_adjustment=True 标识这是"追回调整"。
     commission_amount: Mapped[Decimal] = mapped_column(
         Numeric(15, 2), nullable=False
+    )
+    # 追回标记：True 表示这是一条"跨月退货追回"的负数 adjustment，非新提成
+    is_adjustment: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    # 追回来源：指向被冲销的那条原 Commission.id（便于审计追溯）
+    adjustment_source_commission_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("commissions.id"), nullable=True
     )
     status: Mapped[str] = mapped_column(
         String(20), default="pending", nullable=False

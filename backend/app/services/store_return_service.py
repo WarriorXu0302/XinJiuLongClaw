@@ -217,21 +217,44 @@ async def approve_return(
             notes=f"门店退货入库 {ret.return_no}（原单 {sale.sale_no}）",
         ))
 
-    # ── 4. Commission 冲销（原单 commission.status=pending → reversed；settled 不动）──
+    # ── 4. Commission 冲销（决策 #1）──
+    #   pending  → reversed
+    #   settled → 建负数 Commission(is_adjustment=True, pending) 挂下月工资扣回
     commissions = (await db.execute(
-        select(Commission).where(Commission.store_sale_id == sale.id)
+        select(Commission)
+        .where(Commission.store_sale_id == sale.id)
+        .where(Commission.is_adjustment.is_(False))
     )).scalars().all()
     reversed_count = 0
-    kept_settled_count = 0
+    adjustment_count = 0
     for c in commissions:
         if c.status == "pending":
             c.status = "reversed"
             c.notes = ((c.notes or "") + f"\n[退货冲销] return_no={ret.return_no}").strip()
             reversed_count += 1
         elif c.status == "settled":
-            kept_settled_count += 1
-            # 已结算（工资已发）不动，审计 notes 提示一下；业务侧走下月工资扣回
-            c.notes = ((c.notes or "") + f"\n[退货但已 settled] return_no={ret.return_no}").strip()
+            # 幂等：查是否已有针对此 Commission 的 adjustment
+            existing_adj = (await db.execute(
+                select(Commission)
+                .where(Commission.adjustment_source_commission_id == c.id)
+            )).scalar_one_or_none()
+            if existing_adj is None:
+                adj = Commission(
+                    id=str(uuid.uuid4()),
+                    employee_id=c.employee_id,
+                    brand_id=c.brand_id,
+                    store_sale_id=c.store_sale_id,
+                    order_id=None,
+                    mall_order_id=None,
+                    commission_amount=-c.commission_amount,
+                    is_adjustment=True,
+                    adjustment_source_commission_id=c.id,
+                    status="pending",
+                    notes=f"[跨月退货追回] 原 commission {c.id[:8]} ¥{c.commission_amount} · {ret.return_no}",
+                )
+                db.add(adj)
+                adjustment_count += 1
+                c.notes = ((c.notes or "") + f"\n[跨月退货已建追回 adj] {ret.return_no}").strip()
 
     # ── 5. 原销售单 status → refunded（profit_service 自动排除）──
     sale.status = "refunded"

@@ -88,7 +88,7 @@ export default function SalesmanList() {
   const { data: storeData = [] } = useQuery<StoreWarehouse[]>({
     queryKey: ['warehouses-for-salesman-store'],
     queryFn: async () => {
-      const r = await api.get('/warehouses');
+      const r = await api.get('/inventory/warehouses');
       const items = (r.data?.items || r.data || []) as StoreWarehouse[];
       return items.filter(w => w.warehouse_type === 'store' && w.is_active);
     },

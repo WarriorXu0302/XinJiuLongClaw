@@ -16,9 +16,26 @@
 
 小程序店员端走 /api/mall/workspace/store-sales/*（另起文件，见 workspace/store_sales.py）
 """
-from datetime import datetime
+from datetime import datetime, time, timezone
 from decimal import Decimal
 from typing import Any, Optional
+
+
+def _parse_start(date_str: Optional[str]) -> Optional[datetime]:
+    """把 YYYY-MM-DD 转成当天 00:00:00 UTC 的 timezone-aware datetime。"""
+    if not date_str:
+        return None
+    d = datetime.strptime(date_str, "%Y-%m-%d").date()
+    return datetime.combine(d, time.min).replace(tzinfo=timezone.utc)
+
+
+def _parse_end_exclusive(date_str: Optional[str]) -> Optional[datetime]:
+    """把 YYYY-MM-DD 转成次日 00:00:00 UTC 的 timezone-aware datetime（包含当日全天）。"""
+    if not date_str:
+        return None
+    from datetime import timedelta
+    d = datetime.strptime(date_str, "%Y-%m-%d").date() + timedelta(days=1)
+    return datetime.combine(d, time.min).replace(tzinfo=timezone.utc)
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -193,7 +210,7 @@ async def list_sales(
     start_date: Optional[str] = None,  # YYYY-MM-DD
     end_date: Optional[str] = None,
     skip: int = Query(default=0, ge=0),
-    limit: int = Query(default=20, ge=1, le=100),
+    limit: int = Query(default=20, ge=1, le=500),  # 前端报表可能要拉 200 条
     db: AsyncSession = Depends(get_db),
 ):
     require_role(user, "boss", "finance", "warehouse", "hr")
@@ -203,9 +220,9 @@ async def list_sales(
     if cashier_employee_id:
         stmt = stmt.where(StoreSale.cashier_employee_id == cashier_employee_id)
     if start_date:
-        stmt = stmt.where(StoreSale.created_at >= f"{start_date} 00:00:00+00")
+        stmt = stmt.where(StoreSale.created_at >= _parse_start(start_date))
     if end_date:
-        stmt = stmt.where(StoreSale.created_at < f"{end_date} 23:59:59+00")
+        stmt = stmt.where(StoreSale.created_at < _parse_end_exclusive(end_date))
     total = int((await db.execute(
         select(func.count()).select_from(stmt.subquery())
     )).scalar() or 0)
@@ -236,9 +253,9 @@ async def stats(
     if store_id:
         base_filters.append(StoreSale.store_id == store_id)
     if start_date:
-        base_filters.append(StoreSale.created_at >= f"{start_date} 00:00:00+00")
+        base_filters.append(StoreSale.created_at >= _parse_start(start_date))
     if end_date:
-        base_filters.append(StoreSale.created_at < f"{end_date} 23:59:59+00")
+        base_filters.append(StoreSale.created_at < _parse_end_exclusive(end_date))
 
     if group_by == "store":
         group_stmt = select(
@@ -342,9 +359,9 @@ async def export_sales(
     if store_id:
         stmt = stmt.where(StoreSale.store_id == store_id)
     if start_date:
-        stmt = stmt.where(StoreSale.created_at >= f"{start_date} 00:00:00+00")
+        stmt = stmt.where(StoreSale.created_at >= _parse_start(start_date))
     if end_date:
-        stmt = stmt.where(StoreSale.created_at < f"{end_date} 23:59:59+00")
+        stmt = stmt.where(StoreSale.created_at < _parse_end_exclusive(end_date))
 
     rows = (await db.execute(stmt)).scalars().all()
 

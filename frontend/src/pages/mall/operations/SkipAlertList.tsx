@@ -290,7 +290,7 @@ function AlertDetail({ alertId, open, onClose, onResolve, resolving }: DetailPro
       title="跳单告警详情"
       open={open}
       onClose={onClose}
-      width={800}
+      size={800}
       extra={alert && alert.status === 'open' && (
         <Space>
           <Button danger icon={<CheckOutlined />} onClick={() => confirmResolve('resolved')}

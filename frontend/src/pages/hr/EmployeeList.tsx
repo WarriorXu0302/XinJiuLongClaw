@@ -82,7 +82,7 @@ function EmployeeList() {
   // 门店仓（warehouse_type=store）：店员归属用
   const { data: allWhs = [] } = useQuery<StoreWarehouse[]>({
     queryKey: ['warehouses-for-employee-store'],
-    queryFn: () => api.get('/warehouses').then(r => extractItems<StoreWarehouse>(r.data)),
+    queryFn: () => api.get('/inventory/warehouses').then(r => extractItems<StoreWarehouse>(r.data)),
   });
   const storeWhs = allWhs.filter(w => w.warehouse_type === 'store' && w.is_active);
   const storeNameById: Record<string, string> = {};

@@ -56,7 +56,7 @@ export default function TransferCreate() {
 
   const { data: erpWhs = [] } = useQuery<ERPWarehouse[]>({
     queryKey: ['warehouses-all'],
-    queryFn: () => api.get('/warehouses').then(r => extractItems<ERPWarehouse>(r.data)),
+    queryFn: () => api.get('/inventory/warehouses').then(r => extractItems<ERPWarehouse>(r.data)),
   });
   const { data: mallWhs = [] } = useQuery<MallWarehouse[]>({
     queryKey: ['mall-admin-warehouses-for-transfer'],

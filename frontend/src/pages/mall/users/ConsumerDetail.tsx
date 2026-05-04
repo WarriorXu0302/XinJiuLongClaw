@@ -64,7 +64,7 @@ export default function ConsumerDetail({ userId, open, onClose }: Props) {
 
   if (isLoading || !data) {
     return (
-      <Drawer title="用户详情" open={open} onClose={onClose} width={900}>
+      <Drawer title="用户详情" open={open} onClose={onClose} size={900}>
         <Spin />
       </Drawer>
     );
@@ -84,7 +84,7 @@ export default function ConsumerDetail({ userId, open, onClose }: Props) {
       }
       open={open}
       onClose={onClose}
-      width={900}
+      size={900}
     >
       {/* 统计 */}
       <Space size="large" style={{ marginBottom: 20 }}>

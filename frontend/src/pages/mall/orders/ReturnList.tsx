@@ -197,7 +197,7 @@ export default function ReturnList() {
         title="退货申请详情"
         open={!!detailId}
         onClose={() => setDetailId(null)}
-        width={760}
+        size={760}
       >
         {detail && (
           <Space direction="vertical" size="large" style={{ width: '100%' }}>

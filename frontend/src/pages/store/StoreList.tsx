@@ -31,7 +31,7 @@ export default function StoreList() {
 
   const { data: allWhs = [], isLoading } = useQuery<Store[]>({
     queryKey: ['warehouses-all-for-store'],
-    queryFn: () => api.get('/warehouses').then(r => extractItems<Store>(r.data)),
+    queryFn: () => api.get('/inventory/warehouses').then(r => extractItems<Store>(r.data)),
   });
   const stores = allWhs.filter(w => w.warehouse_type === 'store');
 

@@ -234,7 +234,7 @@ export default function TransferList() {
         title={detailData ? `调拨单 ${detailData.transfer_no}` : '调拨详情'}
         open={!!detailId}
         onClose={() => setDetailId(null)}
-        width={720}
+        size={720}
       >
         {detailData && (
           <>

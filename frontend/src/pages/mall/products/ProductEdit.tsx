@@ -168,7 +168,7 @@ export default function ProductEditDrawer({ productId, createMode, open, onClose
       title={title}
       open={open}
       onClose={onClose}
-      width={900}
+      size={900}
       extra={
         effectiveId && (
           <Tag color={prod?.is_pure ? 'purple' : 'cyan'}>

@@ -359,7 +359,7 @@ export default function AuditLogList() {
         title="审计详情"
         open={!!detail}
         onClose={() => setDetail(null)}
-        width={720}
+        size={720}
       >
         {detail && (
           <div>

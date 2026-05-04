@@ -65,7 +65,7 @@ export default function OrderDetail({ orderId, open, onClose }: Props) {
 
   if (isLoading || !order) {
     return (
-      <Drawer title="订单详情" open={open} onClose={onClose} width={900}>
+      <Drawer title="订单详情" open={open} onClose={onClose} size={900}>
         <Spin />
       </Drawer>
     );
@@ -96,7 +96,7 @@ export default function OrderDetail({ orderId, open, onClose }: Props) {
       }
       open={open}
       onClose={onClose}
-      width={900}
+      size={900}
     >
       {/* 状态时间线 */}
       <Title level={5}>流转时间线</Title>

@@ -278,7 +278,7 @@ export default function LoginLogList() {
         title="登录详情"
         open={!!detail}
         onClose={() => setDetail(null)}
-        width={640}
+        size={640}
       >
         {detail && (
           <div>

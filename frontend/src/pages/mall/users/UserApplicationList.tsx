@@ -158,7 +158,7 @@ export default function UserApplicationList() {
         title="注册申请详情"
         open={!!detail}
         onClose={() => setDetail(null)}
-        width={720}
+        size={720}
       >
         {detail && (
           <div>

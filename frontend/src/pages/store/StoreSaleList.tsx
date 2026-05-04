@@ -64,7 +64,7 @@ export default function StoreSaleList() {
 
   const { data: allWhs = [] } = useQuery<Store[]>({
     queryKey: ['stores-for-sale-list'],
-    queryFn: () => api.get('/warehouses').then(r => extractItems<Store>(r.data)),
+    queryFn: () => api.get('/inventory/warehouses').then(r => extractItems<Store>(r.data)),
   });
   const stores = allWhs.filter(s => s.warehouse_type === 'store');
 
@@ -263,7 +263,7 @@ export default function StoreSaleList() {
         title={detailData ? `销售单 ${detailData.sale_no}` : '销售详情'}
         open={!!detailId}
         onClose={() => setDetailId(null)}
-        width={760}
+        size={760}
       >
         {detailData && (
           <>

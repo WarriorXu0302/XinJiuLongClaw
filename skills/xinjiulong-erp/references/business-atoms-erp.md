@@ -132,18 +132,25 @@ pending_approval
 | # | 动作 | 角色 | 端点 | 前置 | 副作用 | 通知 | 状态 |
 |---|---|---|---|---|---|---|---|
 | E4.1 | 订单 completed**自动生成 Commission** | system | `post_commission_for_order` in receipt/order service | order.status=completed · mall_order 用 commission_service.post_commission_for_order | Commission(status=pending, employee_id=linked or 直属) | — | 🟢 |
-| E4.2 | **Commission 冲销**（mall 退货 approved）| system | `approve_return` in return_service | return.status=pending | pending commission → reversed | — | 🟢 |
+| E4.2 | **Commission 冲销**（mall/store 退货 approved）| system | `approve_return` in return_service / store_return_service | return.status=pending | **pending** commission → reversed；**settled** commission → 新建 is_adjustment=True 负数行（决策 #1 m6c1） | — | 🟢 |
+| E4.2a | **跨月追回 adjustment**（决策 #1） | system | 同 E4.2 的 settled 分支 | 原 commission.status=settled | Commission(is_adjustment=True, amount=-原, status=pending, adjustment_source=原.id) · partial UNIQUE 保证幂等 | — | 🟢 |
 | E4.3 | **partial_closed top-up**（欠款后补交全款）| system | `manual_record_payment` | 订单之前 partial_closed → 现在 received≥pay | 新补一笔 Commission 差额（避免 commission_posted 卡住）| — | 🟢 |
-| E4.4 | 月末**生成工资单** | hr/boss | `POST /api/payroll/generate/{year}/{month}` | 本月无 draft | SalaryRecord(draft) · 汇总 pending Commission | — | 🟢 |
+| E4.4 | 月末**生成工资单** | hr/boss | `POST /api/payroll/generate/{year}/{month}` | 本月无 draft | SalaryRecord(draft) · 汇总 pending Commission（含负数 adjustment）· **先扣历史挂账 SalaryAdjustmentPending** · 当月仍负→挂账下月 | — | 🟢 |
 | E4.5 | 提交审批 | hr | `POST /api/payroll/{id}/submit` | status=draft | status=pending_approval | boss | 🟢 |
 | E4.6 | **批准工资** | boss | `POST /api/payroll/{id}/approve` | status=pending_approval | status=approved | — | 🟢 |
-| E4.7 | **发放工资** | finance/boss | `POST /api/payroll/{id}/pay-salary` | status=approved | status=paid · 关联 Commission.status=settled · settled_at | salesman | 🟢 |
+| E4.7 | **发放工资** | finance/boss | `POST /api/payroll/{id}/pay-salary` | status=approved | status=paid · 关联 Commission.status=settled · settled_at · 结清挂账 `settled_in_salary_id` | salesman | 🟢 |
 | E4.8 | 驳回工资单 | boss | `POST /api/payroll/{id}/reject` | status=pending_approval | status=draft（重算） | hr | 🟢 |
 
-### E2E 测试状态：🟢 tested（mall 4d commission 汇总 commit 记录显示已验证）
+### E2E 测试状态：✅ 全覆盖
+- ✅ `e2e_reversed_commission_excluded` reversed commission 不进工资单
+- ✅ `e2e_cross_month_commission_clawback` 跨月追回 + 挂账完整链路（决策 #1 m6c1）
+- ✅ `e2e_return_approve_concurrency` G12 并发 approve 兜底（m6c6）
+- ✅ `e2e_store_commission_in_payroll` 门店零售 commission 进工资单
+- ✅ `e2e_clawback_transparency` salary_detail 返 clawback_details（G4）
 
-### 🔴 已知 gap
-- **E4.2 冲销**：mall 退货后 `reversed` commission 在**下月工资单生成时**是否被排除？plan 说"工资生成查 pending + settled 排除 reversed"，但**未端到端回归**。若 reversed 被错误计入，业务员工资虚高。
+### ✅ 已解决 gap
+- ~~E4.2 reversed commission 是否进工资单~~ → 已回归（filter `status='pending'` 自动排除）
+- ~~settled 后退货处理~~ → 决策 #1 方案 2+B（m6c1）
 
 ---
 

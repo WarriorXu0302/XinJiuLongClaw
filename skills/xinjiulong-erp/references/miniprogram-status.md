@@ -45,11 +45,11 @@ monorepo 下三个独立部署子项目：
 
 ### 2.2 业务员工作台（salesman）
 
-**页面**（`miniprogram/src/pages/salesman-*`，共 17 个）：
+**页面**（`miniprogram/src/pages/salesman-*`，共 19+ 个）：
 - `salesman-workspace` 工作台首页（接单池）
 - `salesman-home` 首页概览
 - `salesman-orders / salesman-order-detail` 订单 / 详情
-- `salesman-my-customers` 我的客户
+- `salesman-my-customers` 我的客户（**G16 手机脱敏，拨号时才调 reveal 端点**）
 - `salesman-upload-voucher` 上传收款凭证
 - `salesman-checkin` 打卡
 - `salesman-attendance` 考勤记录
@@ -62,6 +62,16 @@ monorepo 下三个独立部署子项目：
 - `salesman-invite` 邀请码（发给客户用的）
 - `salesman-alerts` 跳单告警
 - `salesman-profile` 个人资料
+- `salesman-commissions` 我的提成流水（**G6 决策 #1 透明化**：pending/settled/reversed/追回 四格 + Tab 过滤）
+- `salesman-ship-scan` 扫码出库（mall 仓条码出库）
+
+### 2.3 门店收银（店员专属，assigned_store_id 非空才可见）
+
+**页面**（`miniprogram/src/pages/` 下 store-* 开头）：
+- `store-cashier` 门店收银（**决策 #3 散客支持**：会员/散客两种模式 Toggle）
+- `store-my-sales` 门店业绩（本月汇总 + 销售流水）
+
+**入口**：`salesman-workspace` 页面的快捷入口，仅 `assigned_store_id` 非空的店员可见。
 
 **核心概念**：业务员小程序工作台 ≠ ERP frontend。ERP frontend（React）是**管理台**给 boss / finance / HR / warehouse 用的。业务员在外面跑业务只带手机 → 只用小程序。
 

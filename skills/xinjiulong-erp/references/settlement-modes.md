@@ -61,6 +61,19 @@ UI 上"政策应收"是**从公司角度看的未收款**：
 - 提成率来自 `employee_brand_positions.commission_rate`（员工本人品牌率），没有就用 `brand_salary_schemes.commission_rate`（品牌岗位默认率）
 - 订单多次部分收款时，Commission 只在**首次 fully_paid** 时生成**一次**（幂等：按 order_id 查重）
 
+### mall 订单 + 门店零售的提成口径
+
+- **mall 订单**：`received_amount`（实收）× brand 级提成率；partial_closed 后补 top-up commission（差额）
+- **门店零售（桥 B12）**：`(sale_price - cost_price)` × `retail_commission_rates.rate_on_profit`（每员工×每商品一个率）
+- Commission 来源三选一：`order_id / mall_order_id / store_sale_id`（CHECK 约束保证恰一个非空）
+
+### 退货 / 冲销 / 跨月追回（决策 #1 · m6c1）
+
+- 退货 approve 时 pending commission → `reversed`
+- 退货 approve 时 settled commission（上月已发工资）→ 新建 `is_adjustment=True` 负数 commission（`status=pending`），下月工资单自动扫入扣回
+- 工资不够扣 → `SalaryAdjustmentPending` 挂账下月扣（先进先扣）
+- DB UNIQUE 兜底防双扣（m6c6 `uq_commission_adjustment_source`）
+
 ## Agent 提示用户时的说法
 
 如果用户只说"建个单"没说模式，Agent **必须**先问清模式：

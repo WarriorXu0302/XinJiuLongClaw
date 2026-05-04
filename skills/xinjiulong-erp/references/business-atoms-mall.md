@@ -264,22 +264,23 @@ pending
 | 6.1 | consumer **申请退货** | consumer | `POST /api/mall/orders/{no}/return` | status ∈ {completed, partial_closed} · 同订单无活跃申请 | MallReturnRequest(pending) | notify_roles(admin/boss/finance) | 🟢 |
 | 6.2 | consumer **查退货状态** | consumer | `GET /api/mall/orders/{no}/return` | 属自己 | 返最新一条 | — | 🟢 |
 | 6.3 | admin **列表 + 详情** | admin/boss/finance | `GET /api/mall/admin/returns[?status=][/{id}]` | — | — | — | 🟢 |
-| 6.4 | admin **批准** | admin/boss/finance | `POST /api/mall/admin/returns/{id}/approve` | status=pending | 订单→refunded · 退库存 + IN flow · 条码回 in_stock · pending commission→reversed · refund_amount 默认=received_amount | notify consumer + salesman（entity=MallOrder） | 🟢 |
+| 6.4 | admin **批准** | admin/boss/finance | `POST /api/mall/admin/returns/{id}/approve` | status=pending | 订单→refunded · 退库存 + IN flow · 条码回 in_stock · **FOR UPDATE 锁申请+订单（G12）** · pending commission→reversed · **settled commission→新建 is_adjustment=True 负数行 pending（决策 #1, m6c1）** · **扣 MallProduct.net_sales（决策 #4, m6c3）** · refund_amount 默认=received_amount · **log_audit mall_return.approve（G2）** | notify consumer + salesman（entity=MallOrder） | 🟢 |
 | 6.5 | admin **驳回** | admin/boss/finance | `POST /api/mall/admin/returns/{id}/reject` | status=pending · reason 必填 | status=rejected | notify consumer | 🟢 |
 | 6.6 | admin **标记已退款**（线下打款完成）| admin/boss/finance | `POST /api/mall/admin/returns/{id}/mark-refunded` | status=approved · refund_method ∈ {cash,bank,wechat,alipay} | status=refunded · refunded_at · refund_method | notify consumer | 🟢 |
 
-### E2E 测试状态：⏳ partial
-- ✅ 6.1 → 6.4 → 6.6 主路径人工测过（return_service 单元测）
-- ❌ **6.4 批准时条码回 in_stock** 刚修，没验证过（可能有 outbound_order_id 为 null 的数据不匹配）
-- ❌ 6.5 驳回后用户**重新申请**的路径（"一个订单只能一条活跃申请"的约束释放后）未测
-- ❌ **settled commission 在退货后如何在下月工资单冲销** 从未端到端走过
+### E2E 测试状态：✅ 全覆盖
+- ✅ 6.1 → 6.4 → 6.6 主路径（`scripts/e2e_full_mall_flow.py`）
+- ✅ 6.4 批准时条码回 in_stock + 订单隔离（`scripts/e2e_mall_return_barcode_revert.py`）
+- ✅ settled commission 跨月退货追回完整链路（`scripts/e2e_cross_month_commission_clawback.py`，决策 #1 m6c1）
+- ✅ 退货 approve 并发保护（`scripts/e2e_return_approve_concurrency.py`，G12 m6c6）
+- ✅ 审计留痕（`scripts/e2e_audit_coverage.py`，G2 审计）
 
-### 🔴 已知 gap
-- **6.4** 已 settled 的 commission **只记审计不冲销**。下月工资单要如何处理：
-  - (a) 在业务员下个月工资条上**扣回**已发提成（常规做法）
-  - (b) 不扣，计入公司亏损
-  - 这是业务决策，代码目前走 (b) 的路径。**用户要确认**。
-- **6.6** refund_method 存了但**不动账户**（线下打款）。如果想把退款从 brand cash account 扣除，需要加 disburse 动作。
+### ✅ 已解决 gap
+- ~~6.4 settled commission 冲销~~ → **决策 #1 方案 2+B**：走负数 adjustment Commission + 工资不足挂账下月扣（m6c1）
+- ~~6.4 并发双 approve 建双份 adjustment~~ → **FOR UPDATE + partial UNIQUE 双保**（m6c6）
+
+### 🔴 剩余 gap
+- **6.6** refund_method 存了但**不动账户**（线下打款）。如果想把退款从 brand cash account 扣除，需要加 disburse 动作。（业务决策：老板一般不从账户扣，现金退）
 
 ---
 
@@ -374,16 +375,16 @@ in_stock ──ship──→ outbound (绑 outbound_order_id)
 | 9.8 | 我的**KPI** | salesman | `GET /api/mall/workspace/kpi/my-dashboard` | — | 按 assigned_salesman_id + created_at 月份聚合 | — | 🟢 |
 | 9.9 | 通知**列表/已读/未读数** | salesman/consumer | `GET /api/mall/workspace/notifications[/unread-count]` + `POST /{id}/mark-read` + `/mark-all-read` | recipient_type=mall_user · mall_user_id=self | 响应含 related_order_no 反查 | — | 🟢 |
 
-### E2E 测试状态：⏳ partial
+### E2E 测试状态：✅ 主路径
 - ✅ 9.1/9.5/9.6/9.7 人工测过（都是复用 ERP 成熟接口）
+- ✅ 9.8 KPI 快照冻结（`scripts/e2e_kpi_snapshot.py`，决策 #2 m6c4）
 - ❌ 9.3 拜访进店/出店的 **GPS 计时 + 结束时间生成**未实测
-- ❌ 9.8 KPI 在**订单 refunded 后是否从 actual 剔除**—前端是靠 order.status not in [cancelled, refunded] 过滤，但 KPI 周期按 `created_at`，跨月退货的数字会动。**行为定义不清**。
 
-### 🔴 已知 gap
-- **9.8** KPI 按 created_at 聚合，3 月下单 4 月退货 → 3 月 KPI 在 4 月会"缩水"。业务决策：是否允许历史月份 KPI 数据回改？  
-  - (a) 允许回改（当前行为）
-  - (b) 锁定历史月份
-  - 建议让 HR/boss 确认。
+### ✅ 已解决 gap
+- ~~9.8 KPI 跨月退货数据回改~~ → **决策 #2：快照 + 实时双模式**（m6c4）
+  - 月初 1 号 00:05 `job_build_last_month_snapshot` 冻结上月 KPI
+  - `GET /api/mall/admin/dashboard/salesman-ranking?mode=snapshot|realtime&year_month=YYYY-MM`
+  - 发奖金看快照，看趋势看实时
 
 ---
 

@@ -232,10 +232,16 @@ POST /api/sales-targets
 
 提成是订单 fully_paid 后**自动生成**的（不用 Agent 手动建）。
 
-查我的提成：
+查我的提成（ERP）：
 
 ```
 GET /api/hr/commissions?employee_id=X&status=pending&period=2026-04
+```
+
+mall 业务员自查（**G6 · 决策 #1 透明化**，在小程序里用）：
+```
+GET /api/mall/workspace/my-commissions?status=all|pending|settled|reversed|adjustment&year=2026&month=4
+GET /api/mall/workspace/my-commissions/stats?year=2026&month=4
 ```
 
 返回未结算的提成列表。Agent 给业务员回答"我这月有多少提成"。
@@ -244,6 +250,17 @@ GET /api/hr/commissions?employee_id=X&status=pending&period=2026-04
 - customer_pay / employee_pay：基于指导价
 - company_pay：基于到手价
 - 提成率从 EBP.commission_rate 取（没配则用 BrandSalaryScheme 默认）
+- mall 订单基于 `received_amount`（实收）；门店零售基于 `sale_price - cost_price` × `retail_commission_rates.rate_on_profit`
+
+### 跨月退货追回（决策 #1）
+
+如果业务员问"为什么我工资少 ¥100"：
+1. 调 `GET /api/payroll/salary-records/{rec_id}/detail`
+2. 看 `clawback_details[]`：每条有 `origin_order_no / origin_amount / amount`（负数）
+3. 翻译："是 3 月 MO-xxx 单客户退货冲减，上月已发 ¥100 提成本月扣回"
+4. 不要说"系统扣你工资"，要归因到具体订单
+
+详见 `payroll.md` 场景 6.1 "跨月退货追回 + 挂账"。
 
 ## 常见错误
 

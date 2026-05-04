@@ -127,6 +127,101 @@ POST /api/expenses/{id}/reject
 POST /api/expenses/{id}/pay
 ```
 
+### 11. 商城凭证待确认（桥 B5）
+
+```
+GET /api/mall/admin/payments/pending
+```
+
+返回：小程序业务员上传的 `MallPayment.status='pending_confirmation'` 凭证。
+
+**批准**：调 admin 确认订单收款端点（触发利润/提成）
+```
+POST /api/mall/admin/orders/{id}/confirm-payment
+```
+
+**驳回**：
+```
+POST /api/mall/admin/payments/{id}/reject
+{ "reason": "..." }
+```
+
+**权限**：admin / boss / finance。
+
+**⚠ 超时告警**（G15）：系统每小时 :15 扫 PENDING_CONFIRMATION 超 24h/48h，推 admin/boss/finance 通知。Agent 被问"凭证挂多久"时查 `created_at` 计算小时数。
+
+### 12. 商城退货待审
+
+```
+GET /api/mall/admin/returns?status=pending
+```
+
+**批准**：
+```
+POST /api/mall/admin/returns/{id}/approve
+{ "refund_amount": ..., "review_note": "..." }
+```
+
+**注意**（G12）：
+- service 层已 FOR UPDATE 锁 + DB UNIQUE 兜底
+- 双击 approve 不会双扣提成
+- 遇到 `uq_commission_adjustment_source` 违例 **不要重试**
+
+**驳回**：
+```
+POST /api/mall/admin/returns/{id}/reject
+{ "review_note": "..." }
+```
+
+**标记已退款**（批准后的资金结算）：
+```
+POST /api/mall/admin/returns/{id}/mark-refunded
+{ "refund_method": "wechat|bank|cash|alipay", "refund_amount": ... }
+```
+
+**权限**：admin / boss / finance。
+
+### 13. 门店零售退货待审（桥 B12）
+
+```
+GET /api/store-returns?status=pending
+GET /api/store-returns/pending-approval       # 审批中心聚合端点
+```
+
+**批准**（条码回 in_stock + 库存回加 + commission 冲销或 adjustment）：
+```
+POST /api/store-returns/{id}/approve
+```
+
+**驳回**（必传 rejection_reason）：
+```
+POST /api/store-returns/{id}/reject
+{ "rejection_reason": "..." }
+```
+
+**权限**：admin / boss / finance。同 G12 并发保护。
+
+### 14. 仓库调拨审批（桥 B11）
+
+```
+GET /api/transfers/pending-approval
+```
+
+**批准 / 驳回**：
+```
+POST /api/transfers/{id}/approve
+POST /api/transfers/{id}/reject
+```
+
+**执行**（批准后的实际过户）：
+```
+POST /api/transfers/{id}/execute
+```
+
+**权限**：admin / boss / finance。仅跨品牌 / 涉 mall / 跨端调拨需审批。
+
+---
+
 ## Agent 的审批中心聚合场景
 
 用户（老板/财务）说"看一下今天有啥要审的"：

@@ -308,7 +308,7 @@ function ReceiveScanPage() {
             <Alert
               type="info"
               showIcon
-              message="本采购单入商城仓"
+              title="本采购单入商城仓"
               description="按 PO item 分组扫码，每瓶必须是厂家防伪码（全局唯一）。扫满所有 item 后提交。"
               style={{ marginBottom: 12 }}
             />
@@ -402,7 +402,7 @@ function ReceiveScanPage() {
       </Card>
 
       {!selectedPO && (
-        <Alert type="info" message="请先选择一个已付款/已发货的采购单，再扫码收货" showIcon style={{ marginBottom: 16 }} />
+        <Alert type="info" title="请先选择一个已付款/已发货的采购单，再扫码收货" showIcon style={{ marginBottom: 16 }} />
       )}
 
       <Table<ScannedCode>

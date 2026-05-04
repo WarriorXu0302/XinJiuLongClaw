@@ -109,7 +109,7 @@ export default function HousekeepingLogs() {
       <Alert
         type="info"
         showIcon
-        message="每个任务都由 APScheduler 自动调度，也可点下方「手动触发」立即执行。"
+        title="每个任务都由 APScheduler 自动调度，也可点下方「手动触发」立即执行。"
         style={{ marginBottom: 16 }}
       />
 

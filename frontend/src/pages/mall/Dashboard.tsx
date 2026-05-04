@@ -342,7 +342,7 @@ export default function MallDashboard() {
                   {diffPercent(Number(data.today.received), Number(data.yesterday.received))}
                 </Text>
               }
-              valueStyle={{ color: '#C9A961' }}
+              styles={{ content: { color: '#C9A961' } }}
             />
           </Card>
         </Col>
@@ -351,7 +351,7 @@ export default function MallDashboard() {
             <Statistic
               title={<><UserAddOutlined /> 今日新增用户</>}
               value={data.today.new_users}
-              valueStyle={{ color: '#52c41a' }}
+              styles={{ content: { color: '#52c41a' } }}
             />
           </Card>
         </Col>
@@ -360,7 +360,7 @@ export default function MallDashboard() {
             <Statistic
               title={<><StopOutlined /> 今日取消单</>}
               value={data.today.cancelled}
-              valueStyle={{ color: data.today.cancelled > 0 ? '#ff4d4f' : undefined }}
+              styles={{ content: { color: data.today.cancelled > 0 ? '#ff4d4f' : undefined } }}
             />
           </Card>
         </Col>
@@ -420,7 +420,7 @@ export default function MallDashboard() {
               title="本月收入（实收）"
               prefix="¥"
               value={Number(data.month.revenue || 0).toFixed(2)}
-              valueStyle={{ color: '#1677ff' }}
+              styles={{ content: { color: '#1677ff' } }}
             />
           </Card>
         </Col>
@@ -430,9 +430,7 @@ export default function MallDashboard() {
               title="本月净利润"
               prefix="¥"
               value={Number(data.month.profit || 0).toFixed(2)}
-              valueStyle={{
-                color: Number(data.month.profit || 0) > 0 ? '#52c41a' : '#ff4d4f',
-              }}
+              styles={{ content: { color: Number(data.month.profit || 0) > 0 ? '#52c41a' : '#ff4d4f' } }}
             />
           </Card>
         </Col>
@@ -442,7 +440,7 @@ export default function MallDashboard() {
               title="本月毛利率"
               value={data.month.gross_margin_pct ?? '—'}
               suffix={data.month.gross_margin_pct ? '%' : ''}
-              valueStyle={{ color: '#C9A961' }}
+              styles={{ content: { color: '#C9A961' } }}
             />
           </Card>
         </Col>
@@ -451,7 +449,7 @@ export default function MallDashboard() {
             <Statistic
               title="本月提成 / 坏账"
               value={`¥${Number(data.month.commission || 0).toLocaleString()} / ¥${Number(data.month.bad_debt || 0).toLocaleString()}`}
-              valueStyle={{ color: '#8c8c8c', fontSize: 18 }}
+              styles={{ content: { color: '#8c8c8c', fontSize: 18 } }}
             />
           </Card>
         </Col>

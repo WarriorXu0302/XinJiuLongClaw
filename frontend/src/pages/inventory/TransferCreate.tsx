@@ -171,7 +171,7 @@ export default function TransferCreate() {
 
       <Alert
         type="info"
-        message="品牌主仓（主仓 + 绑定品牌）不参与调拨"
+        title="品牌主仓（主仓 + 绑定品牌）不参与调拨"
         description="品牌主仓只能通过采购单入库 / 销售订单出库。其他仓和商城仓都能互相调拨。"
         showIcon
         style={{ marginBottom: 16 }}

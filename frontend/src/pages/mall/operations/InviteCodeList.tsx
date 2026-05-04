@@ -246,15 +246,15 @@ export default function InviteCodeList() {
             <Statistic title="总签发" value={statsAgg.issued} />
           </Col>
           <Col span={6}>
-            <Statistic title="已使用" value={statsAgg.used} valueStyle={{ color: '#52c41a' }} />
+            <Statistic title="已使用" value={statsAgg.used} styles={{ content: { color: '#52c41a' } }} />
           </Col>
           <Col span={6}>
             <Statistic title="已作废" value={statsAgg.invalidated}
-              valueStyle={{ color: statsAgg.invalidated > 0 ? '#ff4d4f' : undefined }} />
+              styles={{ content: { color: statsAgg.invalidated > 0 ? '#ff4d4f' : undefined } }} />
           </Col>
           <Col span={6}>
             <Statistic title="整体使用率" value={globalRate} suffix="%"
-              valueStyle={{ color: Number(globalRate) >= 30 ? '#52c41a' : '#faad14' }} />
+              styles={{ content: { color: Number(globalRate) >= 30 ? '#52c41a' : '#faad14' } }} />
           </Col>
         </Row>
         <Table

@@ -184,7 +184,7 @@ function KpiRulesList() {
 
       <Alert
         type="info" showIcon style={{ marginBottom: 16 }}
-        message="规则说明"
+        title="规则说明"
         description={
           <div style={{ fontSize: 12 }}>
             <div>· 每条规则覆盖一个完成率区间 <Text code>[下限, 上限)</Text>（左闭右开，上限留空=+∞）</div>

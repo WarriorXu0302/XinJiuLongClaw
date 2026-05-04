@@ -190,7 +190,7 @@ export default function StoreSaleList() {
           </Col>
           <Col span={4}>
             <Card size="small">
-              <Statistic title="成本" value={Number(stats.total_cost)} precision={2} prefix="¥" valueStyle={{ color: '#8c8c8c' }} />
+              <Statistic title="成本" value={Number(stats.total_cost)} precision={2} prefix="¥" styles={{ content: { color: '#8c8c8c' } }} />
             </Card>
           </Col>
           <Col span={4}>
@@ -200,12 +200,12 @@ export default function StoreSaleList() {
                 value={Number(stats.total_profit)}
                 precision={2}
                 prefix="¥"
-                valueStyle={{ color: Number(stats.total_profit) >= 0 ? '#52c41a' : '#ff4d4f' }}
+                styles={{ content: { color: Number(stats.total_profit) >= 0 ? '#52c41a' : '#ff4d4f' } }}
               />
             </Card>
           </Col>
           <Col span={4}>
-            <Card size="small"><Statistic title="店员提成" value={Number(stats.total_commission)} precision={2} prefix="¥" valueStyle={{ color: '#1677ff' }} /></Card>
+            <Card size="small"><Statistic title="店员提成" value={Number(stats.total_commission)} precision={2} prefix="¥" styles={{ content: { color: '#1677ff' } }} /></Card>
           </Col>
         </Row>
       )}

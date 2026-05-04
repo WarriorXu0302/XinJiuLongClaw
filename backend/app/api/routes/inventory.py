@@ -295,7 +295,27 @@ async def list_stock_flow(
         base = base.where(StockFlow.flow_type == flow_type)
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
     rows = (await db.execute(base.order_by(StockFlow.created_at.desc()).offset(skip).limit(limit))).scalars().all()
-    return {"items": rows, "total": total}
+    # 手工序列化避免 FastAPI encoder 触发 SQLAlchemy 关系懒加载递归
+    # （历史 bug：某些 StockFlow 行有 operator/product 关系链，encoder 走循环）
+    items = [
+        {
+            "id": r.id,
+            "flow_no": r.flow_no,
+            "product_id": r.product_id,
+            "warehouse_id": r.warehouse_id,
+            "batch_no": r.batch_no,
+            "flow_type": r.flow_type,
+            "quantity": r.quantity,
+            "cost_price": float(r.cost_price) if r.cost_price is not None else None,
+            "source_order_id": r.source_order_id,
+            "reference_no": r.reference_no,
+            "operator_id": r.operator_id,
+            "notes": r.notes,
+            "created_at": r.created_at,
+        }
+        for r in rows
+    ]
+    return {"items": items, "total": total}
 
 
 # ── Barcode binding (PRD §6.1: POST /api/inventory/stock-ins/{id}/bind-barcodes)

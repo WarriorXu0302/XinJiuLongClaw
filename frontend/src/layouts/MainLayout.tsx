@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Button, Layout, Menu, Select, theme, type MenuProps } from 'antd';
 import NotificationBell from '../components/NotificationBell';
@@ -32,6 +32,9 @@ import {
   WarningOutlined,
   UserOutlined,
   LoginOutlined,
+  SettingOutlined,
+  ContainerOutlined,
+  ProfileOutlined,
 } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../stores/authStore';
@@ -56,7 +59,7 @@ const menuItems: MenuItem[] = [
   },
   // ─── 业务 ───
   {
-    type: 'group', label: '业务',
+    key: 'biz', icon: <ContainerOutlined />, label: '业务',
     children: [
       { key: '/orders', icon: <ShoppingCartOutlined />, label: '订单' },
       { key: '/customers', icon: <TeamOutlined />, label: '客户' },
@@ -84,7 +87,7 @@ const menuItems: MenuItem[] = [
   },
   // ─── 仓储采购 ───
   {
-    type: 'group', label: '仓储采购',
+    key: 'warehouse', icon: <InboxOutlined />, label: '仓储采购',
     roles: ['admin', 'boss', 'warehouse', 'purchase', 'sales_manager'],
     children: [
       { key: '/inventory/query', icon: <DatabaseOutlined />, label: '库存' },
@@ -97,7 +100,7 @@ const menuItems: MenuItem[] = [
   },
   // ─── 财务 ───
   {
-    type: 'group', label: '财务',
+    key: 'finance', icon: <BankOutlined />, label: '财务',
     roles: ['admin', 'boss', 'finance'],
     children: [
       { key: '/finance/accounts', icon: <BankOutlined />, label: '账户总览' },
@@ -111,7 +114,7 @@ const menuItems: MenuItem[] = [
   },
   // ─── 商城 ───
   {
-    type: 'group', label: '商城',
+    key: 'mall', icon: <AppstoreOutlined />, label: '商城',
     roles: ['admin', 'boss', 'finance', 'warehouse', 'hr'],
     children: [
       { key: '/mall/dashboard', icon: <DashboardOutlined />, label: '商城看板', roles: ['admin', 'boss', 'finance'] },
@@ -142,7 +145,7 @@ const menuItems: MenuItem[] = [
   },
   // ─── 门店零售 ───
   {
-    type: 'group', label: '门店',
+    key: 'store', icon: <ShopOutlined />, label: '门店',
     roles: ['admin', 'boss', 'finance', 'warehouse', 'hr'],
     children: [
       { key: '/store/sales', icon: <ShoppingCartOutlined />, label: '门店销售流水', roles: ['admin', 'boss', 'finance', 'warehouse', 'hr'] },
@@ -152,7 +155,7 @@ const menuItems: MenuItem[] = [
   },
   // ─── 人事 ───
   {
-    type: 'group', label: '人事',
+    key: 'hr', icon: <ProfileOutlined />, label: '人事',
     roles: ['admin', 'boss', 'hr', 'finance'],
     children: [
       { key: '/hr/employees', icon: <TeamOutlined />, label: '员工', roles: ['admin', 'boss', 'hr'] },
@@ -169,7 +172,7 @@ const menuItems: MenuItem[] = [
   },
   // ─── 设置 ───
   {
-    type: 'group', label: '设置',
+    key: 'settings', icon: <SettingOutlined />, label: '设置',
     roles: ['admin', 'boss'],
     children: [
       { key: '/products', icon: <AppstoreOutlined />, label: '商品' },
@@ -193,11 +196,28 @@ function filterMenu(items: MenuItem[], userRoles: string[]): MenuItem[] {
     .map(it => {
       if (!it.children?.length) return it;
       const kids = filterMenu(it.children, userRoles);
-      // 如果所有子菜单都被过滤掉，隐藏父节点（group 除外）
-      if (!kids.length && (it as any).type !== 'group') return null as any;
+      // 所有子菜单被过滤掉就隐藏父节点
+      if (!kids.length) return null as any;
       return { ...it, children: kids };
     })
     .filter(Boolean) as MenuItem[];
+}
+
+/**
+ * 给定当前 URL，找到它在菜单树里所有祖先节点的 key，用于 Menu 的 openKeys
+ * （让当前页所在的组自动展开）
+ */
+function findOpenKeysForPath(items: MenuItem[], pathname: string): string[] {
+  for (const it of items) {
+    if (it.key === pathname) return [];  // 自己被选中，不需要展开自己
+    if (it.children?.length) {
+      const childOpen = findOpenKeysForPath(it.children as MenuItem[], pathname);
+      // 如果子树里有选中项，把当前 key 加进路径
+      const matched = (it.children as MenuItem[]).some(c => c.key === pathname) || childOpen.length > 0;
+      if (matched) return [String(it.key), ...childOpen];
+    }
+  }
+  return [];
 }
 
 function MainLayout() {
@@ -221,9 +241,41 @@ function MainLayout() {
     ? allBrands
     : allBrands.filter(b => userBrandIds.includes(b.id));
 
-  // Derive open submenu keys from current path
-  const pathParts = location.pathname.split('/').filter(Boolean);
-  const defaultOpenKeys = pathParts.length > 1 ? [pathParts[0]] : [];
+  // 菜单展开状态（受控）：
+  //   - 当前路径变化时自动展开其祖先；
+  //   - 用户手动点分组标题也能折叠/展开，openKeys 持久化在 localStorage，
+  //     这样刷新后保留偏好。
+  const filteredMenu = useMemo(
+    () => filterMenu(menuItems, roles ?? []),
+    [roles],
+  );
+
+  const [openKeys, setOpenKeys] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('mainlayout-open-menus');
+      if (saved) return JSON.parse(saved) as string[];
+    } catch {}
+    return findOpenKeysForPath(filteredMenu, location.pathname);
+  });
+
+  // 路径变化时，把目标组自动加入 openKeys（不关闭其他已展开的）
+  useEffect(() => {
+    const required = findOpenKeysForPath(filteredMenu, location.pathname);
+    if (required.length === 0) return;
+    setOpenKeys(prev => {
+      const merged = Array.from(new Set([...prev, ...required]));
+      if (merged.length === prev.length) return prev;
+      return merged;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
+
+  // 持久化
+  useEffect(() => {
+    try {
+      localStorage.setItem('mainlayout-open-menus', JSON.stringify(openKeys));
+    } catch {}
+  }, [openKeys]);
 
   const onClick: MenuProps['onClick'] = ({ key }) => {
     navigate(key);
@@ -253,12 +305,27 @@ function MainLayout() {
         }}>
           {collapsed ? 'ERP' : '新鑫久隆 ERP'}
         </div>
+        {!collapsed && openKeys.length > 0 && (
+          <div style={{
+            padding: '0 16px 8px',
+            display: 'flex',
+            justifyContent: 'flex-end',
+          }}>
+            <a
+              onClick={() => setOpenKeys([])}
+              style={{ color: 'rgba(255,255,255,0.45)', fontSize: 12 }}
+            >
+              全部折叠
+            </a>
+          </div>
+        )}
         <Menu
           theme="dark"
           mode="inline"
           selectedKeys={[location.pathname]}
-          defaultOpenKeys={defaultOpenKeys}
-          items={filterMenu(menuItems, roles ?? [])}
+          openKeys={openKeys}
+          onOpenChange={(keys) => setOpenKeys(keys as string[])}
+          items={filteredMenu}
           onClick={onClick}
         />
       </Sider>

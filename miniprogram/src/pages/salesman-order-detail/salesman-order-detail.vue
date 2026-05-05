@@ -222,12 +222,22 @@
 
       <!-- 操作按钮 -->
       <view class="actions">
+        <!-- 仅 assigned 状态可释放（后端 release_order 拒绝非 assigned）
+             shipped 状态的单已出库，条码在业务员手上，不能简单释放，
+             必须找管理员改派（会触发条码过户 + claim_log） -->
         <view
-          v-if="['assigned', 'shipped'].includes(order.status)"
+          v-if="order.status === 'assigned'"
           class="actions__secondary"
           @tap="onRelease"
         >
           <text>释放订单</text>
+        </view>
+        <view
+          v-if="order.status === 'shipped'"
+          class="actions__secondary actions__secondary--disabled"
+          @tap="onShippedReleaseHint"
+        >
+          <text>无法释放（请联系管理员改派）</text>
         </view>
         <view
           v-if="order.status === 'assigned'"
@@ -459,6 +469,15 @@ const onRelease = () => {
   })
 }
 
+const onShippedReleaseHint = () => {
+  uni.showModal({
+    title: '无法释放已出库订单',
+    content: '订单已出库，货在你手上。系统无法自动释放（否则条码/库存/提成都会错乱）。\n\n请联系管理员改派给其他业务员，系统会自动把条码归属和提成过户。',
+    showCancel: false,
+    confirmText: '知道了'
+  })
+}
+
 onLoad((query) => {
   orderId.value = query.order_id || ''
   orderNo.value = query.order_no || ''
@@ -656,6 +675,13 @@ onLoad((query) => {
     border-radius: 12rpx;
     font-size: 28rpx;
     font-weight: 600;
+
+    &--disabled {
+      color: #8c8c8c;
+      border-color: #d9d9d9;
+      background: #f5f5f5;
+      font-size: 24rpx;
+    }
   }
   &__primary {
     flex: 2;

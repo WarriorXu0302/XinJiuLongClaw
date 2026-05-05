@@ -64,6 +64,8 @@ SCRIPTS = [
      "G14/G15/G16/G17：切店在途检查 + 凭证告警 + 手机脱敏 + 禁用通知客户"),
     ("e2e_review_fixes",
      "review 修 #1+#2：挂账字段化（m6c7）+ 门店退货两段式（m6c8）"),
+    ("e2e_review3_fixes",
+     "review3 修 P1-6/P1-7：partial_closed 退货 bad_debt 不洗白（m6c9）+ 月榜北京时区"),
 ]
 
 

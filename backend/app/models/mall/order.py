@@ -160,6 +160,12 @@ class MallOrder(Base):
     cancelled_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # 退货前的 status 快照（profit_service 需要：partial_closed 的订单退货后
+    # bad_debt 仍计入利润聚合，不能"洗白"上月坏账报表）
+    # 值为 None 表示从未走过退货；"completed" / "partial_closed" 表示退货前状态
+    refunded_from_status: Mapped[Optional[str]] = mapped_column(
+        String(30), nullable=True,
+    )
     # C 端用户点"确认收货"按钮的时间（只记一次，delivered 状态可点）
     customer_confirmed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True

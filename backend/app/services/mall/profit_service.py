@@ -56,17 +56,16 @@ async def aggregate_mall_profit(
 
     幂等性：纯聚合查询，调多次结果一致。
     """
-    # 只统计已 completed / partial_closed 的订单
-    valid_statuses = [
-        MallOrderStatus.COMPLETED.value,
-        MallOrderStatus.PARTIAL_CLOSED.value,
-    ]
-
-    # ── 取相关订单（含 received_amount + pay_amount + status）─────
+    # 纳入利润聚合的订单三类：
+    #   1. completed
+    #   2. partial_closed（坏账也计入，扣在净利润里）
+    #   3. **refunded 且退货前是 partial_closed**（P1-6 修复）
+    #      partial_closed 订单的坏账已在当月利润报表扣过，下月退货不应让
+    #      上月的坏账"凭空消失"，保持财务报表月度稳定
     # 时间窗口口径：
-    #   - completed 订单：按 completed_at（全款到账时刻）
-    #   - partial_closed 订单：completed_at 故意留空（见 housekeeping.job_detect_partial_close），
-    #     改按 delivered_at 落窗口 —— 实际交付时刻是最接近"该笔业务归属月份"的锚点
+    #   - completed：按 completed_at（全款到账时刻）
+    #   - partial_closed：按 delivered_at（completed_at 故意留空）
+    #   - refunded(from partial_closed)：按 delivered_at（和 partial_closed 对齐）
     from sqlalchemy import and_, or_
     order_stmt = (
         select(
@@ -74,20 +73,40 @@ async def aggregate_mall_profit(
             MallOrder.received_amount.label("recv"),
             MallOrder.pay_amount.label("pay"),
             MallOrder.status.label("st"),
+            MallOrder.refunded_from_status.label("rfs"),
             MallOrder.completed_at,
         )
-        .where(MallOrder.status.in_(valid_statuses))
+        .where(
+            or_(
+                MallOrder.status == MallOrderStatus.COMPLETED.value,
+                MallOrder.status == MallOrderStatus.PARTIAL_CLOSED.value,
+                and_(
+                    MallOrder.status == MallOrderStatus.REFUNDED.value,
+                    MallOrder.refunded_from_status == MallOrderStatus.PARTIAL_CLOSED.value,
+                ),
+            )
+        )
     )
     if date_from or date_to:
         completed_conds = [MallOrder.status == MallOrderStatus.COMPLETED.value]
         partial_conds = [MallOrder.status == MallOrderStatus.PARTIAL_CLOSED.value]
+        refunded_partial_conds = [
+            MallOrder.status == MallOrderStatus.REFUNDED.value,
+            MallOrder.refunded_from_status == MallOrderStatus.PARTIAL_CLOSED.value,
+        ]
         if date_from:
             completed_conds.append(MallOrder.completed_at >= date_from)
             partial_conds.append(MallOrder.delivered_at >= date_from)
+            refunded_partial_conds.append(MallOrder.delivered_at >= date_from)
         if date_to:
             completed_conds.append(MallOrder.completed_at < date_to)
             partial_conds.append(MallOrder.delivered_at < date_to)
-        order_stmt = order_stmt.where(or_(and_(*completed_conds), and_(*partial_conds)))
+            refunded_partial_conds.append(MallOrder.delivered_at < date_to)
+        order_stmt = order_stmt.where(or_(
+            and_(*completed_conds),
+            and_(*partial_conds),
+            and_(*refunded_partial_conds),
+        ))
     order_rows = (await db.execute(order_stmt)).all()
     if not order_rows:
         return {
@@ -101,10 +120,18 @@ async def aggregate_mall_profit(
 
     order_ids = [r[0] for r in order_rows]
     recv_map = {r[0]: Decimal(str(r[1] or 0)) for r in order_rows}
-    # partial_closed 订单的坏账 = pay_amount - received_amount；completed 订单 bad_debt=0
+    # 坏账 = pay_amount - received_amount
+    # 计入 bad_debt 的两种：
+    #   - status=partial_closed（原路径）
+    #   - status=refunded 且 refunded_from_status=partial_closed（P1-6 修）
+    # completed 订单全款到账，bad_debt=0
     bad_debt_map: dict[str, Decimal] = {}
-    for oid, recv, pay, st, _ct in order_rows:
-        if st == MallOrderStatus.PARTIAL_CLOSED.value:
+    for oid, recv, pay, st, rfs, _ct in order_rows:
+        has_bad_debt = (
+            st == MallOrderStatus.PARTIAL_CLOSED.value
+            or (st == MallOrderStatus.REFUNDED.value and rfs == MallOrderStatus.PARTIAL_CLOSED.value)
+        )
+        if has_bad_debt:
             bd = Decimal(str(pay or 0)) - Decimal(str(recv or 0))
             bad_debt_map[oid] = bd if bd > 0 else Decimal("0")
         else:

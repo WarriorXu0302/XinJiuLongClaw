@@ -22,6 +22,7 @@ import uuid as _uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -37,13 +38,23 @@ from app.models.user import Commission, Employee
 logger = logging.getLogger(__name__)
 
 
+_BEIJING_TZ = ZoneInfo("Asia/Shanghai")
+
+
 def _period_bounds(year: int, month: int) -> tuple[str, datetime, datetime]:
+    """月区间按北京时区算再转 UTC 比较。
+
+    以前用 UTC 月初算，会把 1 月 1 日 08:00 北京（= 1 月 1 日 00:00 UTC）的订单
+    归到 12 月，1 月 1 日 07:30 北京（= 12 月 31 日 23:30 UTC）的订单也归 12 月 —— 业务员看榜会困惑。
+    统一按北京时区算月边界：1 月 1 日 00:00 北京（= 12 月 31 日 16:00 UTC）之后的订单算 1 月。
+    """
     period = f"{year:04d}-{month:02d}"
-    start = datetime(year, month, 1, tzinfo=timezone.utc)
+    # 北京时区的月初 00:00，再转成 UTC-aware datetime 存到 DB 查询用
+    start = datetime(year, month, 1, tzinfo=_BEIJING_TZ).astimezone(timezone.utc)
     if month == 12:
-        end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+        end = datetime(year + 1, 1, 1, tzinfo=_BEIJING_TZ).astimezone(timezone.utc)
     else:
-        end = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+        end = datetime(year, month + 1, 1, tzinfo=_BEIJING_TZ).astimezone(timezone.utc)
     return period, start, end
 
 
@@ -150,15 +161,19 @@ async def build_snapshot_for_month(
 
 
 async def job_build_last_month_snapshot() -> dict:
-    """定时任务入口：每月 1 号凌晨跑上月快照。"""
-    now = datetime.now(timezone.utc)
-    # 上月 = 今天减 1 天，找到的月份
-    last_day_of_prev_month = now.replace(day=1) - timedelta(days=1)
+    """定时任务入口：每月 1 号凌晨跑上月快照。
+
+    按北京时区判断"上月"（scheduler 也是 Asia/Shanghai，但用 UTC now 再 replace(day=1)
+    时会把 1 月 1 日 07:00 北京（=12 月 31 日 23:00 UTC）错算为"上月 = 11 月"）。
+    """
+    now_bj = datetime.now(_BEIJING_TZ)
+    # 北京时区的上月 = 今天减 1 天所在的月份
+    last_day_of_prev_month = now_bj.replace(day=1) - timedelta(days=1)
     y, m = last_day_of_prev_month.year, last_day_of_prev_month.month
     async with admin_session_factory() as s:
         result = await build_snapshot_for_month(
             s, y, m,
-            notes=f"定时任务 {now.strftime('%Y-%m-%d %H:%M')}",
+            notes=f"定时任务 {now_bj.strftime('%Y-%m-%d %H:%M')} CST",
         )
         await s.commit()
     return result

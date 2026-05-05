@@ -395,11 +395,12 @@ async def salesman_ranking(
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="year_month 格式应为 YYYY-MM")
 
-    month_start = datetime(y, m, 1, tzinfo=timezone.utc)
+    # 月区间按北京时区算再转 UTC，保证和 kpi_snapshot_service 的口径一致
+    month_start = datetime(y, m, 1, tzinfo=SHANGHAI).astimezone(timezone.utc)
     if m == 12:
-        month_end = datetime(y + 1, 1, 1, tzinfo=timezone.utc)
+        month_end = datetime(y + 1, 1, 1, tzinfo=SHANGHAI).astimezone(timezone.utc)
     else:
-        month_end = datetime(y, m + 1, 1, tzinfo=timezone.utc)
+        month_end = datetime(y, m + 1, 1, tzinfo=SHANGHAI).astimezone(timezone.utc)
 
     if mode == "snapshot":
         from app.models.mall.kpi_snapshot import MallMonthlyKpiSnapshot

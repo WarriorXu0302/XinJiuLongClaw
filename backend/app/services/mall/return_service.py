@@ -182,6 +182,9 @@ async def approve_return(
         b.outbound_at = None
 
     # 订单 → refunded
+    # 记录退货前状态供 profit_service 使用：partial_closed 的单退货后
+    # bad_debt 仍计入利润聚合（避免上月坏账报表"凭空减少"）
+    order.refunded_from_status = order.status
     order.status = MallOrderStatus.REFUNDED.value
 
     # 决策 #4 商品销量双数据：退货时扣 net_sales（total_sales 保留历史）

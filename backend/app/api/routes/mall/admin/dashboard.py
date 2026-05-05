@@ -246,6 +246,8 @@ async def dashboard_summary(
             "id": sm_id,
             "nickname": s.nickname if s else None,
             "phone": s.phone if s else None,
+            # 禁用业务员仍在榜（历史单还算 GMV），前端标灰色让老板不困惑
+            "is_disabled": bool(s and s.status != "active") if s else False,
             "order_count": int(cnt),
             "gmv": str(gmv or 0),
         })
@@ -478,6 +480,10 @@ async def salesman_ranking(
                 "salesman_id": sm_id,
                 "employee_id": sm_map[sm_id].linked_employee_id if sm_id in sm_map else None,
                 "nickname": sm_map[sm_id].nickname if sm_id in sm_map else None,
+                # 禁用业务员仍算进榜（本月历史单 GMV 保留），前端标灰
+                "is_disabled": (
+                    sm_id in sm_map and sm_map[sm_id].status != "active"
+                ),
                 "gmv": str(gmv or 0),
                 "order_count": cnt,
             }

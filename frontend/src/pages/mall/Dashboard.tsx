@@ -44,7 +44,7 @@ interface Summary {
     bad_debt?: string; gross_margin_pct?: string | null;
   };
   trend: { day: string; orders: number; received: string }[];
-  salesman_rank: { id: string; nickname?: string; phone?: string; order_count: number; gmv: string }[];
+  salesman_rank: { id: string; nickname?: string; phone?: string; is_disabled?: boolean; order_count: number; gmv: string }[];
   product_rank: { id: number; name?: string; main_image?: string; quantity: number; amount: string }[];
   low_stock: { inventory_id: string; product_id: number; product_name: string; spec?: string; quantity: number }[];
 }
@@ -117,6 +117,7 @@ interface RankingRow {
   salesman_id?: string;
   employee_id?: string;
   nickname?: string;
+  is_disabled?: boolean;
   gmv: string;
   order_count: number;
   commission_amount?: string;
@@ -279,11 +280,23 @@ function SalesmanRankingCard() {
                 return <span style={{ color: '#999' }}>{idx + 1}</span>;
               },
             },
-            { title: '业务员', dataIndex: 'nickname', render: (v) => v || <span style={{ color: '#ccc' }}>—</span> },
+            {
+              title: '业务员', dataIndex: 'nickname',
+              render: (v, r) => (
+                <span style={{ color: r.is_disabled ? '#bfbfbf' : undefined }}>
+                  {v || <span style={{ color: '#ccc' }}>—</span>}
+                  {r.is_disabled && <Tag style={{ marginLeft: 6 }}>已停用</Tag>}
+                </span>
+              ),
+            },
             { title: '订单', dataIndex: 'order_count', width: 60, align: 'right' as const },
             {
               title: 'GMV', dataIndex: 'gmv', width: 110, align: 'right' as const,
-              render: (v: string) => <strong>¥{Number(v).toLocaleString()}</strong>,
+              render: (v: string, r) => (
+                <strong style={{ color: r.is_disabled ? '#bfbfbf' : undefined }}>
+                  ¥{Number(v).toLocaleString()}
+                </strong>
+              ),
             },
             ...(isSnapshot ? [{
               title: '提成', dataIndex: 'commission_amount', width: 90, align: 'right' as const,

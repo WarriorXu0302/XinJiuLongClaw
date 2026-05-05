@@ -548,8 +548,9 @@ async def disable_salesman(
     """禁用业务员。
 
     级联处理：
+      - status → DISABLED（登录被拒、所有查询自动过滤）
       - bump token_version 让所有在途 JWT 立即失效
-      - 关闭 is_accepting_orders 防抢单
+      - **不动 is_accepting_orders**（业务员自己设的关单状态要保留，enable 后沿用）
       - 已抢到但还没出库的订单（assigned）自动释放回独占期 / 开放池（assigned_salesman_id=null, status=pending_assignment）
       - 已出库/送达/待确认的订单不动，用 in_progress_count 汇报给 admin，需手动改派
       - 推荐关系不动（历史归属保留，新客户绑定前端会看到"该业务员已停用"）
@@ -566,7 +567,7 @@ async def disable_salesman(
 
     sm.status = MallUserStatus.DISABLED.value
     sm.token_version = (sm.token_version or 0) + 1
-    sm.is_accepting_orders = False
+    # 保留 is_accepting_orders 原值（业务员自己的选择），enable 后继续生效
 
     # 1. assigned 状态订单（刚抢未发货）→ 释放回池子，记 claim log
     to_release = (await db.execute(
@@ -637,8 +638,9 @@ async def enable_salesman(
 ):
     """启用被禁用的业务员。
 
-    同时恢复 is_accepting_orders=True —— disable 时会关闭接单开关，如果 enable
-    不重新打开，业务员账号虽然 active 但抢单池/派单都跳过他，实际等同"僵尸账号"
+    只改 status → ACTIVE。
+    **不动 is_accepting_orders**（业务员请病假时自己关了的开关，康复后复职
+    仍是关闭状态，由业务员自己在小程序打开——避免系统强派单到还没准备好的业务员手上）
     """
     require_role(user, "admin", "boss", "hr")
     sm = await db.get(MallUser, salesman_id)
@@ -648,7 +650,7 @@ async def enable_salesman(
         return _salesman_dict(sm)
 
     sm.status = MallUserStatus.ACTIVE.value
-    sm.is_accepting_orders = True
+    # 保留 is_accepting_orders 原值（业务员自己的选择）
 
     await log_audit(
         db, action="mall_salesman.enable", entity_type="MallUser",

@@ -460,7 +460,7 @@ async def bind_barcodes(
     flow = await db.get(StockFlow, flow_id)
     if flow is None:
         raise HTTPException(404, "StockFlow not found")
-    if flow.flow_type != "in":
+    if flow.flow_type != "inbound":
         raise HTTPException(400, "Can only bind barcodes to inbound stock flow")
 
     results = []

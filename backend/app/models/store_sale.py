@@ -279,6 +279,21 @@ class StoreSaleReturn(Base):
     )
     rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # 退款结算（approve 后由财务完成打款/发现金后调 mark_refunded 写入）
+    # 状态机：pending → approved → refunded（和 mall_return 对齐）
+    refunded_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="财务实际完成打款的时间",
+    )
+    refund_method: Mapped[Optional[str]] = mapped_column(
+        String(20), nullable=True,
+        comment="退款方式：cash/bank/wechat/alipay",
+    )
+    refund_note: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True,
+        comment="退款备注（如银行流水号、微信转账备注）",
+    )
+
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         onupdate=func.now(), nullable=True

@@ -54,6 +54,7 @@ interface SalaryDetailResp {
     late_deduction: number;
     absence_deduction: number;
     fine_deduction: number;
+    historical_clawback_deduction?: number;
     social_security: number;
   };
   total_pay: number;
@@ -125,7 +126,7 @@ function SalaryDetail() {
   const { color, text } = STATUS_MAP[data.status] ?? { color: 'default', text: data.status };
   const incomeSum = data.income.fixed_salary + data.income.variable_salary_total + data.income.commission_total
     + data.income.manager_share_total + data.income.attendance_bonus + data.income.bonus_other;
-  const deductSum = data.deduction.late_deduction + data.deduction.absence_deduction + data.deduction.fine_deduction + data.deduction.social_security;
+  const deductSum = data.deduction.late_deduction + data.deduction.absence_deduction + data.deduction.fine_deduction + (data.deduction.historical_clawback_deduction ?? 0) + data.deduction.social_security;
 
   return (
     <>
@@ -332,6 +333,14 @@ function SalaryDetail() {
               <Descriptions.Item label="旷工扣款">{yuan(data.deduction.absence_deduction)}</Descriptions.Item>
               <Descriptions.Item label="罚款">{yuan(data.deduction.fine_deduction)}</Descriptions.Item>
               <Descriptions.Item label="社保代扣（个人）">{yuan(data.deduction.social_security)}</Descriptions.Item>
+              {(data.deduction.historical_clawback_deduction ?? 0) > 0 && (
+                <Descriptions.Item label={<Text type="warning">历史挂账扣款</Text>} span={2}>
+                  <Text type="warning">
+                    {yuan(data.deduction.historical_clawback_deduction ?? 0)}
+                  </Text>
+                  {' '}（跨月退货追回挂账，本月扣除部分）
+                </Descriptions.Item>
+              )}
               <Descriptions.Item label="合计" span={2}>
                 <Text type="danger" strong>-{yuan(deductSum)}</Text>
               </Descriptions.Item>

@@ -486,7 +486,7 @@ class SalaryRecordResponse(BaseModel):
 
 
 def _recalc_salary_total(r: SalaryRecord) -> None:
-    """合计应发 = 底薪+浮动+提成+管理提成+全勤+其他奖+厂家补贴 - 扣款"""
+    """合计应发 = 底薪+浮动+提成+管理提成+全勤+其他奖 - 迟到/旷工/罚款/历史挂账扣款/社保"""
     def _d(x):
         return Decimal(str(x)) if x is not None else Decimal("0")
     r.fixed_salary = _d(r.fixed_salary)
@@ -499,12 +499,14 @@ def _recalc_salary_total(r: SalaryRecord) -> None:
     r.late_deduction = _d(r.late_deduction)
     r.absence_deduction = _d(r.absence_deduction)
     r.fine_deduction = _d(r.fine_deduction)
+    r.historical_clawback_deduction = _d(getattr(r, "historical_clawback_deduction", 0))
     r.social_security = _d(r.social_security)
     # 厂家补贴不进员工实发（属公司对外应收，在 ManufacturerSalarySubsidy 单独记账）
     r.total_pay = (
         r.fixed_salary + r.variable_salary_total + r.commission_total
         + r.manager_share_total + r.attendance_bonus + r.bonus_other
-        - r.late_deduction - r.absence_deduction - r.fine_deduction - r.social_security
+        - r.late_deduction - r.absence_deduction - r.fine_deduction
+        - r.historical_clawback_deduction - r.social_security
     )
     # 若未手工指定 actual_pay，自动等于 total_pay
     if not r.actual_pay or _d(r.actual_pay) == 0:
@@ -1580,7 +1582,9 @@ async def generate_salary_records(
         # ═══════════════════════════════════════════════════════════════════
         # 决策 #1：扣历史挂账（salary_adjustments_pending）+ 处理本月负数工资
         # ═══════════════════════════════════════════════════════════════════
-        # 1) 先扣历史未结清的挂账（上月工资不够扣留下的）
+        # 关键：挂账扣款**必须存到 historical_clawback_deduction 字段**，
+        # 然后调 _recalc_salary_total 重算 total_pay。
+        # 直接改 rec.total_pay 会被后续 HR 编辑触发的 _recalc_salary_total 抹掉。
         from app.models.payroll import SalaryAdjustmentPending
         pending_adjs = (await db.execute(
             select(SalaryAdjustmentPending)
@@ -1588,42 +1592,37 @@ async def generate_salary_records(
             .where(SalaryAdjustmentPending.settled_in_salary_id.is_(None))
             .order_by(SalaryAdjustmentPending.created_at)  # 先进先扣
         )).scalars().all()
-        historical_deduction = Decimal("0")
-        cleared_adj_ids = []
-        partial_adj = None
-        partial_new_remaining = Decimal("0")
+
         if pending_adjs:
-            remaining = rec.total_pay  # 当前应发余额
+            # 扣款能力 = 当前应发余额（已扣迟到/旷工/罚款/社保）
+            # 如果应发本身就 ≤ 0（本月没挣钱），不动挂账（留到下月再扣）
+            capacity = rec.total_pay
+            historical_deduction = Decimal("0")
             for adj in pending_adjs:
-                if remaining <= 0:
+                if capacity <= 0:
                     break
-                deduct = min(adj.pending_amount, remaining)
+                deduct = min(adj.pending_amount, capacity)
                 historical_deduction += deduct
-                remaining -= deduct
+                capacity -= deduct
                 if deduct >= adj.pending_amount:
-                    # 完全扣清
                     adj.settled_in_salary_id = rec.id
                     adj.settled_at = datetime.now(timezone.utc)
-                    cleared_adj_ids.append(adj.id)
                 else:
-                    # 部分扣：老条目结清剩余 + 新建"剩下的还欠"记录（保证 source_salary_record_id 指向老的）
-                    # 简化做法：直接减 pending_amount
-                    partial_adj = adj
-                    partial_new_remaining = adj.pending_amount - deduct
-                    adj.pending_amount = adj.pending_amount - deduct  # 留剩余
-                    # 不填 settled_in_salary_id，下月继续扣
+                    adj.pending_amount = adj.pending_amount - deduct
             if historical_deduction > 0:
-                rec.total_pay -= historical_deduction
-                rec.actual_pay = rec.total_pay
+                rec.historical_clawback_deduction = (
+                    (rec.historical_clawback_deduction or Decimal("0"))
+                    + historical_deduction
+                )
+                _recalc_salary_total(rec)  # 重算 total_pay（纳入 historical_clawback_deduction）
                 rec.notes = ((rec.notes or "") +
                              f"；扣历史挂账 ¥{historical_deduction}").strip("；")
 
-        # 2) 如果扣完老账后 total_pay 仍 < 0（本月新 adjustment 把工资干成负数）→ 挂账 + 实发 0
+        # 本月 adjustment 负数 commission + 历史挂账扣款后 total_pay 仍 < 0
+        # → 实发 0 + 欠公司部分挂账下月扣
         if rec.total_pay < 0:
-            shortage = -rec.total_pay  # 欠公司这么多
-            # 实发 0
+            shortage = -rec.total_pay
             rec.actual_pay = Decimal("0")
-            # 新挂账记录
             new_adj = SalaryAdjustmentPending(
                 employee_id=emp.id,
                 pending_amount=shortage,
@@ -2110,6 +2109,7 @@ async def salary_detail(rec_id: str, user: CurrentUser, db: AsyncSession = Depen
             "late_deduction": float(rec.late_deduction),
             "absence_deduction": float(rec.absence_deduction),
             "fine_deduction": float(rec.fine_deduction),
+            "historical_clawback_deduction": float(rec.historical_clawback_deduction or 0),
             "social_security": float(rec.social_security),
         },
         "total_pay": float(rec.total_pay),

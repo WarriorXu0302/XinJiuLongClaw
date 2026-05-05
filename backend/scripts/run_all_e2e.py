@@ -62,6 +62,8 @@ SCRIPTS = [
      "G12：退货 approve 并发保护 · FOR UPDATE + UNIQUE partial index（m6c6）"),
     ("e2e_salesman_mgmt_hardening",
      "G14/G15/G16/G17：切店在途检查 + 凭证告警 + 手机脱敏 + 禁用通知客户"),
+    ("e2e_review_fixes",
+     "review 修 #1+#2：挂账字段化（m6c7）+ 门店退货两段式（m6c8）"),
 ]
 
 

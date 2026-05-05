@@ -243,8 +243,24 @@ async def main() -> None:
                 reviewer_employee_id=fx["emp_a_id"],  # 测试用 emp_a 当审批人
             )
             await s.commit()
-            assert ret.status == "refunded"
-            print(f"   ✅ StoreSaleReturn.status = refunded")
+            # 两段式（决策后）：approve_return 后 status=approved，需 mark_refunded 才 refunded
+            assert ret.status == "approved", f"approve 后应 approved，实际 {ret.status}"
+            print(f"   ✅ StoreSaleReturn.status = approved（待 mark_refunded）")
+
+        # 标记已退款（财务打款后）
+        async with admin_session_factory() as s:
+            ret2 = await store_return_service.mark_refunded(
+                s,
+                return_id=return_id_holder["id"],
+                reviewer_employee_id=fx["emp_a_id"],
+                refund_method="cash",
+                refund_note="E2E 现金退",
+            )
+            await s.commit()
+            assert ret2.status == "refunded"
+            assert ret2.refund_method == "cash"
+            assert ret2.refunded_at is not None
+            print(f"   ✅ mark_refunded → status=refunded, method=cash")
 
         async with admin_session_factory() as s:
             # 1) 原 StoreSale.status = refunded

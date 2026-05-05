@@ -159,6 +159,11 @@ class SalaryRecord(Base):
     late_deduction: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     absence_deduction: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     fine_deduction: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+    # 历史挂账扣款（决策 #1 跨月退货追回挂账，本月扣完这一项）
+    # 与罚款分开，审计清晰：_recalc_salary_total 纳入合计
+    historical_clawback_deduction: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2), default=Decimal("0.00"),
+    )
     social_security: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     # 合计
     total_pay: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))

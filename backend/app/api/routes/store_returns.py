@@ -49,6 +49,11 @@ class RejectBody(BaseModel):
     rejection_reason: str = Field(min_length=1, max_length=500)
 
 
+class MarkRefundedBody(BaseModel):
+    refund_method: str = Field(pattern="^(cash|bank|wechat|alipay)$")
+    refund_note: Optional[str] = Field(default=None, max_length=500)
+
+
 def _to_dict(r: StoreSaleReturn, *, with_items: bool = False,
              items: Optional[list[StoreSaleReturnItem]] = None) -> dict:
     d: dict[str, Any] = {
@@ -66,6 +71,9 @@ def _to_dict(r: StoreSaleReturn, *, with_items: bool = False,
         "reviewer_employee_id": r.reviewer_employee_id,
         "reviewed_at": r.reviewed_at,
         "rejection_reason": r.rejection_reason,
+        "refunded_at": r.refunded_at,
+        "refund_method": r.refund_method,
+        "refund_note": r.refund_note,
         "created_at": r.created_at,
     }
     if with_items and items is not None:
@@ -268,5 +276,27 @@ async def reject(
         entity_type="StoreSaleReturn", entity_id=ret.id,
         user=user, request=request,
         changes={"return_no": ret.return_no, "reason": body.rejection_reason},
+    )
+    return _to_dict(ret)
+
+
+@router.post("/{return_id}/mark-refunded")
+async def mark_refunded_endpoint(
+    return_id: str,
+    body: MarkRefundedBody,
+    user: CurrentUser,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """财务完成退款后标记：approved → refunded（和 mall_return 对齐）。"""
+    require_role(user, "boss", "finance", "admin")
+    emp_id = user.get("employee_id")
+    if not emp_id:
+        raise HTTPException(status_code=403, detail="用户未绑定 employee，无法操作")
+    ret = await store_return_service.mark_refunded(
+        db, return_id=return_id,
+        reviewer_employee_id=emp_id,
+        refund_method=body.refund_method,
+        refund_note=body.refund_note,
     )
     return _to_dict(ret)

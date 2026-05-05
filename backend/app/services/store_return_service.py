@@ -82,7 +82,7 @@ async def apply_return(
     active = (await db.execute(
         select(StoreSaleReturn)
         .where(StoreSaleReturn.original_sale_id == original_sale_id)
-        .where(StoreSaleReturn.status.in_(["pending", "approved"]))
+        .where(StoreSaleReturn.status.in_(["pending", "approved", "refunded"]))
     )).scalar_one_or_none()
     if active:
         raise HTTPException(
@@ -287,8 +287,9 @@ async def approve_return(
     # ── 5. 原销售单 status → refunded（profit_service 自动排除）──
     sale.status = "refunded"
 
-    # ── 6. 退货单状态 ─────────────────────────
-    ret.status = "refunded"
+    # ── 6. 退货单状态 → approved（等财务打款后 mark_refunded 才改 refunded）
+    #    和 mall_return 对齐的两段式：approved → mark_refunded
+    ret.status = "approved"
     ret.reviewer_employee_id = reviewer_employee_id
     ret.reviewed_at = now
 
@@ -309,6 +310,64 @@ async def approve_return(
             "bottles": ret.total_bottles,
             "commissions_reversed": reversed_count,
             "commissions_adjustment_built": adjustment_count,
+        },
+    )
+    return ret
+
+
+# =============================================================================
+# mark_refunded（财务实际打款/退现金完成后调此端点）
+# =============================================================================
+
+
+async def mark_refunded(
+    db: AsyncSession,
+    *,
+    return_id: str,
+    reviewer_employee_id: str,
+    refund_method: str,  # cash / bank / wechat / alipay
+    refund_note: Optional[str] = None,
+) -> StoreSaleReturn:
+    """财务完成打款/给现金后标记 refunded。"""
+    allowed_methods = {"cash", "bank", "wechat", "alipay"}
+    if refund_method not in allowed_methods:
+        raise HTTPException(
+            status_code=400,
+            detail=f"退款方式非法：{refund_method}（允许：{', '.join(sorted(allowed_methods))}）",
+        )
+
+    # 锁定退货单防并发
+    ret = (await db.execute(
+        select(StoreSaleReturn)
+        .where(StoreSaleReturn.id == return_id)
+        .with_for_update()
+    )).scalar_one_or_none()
+    if ret is None:
+        raise HTTPException(status_code=404, detail="退货单不存在")
+    if ret.status != "approved":
+        raise HTTPException(
+            status_code=409,
+            detail=f"退货状态 {ret.status} 不可标记已退款（仅 approved 可进入 refunded）",
+        )
+
+    now = datetime.now(timezone.utc)
+    ret.status = "refunded"
+    ret.refunded_at = now
+    ret.refund_method = refund_method
+    ret.refund_note = refund_note
+    await db.flush()
+
+    await log_audit(
+        db,
+        action="store_return.mark_refunded",
+        entity_type="StoreSaleReturn",
+        entity_id=ret.id,
+        actor_id=reviewer_employee_id,
+        changes={
+            "return_no": ret.return_no,
+            "refund_amount": str(ret.refund_amount),
+            "refund_method": refund_method,
+            "refund_note": (refund_note or "")[:200],
         },
     )
     return ret

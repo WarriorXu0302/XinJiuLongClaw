@@ -66,6 +66,10 @@ interface WarehouseRow {
   brand_id?: string | null;
 }
 
+function createDisabledMenuItem(key: string, label: string): MenuItem {
+  return { key, label, disabled: true } as MenuItem;
+}
+
 // =============================================================================
 // 菜单构建（动态，按当前登录用户权限 + 数据库 brands/stores 生成）
 // =============================================================================
@@ -152,6 +156,7 @@ function buildStoreChildren(store: WarehouseRow): MenuItem[] {
   const meta: MenuMeta = { storeId: store.id, brandId: null };
   return [
     { key: `/store/sales?store=${store.id}`, icon: <ShoppingCartOutlined />, label: '销售流水', meta },
+    { key: `/store/accounts?store=${store.id}`, icon: <TeamOutlined />, label: '收银账号', meta, roles: ['admin', 'boss', 'hr'] },
     { key: `/store/commission-rates?store=${store.id}`, icon: <DollarOutlined />, label: '店员提成率', meta, roles: ['admin', 'boss', 'finance', 'hr'] },
   ];
 }
@@ -178,6 +183,14 @@ function buildMenuItems(
     children: buildStoreChildren(s),
   }));
 
+  storeChildren.unshift({
+    key: '/store/accounts',
+    icon: <TeamOutlined />,
+    label: '收银账号管理',
+    meta: { storeId: null, brandId: null },
+    roles: ['admin', 'boss', 'hr'],
+  });
+
   // admin 多一个"门店管理"入口（新建/停用门店）
   if (isAdmin) {
     storeChildren.push({
@@ -199,7 +212,7 @@ function buildMenuItems(
       children: [
         {
           key: 'branch-brand-agents', icon: <ContainerOutlined />, label: '品牌代理',
-          children: brandChildren.length ? brandChildren : [{ key: 'brand-empty', label: '（暂无品牌）', disabled: true } as any],
+          children: brandChildren.length ? brandChildren : [createDisabledMenuItem('brand-empty', '（暂无品牌）')],
         },
         {
           key: 'branch-mall', icon: <AppstoreOutlined />, label: '批发商城',
@@ -209,7 +222,7 @@ function buildMenuItems(
         {
           key: 'branch-stores', icon: <ShopOutlined />, label: '门店',
           roles: ['admin', 'boss', 'finance', 'warehouse', 'hr'],
-          children: storeChildren.length ? storeChildren : [{ key: 'store-empty', label: '（暂无门店）', disabled: true } as any],
+          children: storeChildren.length ? storeChildren : [createDisabledMenuItem('store-empty', '（暂无门店）')],
         },
       ],
     },
@@ -244,7 +257,7 @@ function buildMenuItems(
       key: 'hr', icon: <ProfileOutlined />, label: '人事中心',
       roles: ['admin', 'boss', 'hr', 'finance'],
       children: [
-        { key: '/hr/employees', icon: <TeamOutlined />, label: '员工', roles: ['admin', 'boss', 'hr'] },
+        { key: '/hr/employees', icon: <TeamOutlined />, label: '员工档案', roles: ['admin', 'boss', 'hr'] },
         { key: '/hr/salaries', icon: <AccountBookOutlined />, label: '工资', roles: ['admin', 'boss', 'hr', 'finance'] },
         { key: '/hr/salary-schemes', icon: <DollarOutlined />, label: '薪酬方案', roles: ['admin', 'boss', 'hr'] },
         { key: '/hr/kpi-rules', icon: <DollarOutlined />, label: 'KPI 系数规则', roles: ['admin', 'boss'] },
@@ -279,7 +292,7 @@ function buildMenuItems(
         { key: '/brands', icon: <TagsOutlined />, label: '品牌' },
         { key: '/org-units', icon: <AppstoreOutlined />, label: '经营单元' },
         { key: '/suppliers', icon: <ShopOutlined />, label: '供应商' },
-        { key: '/hr/users', icon: <SafetyOutlined />, label: '用户账号' },
+        { key: '/hr/users', icon: <SafetyOutlined />, label: '登录账号（权限）' },
         { key: '/audit-logs', icon: <FileSearchOutlined />, label: '审计日志', roles: ['admin'] },
       ],
     },
@@ -298,15 +311,18 @@ function hasAccess(item: MenuItem, userRoles: string[]): boolean {
 }
 
 function filterMenu(items: MenuItem[], userRoles: string[]): MenuItem[] {
-  return items
-    .filter(it => hasAccess(it, userRoles))
-    .map(it => {
-      if (!it.children?.length) return it;
-      const kids = filterMenu(it.children, userRoles);
-      if (!kids.length) return null as any;
-      return { ...it, children: kids };
-    })
-    .filter(Boolean) as MenuItem[];
+  return items.reduce<MenuItem[]>((acc, item) => {
+    if (!hasAccess(item, userRoles)) return acc;
+    if (!item.children?.length) {
+      acc.push(item);
+      return acc;
+    }
+    const children = filterMenu(item.children, userRoles);
+    if (children.length) {
+      acc.push({ ...item, children });
+    }
+    return acc;
+  }, []);
 }
 
 /**
@@ -351,7 +367,7 @@ function MainLayout() {
   const location = useLocation();
   const { token: { colorBgContainer, borderRadiusLG } } = theme.useToken();
   const username = useAuthStore((s) => s.username);
-  const roles = useAuthStore((s) => s.roles) ?? [];
+  const roles = useAuthStore((s) => s.roles);
   const userBrandIds = useAuthStore((s) => s.brandIds);
   const logout = useAuthStore((s) => s.logout);
   const { setBrand } = useBrandStore();
@@ -392,7 +408,9 @@ function MainLayout() {
     try {
       const saved = localStorage.getItem('mainlayout-open-menus');
       if (saved) return JSON.parse(saved) as string[];
-    } catch {}
+    } catch {
+      // 忽略本地缓存读取失败
+    }
     return [];
   });
 
@@ -411,7 +429,9 @@ function MainLayout() {
   useEffect(() => {
     try {
       localStorage.setItem('mainlayout-open-menus', JSON.stringify(openKeys));
-    } catch {}
+    } catch {
+      // 忽略本地缓存写入失败
+    }
   }, [openKeys]);
 
   const onClick: MenuProps['onClick'] = ({ key }) => {

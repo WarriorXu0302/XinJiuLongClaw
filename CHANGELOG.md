@@ -27,6 +27,18 @@
   - /pay-all 批量发薪时按 commission_id 统一 settled（覆盖 B2B/mall/store 三路径），不再只按 mall_order_id
   - E2E `scripts/e2e_store_commission_in_payroll.py` 验证 payroll 扫描能挂上门店 Commission
 
+### Changed
+
+- **ERP 前端菜单按"分公司"视角重组**（MainLayout.tsx 大重写）
+  - 一级菜单从 12 个压到 8 个：老板驾驶舱 / 分公司 / 审批中心 / 财务中心 / 人事中心 / 工具 / 我的 / 系统设置
+  - 新「分公司」一级下分 3 组：品牌代理（动态挂青花郎/五粮液/珍十五）/ 批发商城（原 16 项拆成 6 子组）/ 门店（动态挂每家 store_id）
+  - 点某分公司子页自动 `setBrand(id)` 或 `setStore(id)`，利用现有 81 处 `useBrandStore` 基建；Header 的「品牌 Select」移除（菜单即上下文）
+  - 商城菜单按"订单&退货 / 商品目录 / 仓库与库存 / 用户 / 运营 / 审计" 6 组，原扁平 16 项升级
+  - 工具组归并跨分公司动作（扫码追溯/收货扫码/仓库调拨/出入库流水/低库存）
+  - 系统设置保留全局主数据（商品/品牌/供应商/经营单元/用户账号/审计日志）
+  - 动态数据源：`/products/brands` + `/inventory/warehouses`（filter `warehouse_type=store` + 剔除 E2E）
+  - 新 store 上下文 `useStoreStore`（`erp-store` localStorage）；`StoreSaleList` 接入，菜单选定店时隐藏下拉
+
 ### Added
 
 - **经营单元 boss 看板净利润改走 11 科目**（dashboard.py refactor）— brand_agent 分支不再用简化口径（gmv - commission），改为调 `_compute_profit_summary(include_mall=False)` 复用现有完整利润计算，保证和 `/profit-summary` 口径一致

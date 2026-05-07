@@ -1,7 +1,7 @@
 /**
  * 门店销售流水 + 统计看板
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Button, Card, Col, DatePicker, Descriptions, Drawer, Row, Segmented, Select, Space,
   Statistic, Table, Tag, Typography, message,
@@ -11,6 +11,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs, { Dayjs } from 'dayjs';
 import api, { extractItems } from '../../api/client';
+import { useStoreStore } from '../../stores/storeStore';
 
 const { Title } = Typography;
 const { RangePicker } = DatePicker;
@@ -48,10 +49,17 @@ interface Store {
 }
 
 export default function StoreSaleList() {
-  const [storeId, setStoreId] = useState<string | undefined>();
+  // 菜单「分公司 → 门店 → X门店」会设置 selectedStoreId —— 锁死上下文隐藏下拉
+  const menuSelectedStoreId = useStoreStore(s => s.selectedStoreId);
+  const [storeId, setStoreId] = useState<string | undefined>(menuSelectedStoreId ?? undefined);
   const [range, setRange] = useState<[Dayjs, Dayjs] | null>([
     dayjs().startOf('month'), dayjs().endOf('day'),
   ]);
+
+  // 菜单切了不同门店 → 列表 store 过滤同步
+  useEffect(() => {
+    setStoreId(menuSelectedStoreId ?? undefined);
+  }, [menuSelectedStoreId]);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [statsView, setStatsView] = useState<'total' | 'by_store'>('total');
 
@@ -149,14 +157,17 @@ export default function StoreSaleList() {
       <Title level={4}>门店销售流水</Title>
 
       <Space style={{ marginBottom: 16 }} wrap>
-        <Select
-          placeholder="按门店筛选"
-          style={{ width: 220 }}
-          value={storeId}
-          onChange={setStoreId}
-          options={stores.map(s => ({ value: s.id, label: s.name }))}
-          allowClear
-        />
+        {/* 菜单没有选定门店时才显示下拉（菜单 = 上下文） */}
+        {!menuSelectedStoreId && (
+          <Select
+            placeholder="按门店筛选"
+            style={{ width: 220 }}
+            value={storeId}
+            onChange={setStoreId}
+            options={stores.map(s => ({ value: s.id, label: s.name }))}
+            allowClear
+          />
+        )}
         <RangePicker
           value={range as any}
           onChange={(v) => setRange(v as any)}

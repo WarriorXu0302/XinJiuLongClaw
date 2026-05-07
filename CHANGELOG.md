@@ -29,6 +29,8 @@
 
 ### Changed
 
+- **AccountOverview 加「手工入账/扣款」UI** — 冷启动/外部注资场景以前只能 curl 后端 `POST /accounts/fund-flows`；现在 boss/finance 在账户总览页头部有按钮，弹窗选账户（含总资金池 / 品牌现金/F类/融资 / MALL_MASTER / STORE_MASTER 等全部账户）、选 credit/debit、填金额 + 必填备注。不走审批流，直接改余额 + 记流水（related_type=manual_deposit）+ 审计。
+
 - **ERP 前端菜单按"分公司"视角重组**（MainLayout.tsx 大重写）
   - 一级菜单从 12 个压到 8 个：老板驾驶舱 / 分公司 / 审批中心 / 财务中心 / 人事中心 / 工具 / 我的 / 系统设置
   - 新「分公司」一级下分 3 组：品牌代理（动态挂青花郎/五粮液/珍十五）/ 批发商城（原 16 项拆成 6 子组）/ 门店（动态挂每家 store_id）

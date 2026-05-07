@@ -30,6 +30,10 @@ function AccountOverview() {
   const [isFinancingMode, setIsFinancingMode] = useState(false);
   const [interestPreview, setInterestPreview] = useState<{ interest: number; days: number; total: number } | null>(null);
 
+  // 手工入账（冷启动/追加资金/额外扣款）
+  const [depositOpen, setDepositOpen] = useState(false);
+  const [depositForm] = Form.useForm();
+
   const { data: summary } = useQuery<Summary>({
     queryKey: ['account-summary', selectedBrandId],
     queryFn: () => api.get('/accounts/summary').then(r => r.data),
@@ -124,6 +128,23 @@ function AccountOverview() {
 
   const closeModal = () => { setTransferOpen(false); form.resetFields(); setIsFinancingMode(false); setInterestPreview(null); };
 
+  const depositMutation = useMutation({
+    mutationFn: (v: { account_id: string; flow_type: 'credit' | 'debit'; amount: number; notes?: string }) =>
+      api.post('/accounts/fund-flows', { ...v, related_type: 'manual_deposit' }),
+    onSuccess: (res) => {
+      message.success(res.data.detail ?? '入账成功');
+      setDepositOpen(false);
+      depositForm.resetFields();
+      queryClient.invalidateQueries({ queryKey: ['account-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['fund-flows'] });
+    },
+    onError: (err: any) => message.error(err?.response?.data?.detail ?? '入账失败'),
+  });
+
+  const submitDeposit = () => {
+    depositForm.validateFields().then(v => depositMutation.mutate(v));
+  };
+
   // Fetch interest preview when financing order or amount changes
   const financingOrderId = Form.useWatch('financing_order_id', form);
   useEffect(() => {
@@ -186,7 +207,14 @@ function AccountOverview() {
     <>
       <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
         <Title level={4} style={{ margin: 0 }}><BankOutlined /> 账户总览</Title>
-        <Button type="primary" icon={<SwapOutlined />} onClick={() => setTransferOpen(true)}>申请拨款</Button>
+        <Space>
+          <Button icon={<PlusOutlined />} onClick={() => {
+            depositForm.resetFields();
+            depositForm.setFieldsValue({ flow_type: 'credit' });
+            setDepositOpen(true);
+          }}>手工入账/扣款</Button>
+          <Button type="primary" icon={<SwapOutlined />} onClick={() => setTransferOpen(true)}>申请拨款</Button>
+        </Space>
       </Space>
 
       {/* 总资金池（仅 admin/boss 可见） */}
@@ -381,6 +409,60 @@ function AccountOverview() {
           )}
 
           <Form.Item name="notes" label="备注"><Input.TextArea rows={2} placeholder={isFinancingMode ? '还款说明' : '拨款用途'} /></Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 手工入账/扣款弹窗（冷启动、外部注资、人工调整用） */}
+      <Modal
+        title="手工入账 / 扣款"
+        open={depositOpen}
+        onOk={submitDeposit}
+        onCancel={() => { setDepositOpen(false); depositForm.resetFields(); }}
+        confirmLoading={depositMutation.isPending}
+        okText="提交"
+        width={520}
+      >
+        <Card size="small" style={{ marginBottom: 12, background: '#fff7e6', borderColor: '#ffd591' }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            用于冷启动时给总资金池注资，或后续追加资金/扣款调整。
+            <br />
+            <strong>不走审批流</strong>，直接改余额 + 记流水 + 审计。仅 boss/finance 可见。
+          </Text>
+        </Card>
+        <Form form={depositForm} layout="vertical">
+          <Form.Item name="account_id" label="目标账户" rules={[{ required: true, message: '必选' }]}>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder="选择账户"
+              options={[
+                ...masterAccounts.map(a => ({
+                  value: a.id,
+                  label: `[总池] ${a.name}（余额 ¥${Number(a.balance).toLocaleString()}）`,
+                })),
+                ...(summary?.brand_groups ?? []).flatMap(g =>
+                  g.accounts.map(a => ({
+                    value: a.id,
+                    label: `[${g.brand_name}] ${a.name}（${typeLabel[a.account_type] ?? a.account_type}，余额 ¥${Number(a.balance).toLocaleString()}）`,
+                  }))
+                ),
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="flow_type" label="类型" rules={[{ required: true }]} initialValue="credit">
+            <Select
+              options={[
+                { value: 'credit', label: '入账 (+)' },
+                { value: 'debit', label: '扣款 (-)' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="amount" label="金额" rules={[{ required: true, message: '必填' }, { type: 'number', min: 0.01, message: '金额必须大于 0' }]}>
+            <InputNumber style={{ width: '100%' }} min={0.01} precision={2} prefix="¥" placeholder="输入金额" />
+          </Form.Item>
+          <Form.Item name="notes" label="备注（用途/来源，强烈建议填）" rules={[{ required: true, message: '建议填写来源用于审计' }]}>
+            <Input.TextArea rows={3} placeholder="如：股东注资 / 银行存款转入 / 账目修正 等" />
+          </Form.Item>
         </Form>
       </Modal>
     </>

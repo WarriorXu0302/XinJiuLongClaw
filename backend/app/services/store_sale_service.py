@@ -302,9 +302,12 @@ async def create_store_sale(
         ))
 
     # 11. 写 StoreSale 主单
+    from app.services.org_unit_service import get_org_unit_id_by_code
+    retail_org_unit_id = await get_org_unit_id_by_code(db, "retail")
     sale = StoreSale(
         id=sale_id,
         sale_no=sale_no,
+        org_unit_id=retail_org_unit_id,
         store_id=store_id,
         cashier_employee_id=cashier_employee_id,
         customer_id=customer_id,
@@ -330,6 +333,7 @@ async def create_store_sale(
         id=str(uuid.uuid4()),
         employee_id=cashier_employee_id,
         brand_id=(products[0].brand_id if products else None),
+        org_unit_id=retail_org_unit_id,
         store_sale_id=sale.id,
         commission_amount=total_commission,
         status="pending",
@@ -367,3 +371,64 @@ async def create_store_sale(
         },
     )
     return sale
+
+
+async def aggregate_retail_profit(
+    db: AsyncSession,
+    *,
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+) -> dict:
+    """零售事业部利润聚合。
+
+    口径（和门店零售业务对齐）：
+      - 收入 = SUM(store_sales.total_sale_amount WHERE status='completed')
+      - 毛利 = SUM(store_sales.total_profit)
+      - 提成 = SUM(commissions WHERE store_sale_id IS NOT NULL，含负数追回 adjustment)
+      - 净利润 = 毛利 - 提成
+
+    时间窗口按 store_sales.created_at（门店即时结算，创建=成交）。
+    status='refunded' 的销售单不计入（等同 mall profit_service 的处理）。
+    """
+    from sqlalchemy import func as _func
+    from app.models.store_sale import StoreSale
+    from app.models.user import Commission
+
+    base = select(StoreSale).where(StoreSale.status == "completed")
+    if date_from:
+        base = base.where(StoreSale.created_at >= date_from)
+    if date_to:
+        base = base.where(StoreSale.created_at < date_to)
+
+    # 收入 / 毛利
+    rev_row = (await db.execute(
+        select(
+            _func.coalesce(_func.sum(StoreSale.total_sale_amount), 0).label("rev"),
+            _func.coalesce(_func.sum(StoreSale.total_profit), 0).label("profit"),
+            _func.count(StoreSale.id).label("cnt"),
+        ).where(StoreSale.status == "completed")
+        .where(StoreSale.created_at >= date_from if date_from else True)
+        .where(StoreSale.created_at < date_to if date_to else True)
+    )).one()
+
+    # 提成（走 commission 表，因为 store_sale 关闭后的追回调整也要扣）
+    comm_row = (await db.execute(
+        select(
+            _func.coalesce(_func.sum(Commission.commission_amount), 0).label("comm")
+        ).where(Commission.store_sale_id.isnot(None))
+        .where(Commission.created_at >= date_from if date_from else True)
+        .where(Commission.created_at < date_to if date_to else True)
+    )).one()
+
+    revenue = Decimal(str(rev_row.rev or 0))
+    gross_profit = Decimal(str(rev_row.profit or 0))
+    commission = Decimal(str(comm_row.comm or 0))
+    net_profit = (gross_profit - commission).quantize(Decimal("0.01"))
+
+    return {
+        "total_revenue": str(revenue),
+        "total_gross_profit": str(gross_profit),
+        "total_commission": str(commission),
+        "total_profit": str(net_profit),
+        "order_count": int(rev_row.cnt or 0),
+    }

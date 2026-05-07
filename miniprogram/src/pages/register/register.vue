@@ -131,7 +131,7 @@
           <image
             v-if="form.business_license_url"
             class="upload__img"
-            :src="form.business_license_url"
+            :src="licensePreviewUrl"
             mode="aspectFit"
           />
           <view
@@ -201,6 +201,15 @@ const form = ref({
 const addressParts = ref(null)
 const submitting = ref(false)
 const licenseUploading = ref(false)
+
+// 后端返的 business_license_url 是相对路径（/api/uploads/files/...），
+// mp-weixin 的 <image> 只认绝对 URL，展示前拼 BASE_API
+const licensePreviewUrl = computed(() => {
+  const u = form.value.business_license_url
+  if (!u) return ''
+  if (/^https?:\/\//.test(u)) return u // 兼容以后改成绝对 URL
+  return (import.meta.env.VITE_APP_BASE_API || '') + u
+})
 // URL 带来的邀请码锁定展示；手动进入则允许用户输入
 const inviteLocked = ref(false)
 
@@ -247,25 +256,34 @@ const onChooseLicense = () => {
     success: (r) => {
       if (!r.tempFilePaths?.length) return
       licenseUploading.value = true
+      const uploadUrl = (import.meta.env.VITE_APP_BASE_API || '') + '/api/mall/public-uploads/upload'
+      console.log('[upload-license] url:', uploadUrl, 'file:', r.tempFilePaths[0])
       uni.uploadFile({
-        url: (import.meta.env.VITE_APP_BASE_API || '') + '/api/mall/public-uploads/upload',
+        url: uploadUrl,
         filePath: r.tempFilePaths[0],
         name: 'file',
         formData: { kind: 'business_license' },
         success: (res) => {
+          console.log('[upload-license] success statusCode:', res.statusCode, 'data:', res.data)
           try {
             const body = typeof res.data === 'string' ? JSON.parse(res.data) : res.data
             if (res.statusCode >= 200 && res.statusCode < 300 && body.url) {
               form.value.business_license_url = body.url
               uni.showToast({ title: '上传成功', icon: 'success' })
             } else {
-              uni.showToast({ title: body?.detail || '上传失败', icon: 'none' })
+              const msg = body?.detail || `上传失败（HTTP ${res.statusCode}）`
+              console.error('[upload-license] failed:', msg, body)
+              uni.showToast({ title: msg, icon: 'none' })
             }
           } catch (e) {
-            uni.showToast({ title: '上传失败', icon: 'none' })
+            console.error('[upload-license] parse error:', e, 'raw:', res.data)
+            uni.showToast({ title: '响应解析失败', icon: 'none' })
           }
         },
-        fail: () => uni.showToast({ title: '上传失败', icon: 'none' }),
+        fail: (err) => {
+          console.error('[upload-license] fail:', err)
+          uni.showToast({ title: err?.errMsg || '上传失败（网络错误）', icon: 'none', duration: 3000 })
+        },
         complete: () => { licenseUploading.value = false }
       })
     }

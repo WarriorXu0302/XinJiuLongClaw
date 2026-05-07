@@ -228,6 +228,8 @@ async def approve_return(
                     id=str(_uuid.uuid4()),
                     employee_id=c.employee_id,
                     brand_id=c.brand_id,
+                    # 追回跟原 commission 同经营单元（mall 退货 → mall）
+                    org_unit_id=c.org_unit_id,
                     mall_order_id=c.mall_order_id,
                     order_id=None,
                     store_sale_id=None,

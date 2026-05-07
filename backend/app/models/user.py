@@ -231,6 +231,10 @@ class Commission(Base):
     brand_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("brands.id"), nullable=True
     )
+    # 经营单元归属（跨项目兼职时天然分段：老王五粮液 + 商城 + 门店 = 三条记录）
+    org_unit_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("org_units.id"), nullable=False, index=True
+    )
     order_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("orders.id"), nullable=True
     )

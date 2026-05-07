@@ -137,11 +137,15 @@ async def apply_post_confirmation_effects(
                 comm_base = order.customer_paid_amount or order.total_amount
                 comm_amount = (Decimal(str(comm_base)) * rate).quantize(Decimal("0.01"))
                 import uuid as _uuid
+                from app.services.org_unit_service import get_org_unit_id_by_code
+                # B2B 订单产生的提成归"品牌代理"经营单元（order.org_unit_id 理论上已经是该值，沿用）
+                b2b_org_unit_id = order.org_unit_id or await get_org_unit_id_by_code(db, "brand_agent")
                 db.add(
                     Commission(
                         id=str(_uuid.uuid4()),
                         employee_id=order.salesman_id,
                         brand_id=order.brand_id,
+                        org_unit_id=b2b_org_unit_id,
                         order_id=order.id,
                         commission_amount=comm_amount,
                         status="pending",

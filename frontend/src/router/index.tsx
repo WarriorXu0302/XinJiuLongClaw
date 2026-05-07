@@ -2,6 +2,8 @@ import { Navigate, type RouteObject } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
 import Login from '../pages/Login';
 import Dashboard from '../pages/Dashboard';
+import BossView from '../pages/BossView';
+import OrgUnitsList from '../pages/OrgUnitsList';
 import OrderList from '../pages/orders/OrderList';
 import OrderStockOutPage from '../pages/orders/OrderStockOutPage';
 import OrderDeliveryPage from '../pages/orders/OrderDeliveryPage';
@@ -91,6 +93,8 @@ const routes: RouteObject[] = [
     children: [
       { index: true, element: <Navigate to="/dashboard" replace /> },
       { path: 'dashboard', element: <Dashboard /> },
+      { path: 'boss-view', element: <BossView /> },
+      { path: 'org-units', element: <OrgUnitsList /> },
 
       // 审批中心
       { path: 'approval/policy', element: <PolicyApproval /> },

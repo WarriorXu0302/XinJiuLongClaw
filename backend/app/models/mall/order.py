@@ -102,6 +102,11 @@ class MallOrder(Base):
     # 对外展示的业务单号（用户可读），格式 MO + yyyymmdd + 6位序号
     order_no: Mapped[str] = mapped_column(String(30), nullable=False)
 
+    # 经营单元归属（商城订单固定为 mall）
+    org_unit_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("org_units.id"), nullable=False, index=True,
+    )
+
     # ─── 归属 ───────────────────────────────────────────────
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("mall_users.id", ondelete="RESTRICT"), nullable=False

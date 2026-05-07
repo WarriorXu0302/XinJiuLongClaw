@@ -29,6 +29,11 @@ from app.models.store_sale import (  # noqa: F401
     StoreSaleReturn,
     StoreSaleReturnItem,
 )
+from app.models.mall_purchase import (  # noqa: F401
+    MallPurchaseOrder,
+    MallPurchaseOrderItem,
+)
+from app.models.org_unit import OrgUnit  # noqa: F401
 
 # Mall models（小程序）
 from app.models.mall.user import (  # noqa: F401

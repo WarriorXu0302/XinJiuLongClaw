@@ -90,6 +90,8 @@ def create_app() -> FastAPI:
         policy_templates,
         products,
         purchase,
+        mall_purchase_orders,
+        org_units,
         suppliers,
         tasting,
         uploads,
@@ -116,6 +118,14 @@ def create_app() -> FastAPI:
     app.include_router(inspections.router, prefix="/api", tags=["Inspections"])
     app.include_router(tasting.router, prefix="/api", tags=["Tasting"])
     app.include_router(purchase.router, prefix="/api/purchase-orders", tags=["Purchase"])
+    # 商城/门店采购（独立于 ERP B2B 采购，跨品牌、走 MALL_MASTER/STORE_MASTER 账户）
+    app.include_router(
+        mall_purchase_orders.router,
+        prefix="/api/mall-purchase-orders",
+        tags=["MallPurchase"],
+    )
+    # 经营单元（品牌代理/零售/批发商城）CRUD —— 视角层
+    app.include_router(org_units.router, prefix="/api/org-units", tags=["OrgUnits"])
     app.include_router(transfers.router, prefix="/api/transfers", tags=["Transfers"])
     app.include_router(store_sales.router, prefix="/api/store-sales", tags=["StoreSales"])
     app.include_router(

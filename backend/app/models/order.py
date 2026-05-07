@@ -52,6 +52,10 @@ class Order(Base):
     brand_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("brands.id"), nullable=True
     )
+    # 经营单元归属（brand_agent / retail / mall），报表聚合用
+    org_unit_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("org_units.id"), nullable=False, index=True
+    )
     total_amount: Mapped[Decimal] = mapped_column(
         Numeric(15, 2), default=Decimal("0.00")
     )

@@ -233,12 +233,15 @@ async def _build_order_from_computed(
     amounts: dict[str, Any],
 ) -> Order:
     """用 _compute_order_amounts 的结果构造 Order + OrderItem。不 flush，由调用方决定。"""
+    from app.services.org_unit_service import get_org_unit_id_by_code
+    org_unit_id = await get_org_unit_id_by_code(db, "brand_agent")
     order = Order(
         id=str(uuid.uuid4()),
         order_no=_generate_order_no(),
         customer_id=body.customer_id,
         salesman_id=body.salesman_id,  # 已经过 _enforce_salesman_binding
         brand_id=brand_id,
+        org_unit_id=org_unit_id,
         settlement_mode_snapshot=body.settlement_mode_snapshot,
         settlement_mode=body.settlement_mode,
         advance_payer_id=body.advance_payer_id,

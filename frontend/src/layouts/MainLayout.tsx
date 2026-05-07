@@ -48,6 +48,7 @@ type MenuItem = Required<MenuProps>['items'][number] & { roles?: string[]; child
 
 const menuItems: MenuItem[] = [
   { key: '/dashboard', icon: <DashboardOutlined />, label: '仪表盘' },
+  { key: '/boss-view', icon: <AppstoreOutlined />, label: '经营单元看板', roles: ['admin', 'boss'] },
   { key: '/me', icon: <SolutionOutlined />, label: '我的' },
   {
     key: 'approval', icon: <CheckCircleOutlined />, label: '审批中心',
@@ -177,6 +178,7 @@ const menuItems: MenuItem[] = [
     children: [
       { key: '/products', icon: <AppstoreOutlined />, label: '商品' },
       { key: '/brands', icon: <TagsOutlined />, label: '品牌' },
+      { key: '/org-units', icon: <AppstoreOutlined />, label: '经营单元' },
       { key: '/suppliers', icon: <ShopOutlined />, label: '供应商' },
       { key: '/hr/users', icon: <SafetyOutlined />, label: '用户账号' },
       { key: '/audit-logs', icon: <FileSearchOutlined />, label: '审计日志', roles: ['admin'] },

@@ -100,6 +100,9 @@ async def post_commission_for_order(
         bid: Decimal(str(amt or 0)) for bid, amt in existing_rows
     }
 
+    from app.services.org_unit_service import get_org_unit_id_by_code
+    mall_org_unit_id = await get_org_unit_id_by_code(db, "mall")
+
     commissions: list[Commission] = []
     for brand_id, subtotal in brand_subtotal.items():
         if subtotal <= 0:
@@ -116,6 +119,7 @@ async def post_commission_for_order(
         c = Commission(
             employee_id=salesman.linked_employee_id,
             brand_id=brand_id,
+            org_unit_id=mall_org_unit_id,
             mall_order_id=order.id,
             commission_amount=delta,
             status="pending",

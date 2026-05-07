@@ -54,6 +54,7 @@ from app.models.store_sale import (
     StoreSaleReturn,
     StoreSaleReturnItem,
 )
+from app.models.org_unit import OrgUnit
 
 __all__ = [
     "Base",

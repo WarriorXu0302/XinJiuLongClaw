@@ -29,6 +29,13 @@
 
 ### Added
 
+- **经营单元视角层**（migration m6cc）— 老板在不动品牌主轴的前提下看「品牌代理/零售/批发商城」三个事业部的 GMV/利润/库存/账户/待收
+  - 新建 `org_units` 小表 + 3 条种子（brand_agent/retail/mall），admin 可 CRUD 扩展
+  - `orders`/`commissions`/`store_sales`/`mall_orders`/`mall_purchase_orders` 加 `org_unit_id` FK（回填完成）
+  - 6 个写入点（ERP 订单、Mall 订单、B2B Commission、Mall Commission、门店 Commission、Mall 采购）自动按来源标 org_unit_id；`org_unit_service` 内存缓存 code→id
+  - 新端点 `GET /api/dashboard/business-unit-summary`（admin/boss 权限），聚合 GMV / 净利润 / 提成 / 库存价值 / 账户余额 / 待收款；`store_sale_service.aggregate_retail_profit` + 复用 `aggregate_mall_profit` 实现
+  - 新端点 `GET|POST|PUT|DELETE /api/org-units`（admin/boss 权限，内置 3 单元禁删）
+  - 前端新增「经营单元看板」（`/boss-view`）+ 「设置 → 经营单元」管理页
 - **决策 #2 月榜快照 vs 实时双显**（migration m6c4） — 上月榜冻结不受退货影响
   - 新表 `mall_monthly_kpi_snapshot`（employee_id, period UNIQUE）冻结 GMV/订单数/提成
   - `services/mall/kpi_snapshot_service.py::build_snapshot_for_month(y, m)` ON CONFLICT UPSERT 实现幂等

@@ -611,3 +611,222 @@ async def dashboard_trend(
         "brand_sales": brand_stat,
         "order_status": order_status,
     }
+
+
+# =============================================================================
+# Boss 视角：经营单元看板
+# =============================================================================
+
+
+@router.get("/business-unit-summary")
+async def business_unit_summary(
+    user: CurrentUser,
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """老板视角：按经营单元（品牌代理/零售/批发商城）聚合 GMV / 利润 / 库存 / 账户 / 待收。
+
+    权限：admin / boss
+    时间窗：默认本月 1 号 → 今天，两头闭闭。
+    """
+    from app.core.permissions import require_role
+    from app.models.org_unit import OrgUnit
+    from app.models.order import Order as _Order
+    from app.models.mall.order import MallOrder as _MallOrder
+    from app.models.mall.inventory import MallInventory as _MallInv
+    from app.models.inventory import Inventory as _Inv
+    from app.models.product import Warehouse as _Warehouse, Account as _Acc
+    from app.services.mall.profit_service import aggregate_mall_profit
+    from app.services.store_sale_service import aggregate_retail_profit
+
+    require_role(user, "admin", "boss")
+
+    # 时间窗规整
+    today = date.today()
+    if date_from is None:
+        date_from = today.replace(day=1)
+    if date_to is None:
+        date_to = today
+
+    window_from = datetime(date_from.year, date_from.month, date_from.day, tzinfo=timezone.utc)
+    # date_to 闭区间 → +1 天
+    from datetime import timedelta as _td
+    window_to = datetime(
+        (date_to + _td(days=1)).year,
+        (date_to + _td(days=1)).month,
+        (date_to + _td(days=1)).day,
+        tzinfo=timezone.utc,
+    )
+
+    # 1. 取 active org_units
+    units = (await db.execute(
+        select(OrgUnit).where(OrgUnit.is_active.is_(True))
+        .order_by(OrgUnit.sort_order, OrgUnit.created_at)
+    )).scalars().all()
+
+    results = []
+    grand = {
+        "gmv": Decimal("0"),
+        "net_profit": Decimal("0"),
+        "commission_total": Decimal("0"),
+        "inventory_value": Decimal("0"),
+        "account_balance": Decimal("0"),
+        "pending_receivables": Decimal("0"),
+    }
+
+    for ou in units:
+        gmv = Decimal("0")
+        net_profit = Decimal("0")
+        commission_total = Decimal("0")
+        inventory_value = Decimal("0")
+        account_balance = Decimal("0")
+        pending_receivables = Decimal("0")
+
+        if ou.code == "brand_agent":
+            # GMV：B2B orders.total_amount
+            row = (await db.execute(
+                select(
+                    func.coalesce(func.sum(_Order.total_amount), 0).label("gmv"),
+                ).where(_Order.org_unit_id == ou.id)
+                .where(_Order.created_at >= window_from)
+                .where(_Order.created_at < window_to)
+                .where(_Order.status.notin_(["rejected", "cancelled"]))
+            )).one()
+            gmv = Decimal(str(row.gmv or 0))
+
+            # 提成
+            from app.models.user import Commission as _Comm
+            c_row = (await db.execute(
+                select(func.coalesce(func.sum(_Comm.commission_amount), 0))
+                .where(_Comm.org_unit_id == ou.id)
+                .where(_Comm.created_at >= window_from)
+                .where(_Comm.created_at < window_to)
+            )).scalar()
+            commission_total = Decimal(str(c_row or 0))
+
+            # 利润（简化版本：gmv - 提成；详细利润走 /profit-summary 端点）
+            net_profit = gmv - commission_total
+
+            # 库存价值：品牌主仓 / backup / tasting
+            inv_row = (await db.execute(
+                select(
+                    func.coalesce(
+                        func.sum(_Inv.quantity * _Inv.cost_price), 0
+                    )
+                ).join(_Warehouse, _Warehouse.id == _Inv.warehouse_id)
+                .where(_Warehouse.warehouse_type.in_(["main", "backup", "tasting"]))
+            )).scalar()
+            inventory_value = Decimal(str(inv_row or 0))
+
+            # 账户余额：level='project'
+            acc_row = (await db.execute(
+                select(func.coalesce(func.sum(_Acc.balance), 0))
+                .where(_Acc.level == "project")
+                .where(_Acc.is_active.is_(True))
+            )).scalar()
+            account_balance = Decimal(str(acc_row or 0))
+
+            # 待收：partial_closed 订单的未收部分
+            pr_row = (await db.execute(
+                select(
+                    func.coalesce(
+                        func.sum(_Order.total_amount - func.coalesce(_Order.customer_paid_amount, 0)),
+                        0,
+                    )
+                ).where(_Order.org_unit_id == ou.id)
+                .where(_Order.status == "partial_closed")
+            )).scalar()
+            pending_receivables = Decimal(str(pr_row or 0))
+
+        elif ou.code == "retail":
+            # 零售
+            r_data = await aggregate_retail_profit(
+                db, date_from=window_from, date_to=window_to
+            )
+            gmv = Decimal(r_data["total_revenue"])
+            commission_total = Decimal(r_data["total_commission"])
+            net_profit = Decimal(r_data["total_profit"])
+
+            # 库存（warehouse_type='store' 门店仓）
+            inv_row = (await db.execute(
+                select(
+                    func.coalesce(
+                        func.sum(_Inv.quantity * _Inv.cost_price), 0
+                    )
+                ).join(_Warehouse, _Warehouse.id == _Inv.warehouse_id)
+                .where(_Warehouse.warehouse_type == "store")
+            )).scalar()
+            inventory_value = Decimal(str(inv_row or 0))
+
+            # STORE_MASTER 账户
+            acc = (await db.execute(
+                select(_Acc).where(_Acc.code == "STORE_MASTER")
+            )).scalar_one_or_none()
+            account_balance = Decimal(str(acc.balance)) if acc else Decimal("0")
+
+            pending_receivables = Decimal("0")  # 门店当场结清
+
+        elif ou.code == "mall":
+            m_data = await aggregate_mall_profit(
+                db, date_from=window_from, date_to=window_to
+            )
+            gmv = Decimal(m_data["total_revenue"])
+            commission_total = Decimal(m_data["total_commission"])
+            net_profit = Decimal(m_data["total_profit"])
+
+            # mall_inventory × avg_cost_price
+            inv_row = (await db.execute(
+                select(
+                    func.coalesce(
+                        func.sum(_MallInv.quantity * _MallInv.avg_cost_price), 0
+                    )
+                )
+            )).scalar()
+            inventory_value = Decimal(str(inv_row or 0))
+
+            # MALL_MASTER 账户
+            acc = (await db.execute(
+                select(_Acc).where(_Acc.code == "MALL_MASTER")
+            )).scalar_one_or_none()
+            account_balance = Decimal(str(acc.balance)) if acc else Decimal("0")
+
+            # 待收：partial_closed mall_orders
+            pr_row = (await db.execute(
+                select(
+                    func.coalesce(
+                        func.sum(_MallOrder.pay_amount - func.coalesce(_MallOrder.received_amount, 0)),
+                        0,
+                    )
+                ).where(_MallOrder.org_unit_id == ou.id)
+                .where(_MallOrder.status == "partial_closed")
+            )).scalar()
+            pending_receivables = Decimal(str(pr_row or 0))
+
+        # 未来新单元（code 不是内置 3 个）：暂时全 0，等用户接入对应逻辑
+        else:
+            pass
+
+        results.append({
+            "id": ou.id,
+            "code": ou.code,
+            "name": ou.name,
+            "gmv": float(gmv),
+            "net_profit": float(net_profit),
+            "commission_total": float(commission_total),
+            "inventory_value": float(inventory_value),
+            "account_balance": float(account_balance),
+            "pending_receivables": float(pending_receivables),
+        })
+        grand["gmv"] += gmv
+        grand["net_profit"] += net_profit
+        grand["commission_total"] += commission_total
+        grand["inventory_value"] += inventory_value
+        grand["account_balance"] += account_balance
+        grand["pending_receivables"] += pending_receivables
+
+    return {
+        "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
+        "units": results,
+        "grand_total": {k: float(v) for k, v in grand.items()},
+    }

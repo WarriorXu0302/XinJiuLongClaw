@@ -59,6 +59,10 @@ class StoreSale(Base):
         String(50), unique=True, index=True, nullable=False,
         comment="SS-YYYYMMDD-HHMMSS-xxxxxx",
     )
+    # 经营单元归属（门店销售固定为 retail）
+    org_unit_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("org_units.id"), nullable=False, index=True,
+    )
 
     store_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("warehouses.id"), nullable=False,

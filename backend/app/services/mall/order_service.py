@@ -210,8 +210,11 @@ async def create_order(
         raise HTTPException(status_code=503, detail="未配置可用仓库，无法下单")
 
     # 3. 建 Order 主记录（先拿到 order.id，用于 flow ref）
+    from app.services.org_unit_service import get_org_unit_id_by_code
+    mall_org_unit_id = await get_org_unit_id_by_code(db, "mall")
     order = MallOrder(
         order_no=_generate_order_no(),
+        org_unit_id=mall_org_unit_id,
         user_id=user.id,
         address_snapshot=_address_snapshot(addr),
         # 下单瞬间固化 referrer（之后换绑推荐人不影响历史订单归属）

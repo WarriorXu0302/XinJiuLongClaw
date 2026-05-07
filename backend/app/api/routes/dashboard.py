@@ -173,20 +173,25 @@ class ProfitSummaryResponse(BaseModel):
     items: list[ProfitItem]
 
 
-@router.get("/profit-summary", response_model=ProfitSummaryResponse)
-async def profit_summary(
-    user: CurrentUser,
-    brand_id: Optional[str] = Query(None),
-    date_from: Optional[str] = Query(None),
-    date_to: Optional[str] = Query(None),
-    db: AsyncSession = Depends(get_db),
-):
-    """Aggregate profit/loss from all modules."""
-    items: list[ProfitItem] = []
+async def _compute_profit_summary(
+    db: AsyncSession,
+    *,
+    brand_id: Optional[str] = None,
+    d_from: Optional[datetime] = None,
+    d_to: Optional[datetime] = None,
+    include_mall: bool = True,
+) -> ProfitSummaryResponse:
+    """利润台账 11 科目聚合（核心实现，抽出来给多个 endpoint 复用）。
 
-    # Date filters
-    d_from = datetime.strptime(date_from, '%Y-%m-%d') if date_from else datetime(2020, 1, 1)
-    d_to = datetime.strptime(date_to, '%Y-%m-%d').replace(hour=23, minute=59, second=59) if date_to else datetime(2099, 12, 31)
+    - 传 brand_id: 按品牌过滤（原 /profit-summary 支持的行为）
+    - include_mall: False 时跳过 mall 销售利润/坏账两条，用于 business_unit_summary
+      的 brand_agent 分支（mall 单独走 aggregate_mall_profit 已算过了，不要重复）
+    """
+    items: list[ProfitItem] = []
+    if d_from is None:
+        d_from = datetime(2020, 1, 1)
+    if d_to is None:
+        d_to = datetime(2099, 12, 31)
 
     # --- 1. 订单销售利润（company_pay 按 deal_unit_price 算毛利；其他按指导价 unit_price）---
     from sqlalchemy import case as _case
@@ -297,29 +302,30 @@ async def profit_summary(
     # mall 独立记账：order.completed_at / partial_closed 在窗口内的，按 item.brand 切分收入
     # 毛利 = 按比例切分的 received_amount − cost_price_snapshot × qty − commission − bad_debt
     # bad_debt 单独列一行方便老板看"损失多少"（total_profit 里已扣过）
-    try:
-        from app.services.mall.profit_service import aggregate_mall_profit
-        mall_agg = await aggregate_mall_profit(
-            db, date_from=d_from, date_to=d_to, brand_id=brand_id,
-        )
-        mall_profit = float(mall_agg.get("total_profit") or 0)
-        mall_bad_debt = float(mall_agg.get("total_bad_debt") or 0)
-        items.append(ProfitItem(
-            category='mall_sales',
-            label='商城销售利润',
-            amount=abs(mall_profit),
-            direction='income' if mall_profit >= 0 else 'expense',
-        ))
-        if mall_bad_debt > 0:
+    if include_mall:
+        try:
+            from app.services.mall.profit_service import aggregate_mall_profit
+            mall_agg = await aggregate_mall_profit(
+                db, date_from=d_from, date_to=d_to, brand_id=brand_id,
+            )
+            mall_profit = float(mall_agg.get("total_profit") or 0)
+            mall_bad_debt = float(mall_agg.get("total_bad_debt") or 0)
             items.append(ProfitItem(
-                category='mall_bad_debt',
-                label='商城坏账（60 天未收款）',
-                amount=mall_bad_debt,
-                direction='expense',
+                category='mall_sales',
+                label='商城销售利润',
+                amount=abs(mall_profit),
+                direction='income' if mall_profit >= 0 else 'expense',
             ))
-    except Exception as _e:
-        # 不影响主报表：mall 模块未初始化也能正常查 ERP 其他科目
-        items.append(ProfitItem(category='mall_sales', label='商城销售利润', amount=0, direction='income'))
+            if mall_bad_debt > 0:
+                items.append(ProfitItem(
+                    category='mall_bad_debt',
+                    label='商城坏账（60 天未收款）',
+                    amount=mall_bad_debt,
+                    direction='expense',
+                ))
+        except Exception as _e:
+            # 不影响主报表：mall 模块未初始化也能正常查 ERP 其他科目
+            items.append(ProfitItem(category='mall_sales', label='商城销售利润', amount=0, direction='income'))
 
     # --- 11. 人力成本净额（主属该品牌员工工资 + 公司社保 + 提成 - 实际厂家补贴回款） ---
     try:
@@ -369,6 +375,25 @@ async def profit_summary(
         total_expense=total_expense,
         net_profit=total_income - total_expense,
         items=items,
+    )
+
+
+@router.get("/profit-summary", response_model=ProfitSummaryResponse)
+async def profit_summary(
+    user: CurrentUser,
+    brand_id: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Aggregate profit/loss from all modules（11 科目完整版，含 mall）。"""
+    d_from = datetime.strptime(date_from, '%Y-%m-%d') if date_from else None
+    d_to = (
+        datetime.strptime(date_to, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+        if date_to else None
+    )
+    return await _compute_profit_summary(
+        db, brand_id=brand_id, d_from=d_from, d_to=d_to, include_mall=True,
     )
 
 
@@ -695,7 +720,7 @@ async def business_unit_summary(
             )).one()
             gmv = Decimal(str(row.gmv or 0))
 
-            # 提成
+            # 提成（仅本单元口径）
             from app.models.user import Commission as _Comm
             c_row = (await db.execute(
                 select(func.coalesce(func.sum(_Comm.commission_amount), 0))
@@ -705,8 +730,15 @@ async def business_unit_summary(
             )).scalar()
             commission_total = Decimal(str(c_row or 0))
 
-            # 利润（简化版本：gmv - 提成；详细利润走 /profit-summary 端点）
-            net_profit = gmv - commission_total
+            # 净利润：复用 /profit-summary 的 11 科目聚合（ERP 侧所有口径）
+            # include_mall=False 避免和本端点后面 mall 分支重复计
+            profit_agg = await _compute_profit_summary(
+                db, brand_id=None, d_from=window_from, d_to=window_to,
+                include_mall=False,
+            )
+            # profit_summary 是全口径（ERP 所有品牌），brand_agent 单元本就等于全 ERP 业务
+            # 这里直接取 net_profit（若未来加"品牌代理下分若干子单元"可再按品牌细分）
+            net_profit = Decimal(str(profit_agg.net_profit))
 
             # 库存价值：品牌主仓 / backup / tasting
             inv_row = (await db.execute(

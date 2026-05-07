@@ -29,6 +29,9 @@
 
 ### Added
 
+- **经营单元 boss 看板净利润改走 11 科目**（dashboard.py refactor）— brand_agent 分支不再用简化口径（gmv - commission），改为调 `_compute_profit_summary(include_mall=False)` 复用现有完整利润计算，保证和 `/profit-summary` 口径一致
+- **经营单元 E2E 覆盖**（`scripts/e2e_org_unit_writepoints.py`）— 5 个测试：cache 工具 + mall_purchase scope 映射 + MallOrder 建单 + Commission 三路径 + 分布 sanity
+- **桥 13 文档化**（`business-atoms-bridges.md`）— 加经营单元视角桥说明，10 条动作 + 口径 + 限制 + E2E 引用
 - **经营单元视角层**（migration m6cc）— 老板在不动品牌主轴的前提下看「品牌代理/零售/批发商城」三个事业部的 GMV/利润/库存/账户/待收
   - 新建 `org_units` 小表 + 3 条种子（brand_agent/retail/mall），admin 可 CRUD 扩展
   - `orders`/`commissions`/`store_sales`/`mall_orders`/`mall_purchase_orders` 加 `org_unit_id` FK（回填完成）

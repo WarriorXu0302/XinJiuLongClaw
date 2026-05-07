@@ -445,6 +445,69 @@ pending_scan ─submit→ pending_approval ─approve→ approved ─execute→ 
 
 ---
 
+## 桥 13：经营单元视角（org_units 跨域分析维度）
+
+### 定位
+- **不是**组织架构主轴，**只是**老板看 3 个事业部（品牌代理/零售/批发商城）的分析标签
+- **不动** `brand_id` 主轴、不动 RLS、不动员工/账户/仓库归属
+
+### 绑定
+- `org_units` 小表（id, code, name, sort_order, is_active）
+- 种子 3 条：`brand_agent` / `retail` / `mall`（内置不可删，只能停用）
+- 5 张业务表加 `org_unit_id` FK NOT NULL：
+  - `orders` → 固定 `brand_agent`
+  - `commissions` → 按数据来源（B2B=brand_agent / mall 订单=mall / 门店=retail）
+  - `store_sales` → 固定 `retail`
+  - `mall_orders` → 固定 `mall`
+  - `mall_purchase_orders` → 按 scope（mall→mall, store→retail）
+
+### 动作表
+
+| # | 动作 | 源 | 目标副作用 | 状态 |
+|---|---|---|---|---|
+| B13.1 | ERP 建 B2B 订单 | `_build_order_from_computed` | order.org_unit_id = brand_agent | 🟢 |
+| B13.2 | Mall 下单 | `mall/order_service::create_mall_order` | mall_order.org_unit_id = mall | 🟢 |
+| B13.3 | 收款后建 B2B Commission | `receipt_service::apply_post_confirmation_effects` | commission.org_unit_id = brand_agent（沿用 order.org_unit_id） | 🟢 |
+| B13.4 | Mall 订单完成 → 建 Commission | `mall/commission_service::post_commission_for_order` | commission.org_unit_id = mall | 🟢 |
+| B13.5 | 门店收银 → 建 StoreSale + Commission | `store_sale_service::create_store_sale` | store_sale.org_unit_id = retail · commission.org_unit_id = retail | 🟢 |
+| B13.6 | 建 Mall 采购（scope=mall） | `mall_purchase_service::create_po` | mpo.org_unit_id = mall | 🟢 |
+| B13.7 | 建门店采购（scope=store） | `mall_purchase_service::create_po` | mpo.org_unit_id = retail | 🟢 |
+| B13.8 | 跨月退货追回 adjustment | `store_return_service / mall/return_service` | adj.org_unit_id 沿用原 commission.org_unit_id | 🟢 |
+| B13.9 | Boss 看板 | `GET /api/dashboard/business-unit-summary` | 每单元聚合 GMV/利润/提成/库存/账户/待收 · brand_agent 分支调 `_compute_profit_summary(include_mall=False)` 11 科目 | 🟢 |
+| B13.10 | admin 加新单元 | `POST /api/org-units` | 看板自动多出卡片（数字全 0，等代码映射） | 🟢 |
+
+### 口径（重要）
+- **GMV**：按业务源头加 `org_unit_id` 过滤后 SUM 金额
+- **净利润**：
+  - brand_agent → `_compute_profit_summary(include_mall=False)` 返的 net_profit（11 科目完整算）
+  - retail → `aggregate_retail_profit()`（毛利 - retail commissions）
+  - mall → `aggregate_mall_profit()`.total_profit（已扣坏账）
+  - 其他新单元 → 0
+- **账户余额**：
+  - brand_agent → `Account WHERE level='project'` 总和（所有品牌代理账户）
+  - retail → `Account WHERE code='STORE_MASTER'`
+  - mall → `Account WHERE code='MALL_MASTER'`
+- **待收款**：
+  - brand_agent → `orders.partial_closed 未收部分`
+  - mall → `mall_orders.partial_closed 未收部分`
+  - retail → 0（门店当场结清）
+
+### 🔴 已知限制（非 bug）
+- 员工跨兼职**不额外建关系表** — 自然由 commission 记录的 org_unit_id 体现（老王跑五粮液 B2B + 商城送货 → 两条不同 org_unit 的 commission）
+- **没做钻取**：点卡片跳订单列表未实现（留 Phase 5）
+- **资金池共享** — STORE_MASTER/MALL_MASTER 依然从 master 调拨，不是法务意义的独立账套（v1 不做）
+- **未来新单元** 数字全 0 — 需要开发在业务写入点加 code 映射才会出数据（设计预期）
+
+### E2E 覆盖
+- `scripts/e2e_org_unit_writepoints.py` 5 个测试：
+  - cache 工具 + 3 种子查得到
+  - mall_purchase scope=mall/store 各赋对应 org_unit_id
+  - MallOrder 建单 org_unit_id=mall
+  - Commission 三路径分 3 个 org_unit 可区分
+  - 5 张表分布 sanity（total = non_null = joined_ok）
+
+---
+
 ## 维护说明
 
 - 本文件与 `business-atoms-mall.md` + `business-atoms-erp.md` 同步更新
